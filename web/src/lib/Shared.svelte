@@ -1,16 +1,28 @@
 <script lang="ts">
+  /*
+   * A shared document, seen through the same frame as the workspace it was
+   * written in: the bar, a porthole with the outline and the document tiled
+   * in it as two windows, the band along the bottom. No rail — a reader has
+   * no tools — but the reading keys work: j/k, gg/G, Ctrl-d/u.
+   */
   import { api, type SharedDocument } from './api'
+  import Clock from './Clock.svelte'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
-  import { formatStamp, formatWeekday } from './util'
+  import { formatStamp, formatWeekday, scrollPage, slugify, type ScrollAmount } from './util'
 
   const { token, shareKey }: { token: string; shareKey: string } = $props()
 
   let doc = $state<SharedDocument | null>(null)
   let error = $state('')
-  let page = $state<HTMLElement>()
+  let scroller = $state<HTMLElement>()
   let article = $state<HTMLElement>()
+  let position = $state('All')
   const html = $derived(doc ? renderMarkdown(doc.body, { token, key: shareKey }) : '')
+  const title = $derived(doc?.name.trim() ?? '')
+  const words = $derived(doc ? doc.body.split(/\s+/).filter(Boolean).length : 0)
+  // The outline gets a window of its own only when there is something to outline.
+  const sections = $derived((html.match(/<h[23][\s>]/g) ?? []).length)
 
   $effect(() => {
     if (!shareKey) {
@@ -25,67 +37,166 @@
       })
       .catch(() => (error = 'this link is not valid, or the document is no longer shared.'))
   })
+
+  /** Where the view is, the way vim's ruler says it: Top, Bot, All or a percentage. */
+  function measure() {
+    if (!scroller) return
+    const room = scroller.scrollHeight - scroller.clientHeight
+    const top = scroller.scrollTop
+    position = room <= 1 ? 'All' : top <= 1 ? 'Top' : top >= room - 1 ? 'Bot' : `${Math.round((top / room) * 100)}%`
+  }
+
+  $effect(() => {
+    void html
+    requestAnimationFrame(measure)
+  })
+
+  let pending = ''
+  function onkeydown(event: KeyboardEvent) {
+    if (!scroller || event.altKey || event.metaKey) return
+    let amount: ScrollAmount | null = null
+    if (event.ctrlKey) {
+      if (event.key === 'd') amount = 'halfdown'
+      else if (event.key === 'u') amount = 'halfup'
+    } else if (event.key === 'j' || event.key === 'ArrowDown') amount = 1
+    else if (event.key === 'k' || event.key === 'ArrowUp') amount = -1
+    else if (event.key === 'G') amount = 'bottom'
+    else if (event.key === 'g' && pending === 'g') amount = 'top'
+    pending = event.key === 'g' && pending !== 'g' ? 'g' : ''
+    if (amount === null) return
+    event.preventDefault()
+    scrollPage(scroller, amount)
+  }
 </script>
 
-<main bind:this={page}>
-  {#if error}
-    <p class="alarm">{error}</p>
-  {:else if doc}
-    <article class="md resolve" bind:this={article}>
-      <div class="meta label rule">
-        <span class="marker"></span>
-        <span>{formatStamp(doc.created_at)} {formatWeekday(doc.created_at)}</span>
-        <span class="tag">shared document</span>
+<svelte:window {onkeydown} />
+
+<div class="shell shared">
+  <header class="bar">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="divider"></span>
+    <span class="pill" aria-current="true">shared</span>
+    <span class="divider"></span>
+    <span class="title">{title}</span>
+    <span class="spacer"></span>
+    <span class="readout ro"><span class="key">mode</span><span class="value">read only</span></span>
+    <span class="divider ro"></span>
+    <Clock />
+  </header>
+
+  <main class="porthole">
+    <div class="panes switch" class:split={sections >= 2}>
+      {#if doc && sections >= 2}
+        <aside class="window toc">
+          <Outline root={article} {scroller} source={html} />
+        </aside>
+      {/if}
+
+      <div class="window doc" class:focused={sections >= 2}>
+        <div class="body" bind:this={scroller} onscroll={measure}>
+          {#if error}
+            <div class="standby">
+              <h2 class="label rule">link</h2>
+              <p class="alarm">{error}</p>
+            </div>
+          {:else if doc}
+            <article class="md resolve" bind:this={article}>
+              <div class="meta label rule">
+                <span class="marker"></span>
+                <span>{formatStamp(doc.created_at)} {formatWeekday(doc.created_at)}</span>
+                <span class="tag">shared document</span>
+              </div>
+              {#if title}<h1>{title}</h1>{/if}
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
+              {@html html}
+              <footer class="label">— written in ~/workspace</footer>
+            </article>
+          {:else}
+            <div class="standby">
+              <p class="label">loading<span class="cursor">_</span></p>
+            </div>
+          {/if}
+        </div>
       </div>
-      {#if doc.name.trim()}<h1>{doc.name}</h1>{/if}
-      <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
-      {@html html}
-    </article>
-    <aside class="side">
-      <Outline root={article} scroller={page} source={html} />
-    </aside>
-    <footer class="label">— written in ~/workspace</footer>
-  {:else}
-    <p class="label">loading<span class="cursor">_</span></p>
-  {/if}
-</main>
+    </div>
+  </main>
+
+  <footer class="status">
+    <span class="mode">read</span>
+    <span class="file">shared/{slugify(title) || token.slice(0, 8)}</span>
+    <span class="msg"></span>
+    {#if doc}
+      <span class="readout">{words}<span class="unit">W</span></span>
+      <span class="readout">{position}</span>
+    {/if}
+    <span class="hint">j k scroll · gg G ends · ^d ^u half</span>
+  </footer>
+</div>
 
 <style>
-  /* The same page as the reading pane: a centred column, the outline in the margin. */
-  main {
-    height: 100%;
+  /* No rail: the porthole and the bands run to the frame on the right too. */
+  .shared { --rail-w: var(--frame); }
+
+  .title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.06em;
+    text-transform: none;
+    color: var(--light);
+  }
+
+  .panes { grid-template-columns: minmax(0, 1fr); }
+  .panes.split { grid-template-columns: minmax(26ch, 22vw) minmax(0, 1fr); }
+
+  .toc { --pane-bg: color-mix(in oklab, var(--surface) 60%, var(--base)); padding: 22px 16px 22px 20px; overflow-y: auto; }
+
+  .doc { display: flex; flex-direction: column; }
+  /* A lone window has nothing to stand out from, so it keeps the plain rim. */
+  .doc:not(.focused) { border-color: transparent; background: transparent; }
+
+  .body {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 56px 20px 20vh;
+    padding: 40px 28px 30vh;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 46rem) minmax(0, 1fr);
     align-content: start;
-    align-items: start;
-    container-type: inline-size;
-    background:
-      radial-gradient(120% 70% at 30% 0%, #141713 0%, transparent 60%),
-      var(--base);
   }
-
-  article, footer, p { grid-column: 2; }
+  .body > * { grid-column: 2; }
   article { max-width: none; }
-  .side {
-    grid-column: 3;
-    grid-row: 1;
-    position: sticky;
-    top: 0;
-    max-width: 30ch;
-    padding: 4px 0 0 44px;
-  }
-  @container (max-width: 1000px) {
-    .side { display: none; }
-  }
 
   .meta { margin-bottom: 28px; font-size: 10px; }
   .meta .marker { background: var(--light); }
-
   .tag { color: var(--light); }
 
   h1 { margin-top: 0 !important; font-size: 2.1em !important; }
 
-  footer { margin-top: 56px; font-size: 10px; }
+  article footer { margin-top: 56px; font-size: 10px; }
+
+  .standby { padding-top: 18vh; }
+  .standby h2 { margin: 0 0 14px; font-weight: 400; }
+
+  .status .mode { background: var(--light); color: var(--ink); }
+  .file { color: var(--subtle); }
+  .msg { flex: 1; }
+
+  @media (max-width: 1000px) {
+    .panes.split { grid-template-columns: minmax(0, 1fr); }
+    .toc { display: none; }
+    .doc.focused {
+      background: linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
+        linear-gradient(var(--overlay), var(--overlay)) border-box;
+      box-shadow: none;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .bar .ro { display: none; }
+    .body { padding: 24px 18px 30vh; grid-template-columns: minmax(0, 1fr); }
+    .body > * { grid-column: 1; }
+    .status { padding: 0 12px; gap: 12px; }
+    .hint, .file { display: none; }
+  }
 </style>

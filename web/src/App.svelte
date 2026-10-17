@@ -91,15 +91,16 @@
   }
 
   // What the empty pane offers, in the key/value shape of a status readout.
-  const offers: [string, string][] = [
-    ['o', 'write a new document'],
-    ['O', 'make a folder'],
-    ['j / k', 'browse, l opens'],
-    ['1 … 9', 'switch space, Tab cycles'],
-    ['w', 'overview of every space'],
-    ['b', "this space's board"],
-    ['/', 'search this space'],
-    ['?', 'help'],
+  // Keys are keycaps, so `o` and `O` cannot be read as the same key.
+  const offers: [string[], string][] = [
+    [['o'], 'write a new document'],
+    [['⇧ O'], 'make a folder'],
+    [['j', 'k'], 'browse, l opens'],
+    [['1…9'], 'switch space, Tab cycles'],
+    [['w'], 'overview of every space'],
+    [['b'], "this space's board"],
+    [['/'], 'search this space'],
+    [['?'], 'help'],
   ]
 
   /*
@@ -520,8 +521,8 @@
                 <div class="standby resolve">
                   <h2 class="label rule">nothing open</h2>
                   <dl>
-                    {#each offers as [key, what] (key)}
-                      <dt>{key}</dt>
+                    {#each offers as [keys, what] (what)}
+                      <dt>{#each keys as key (key)}<span class="kbd">{key}</span>{/each}</dt>
                       <dd>{what}</dd>
                     {/each}
                     <dt>status</dt>
@@ -564,78 +565,9 @@
 <style>
   .boot { display: grid; place-items: center; height: 100%; }
 
-  .shell {
-    position: relative;
-    height: 100%;
-    outline: none;
-    background: var(--hull);
-  }
-
-  /*
-   * The porthole: a rounded opening in the hull, outlined by a single rim. The
-   * rim is drawn on top by ::after, so the panes scroll underneath it the way
-   * windows sit under the frame on the desktop.
-   */
-  .porthole {
-    position: absolute;
-    top: var(--bar-h);
-    right: var(--rail-w);
-    bottom: var(--status-h);
-    left: var(--frame);
-    overflow: hidden;
-    border-radius: var(--frame-radius);
-    background:
-      radial-gradient(120% 70% at 30% 0%, #141713 0%, transparent 60%),
-      var(--base);
-  }
-  .porthole::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow: inset 0 0 0 1px var(--rim);
-    pointer-events: none;
-    z-index: 5;
-  }
-
-  /*
-   * The panes tile the porthole like windows tile a workspace: a gap round
-   * and between them, each rounded to sit concentric with the frame.
-   */
-  .panes {
-    --gap: 7px;
-    height: 100%;
-    display: grid;
-    grid-template-columns: minmax(32ch, 24vw) 1fr;
-    gap: var(--gap);
-    padding: var(--gap);
-  }
-
   .panes.board { grid-template-columns: 1fr; }
-
-  /*
-   * A window: opaque, a hairline border in overlay. The focused one gets the
-   * desktop's active border — a light gradient at 135° — and its shadow.
-   */
-  .window {
-    --pane-bg: color-mix(in oklab, var(--surface) 40%, var(--base));
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    border: 1px solid transparent;
-    border-radius: calc(var(--frame-radius) - var(--gap));
-    background:
-      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
-      linear-gradient(var(--overlay), var(--overlay)) border-box;
-    transition: box-shadow var(--t-base) var(--ease-glide);
-  }
   .window.list { --pane-bg: color-mix(in oklab, var(--surface) 60%, var(--base)); }
-  .window.focused {
-    background:
-      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
-      linear-gradient(135deg, var(--light), var(--light-dim)) border-box;
-    box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
-  }
+
   /* Only one pane on screen: nothing to tell apart, so no active border. */
   .panes:not(.reading) .window.list,
   .panes.board .window {
@@ -651,24 +583,18 @@
   .panes.full .window:not(.focused) { display: none; }
   .panes.full:not(.reading) .window.entry { display: none; }
 
-  /* hypr: workspaces, slidefadevert 18%, 550ms on the drift curve. */
-  .switch { animation: slidefadevert 550ms var(--ease-drift) both; }
-  @keyframes slidefadevert {
-    from { opacity: 0; transform: translateY(calc(var(--dir, 1) * 18%)); }
-  }
-
   .placeholder { display: grid; place-items: center; height: 100%; padding: 24px; }
   .standby { width: min(100%, 44ch); }
   .standby h2 { margin: 0 0 18px; font-weight: 400; }
   .standby dl {
     display: grid;
     grid-template-columns: 7rem 1fr;
-    gap: 6px 0;
+    gap: 8px 0;
+    align-items: center;
     margin: 0;
     font-size: 12px;
   }
-  /* Keys keep their case: `o` and `O` are different keys. */
-  .standby dt { color: var(--light); letter-spacing: 0.08em; }
+  .standby dt { display: flex; gap: 4px; align-items: center; }
   .standby dt:last-of-type { color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
   .standby dd { margin: 0; color: var(--fg); }
   .standby dd.light { color: var(--light); }
@@ -688,8 +614,8 @@
 
   .hidden { display: none; }
 
-  @media (max-width: 760px) {
-    .panes { grid-template-columns: 1fr; --gap: 4px; }
+  @media (max-width: 767px) {
+    .panes { grid-template-columns: 1fr; }
     .panes .entry { display: none; }
     .panes.reading .list { display: none; }
     .panes.reading .entry { display: block; }

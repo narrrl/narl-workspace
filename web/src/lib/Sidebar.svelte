@@ -67,7 +67,11 @@
       </li>
     {:else}
       <li class="empty muted">
-        {workspace.query ? 'no matches' : 'nothing here yet — o writes, O makes a folder'}
+        {#if workspace.query}
+          no matches
+        {:else}
+          nothing here yet — <span class="kbd">o</span> writes, <span class="kbd">⇧ O</span> makes a folder
+        {/if}
       </li>
     {/each}
   </ul>

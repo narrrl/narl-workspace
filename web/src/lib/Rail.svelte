@@ -1,49 +1,92 @@
 <script lang="ts">
   /*
-   * The right edge of the frame: the things a pointer needs a door for. Each
-   * door is labelled with the key that does the same thing, so the rail
-   * teaches the keymap instead of replacing it. `compact` lays the same doors
-   * out in a row, for the bottom band on a phone.
+   * The right edge of the frame, built like the desktop's rail: a glyph per
+   * door, groups split by a hairline, the always-there things pinned to the
+   * bottom. The name and the key that does the same thing live in a tooltip,
+   * so the rail stays narrow and still teaches the keymap. `dock` lays the
+   * same doors out in a row for the bottom band on a phone, without the ones
+   * that only make sense with a keyboard or two panes.
    */
   import { hooks, runCommand } from './commands'
+  import Icon, { type IconName } from './Icon.svelte'
   import { workspace } from './store.svelte'
 
-  const { compact = false }: { compact?: boolean } = $props()
+  const { dock = false }: { dock?: boolean } = $props()
 
-  type Door = { key: string; caption: string; title: string; run: () => unknown; on?: boolean }
+  type Door = {
+    icon: IconName
+    label: string
+    keys: string[]
+    run: () => unknown
+    on?: boolean
+    dim?: boolean
+    desk?: boolean // only on the desktop rail
+  }
 
-  const doors = $derived.by((): Door[] => {
+  const groups = $derived.by((): Door[][] => {
+    const cmd: Door = { icon: 'prompt', label: 'Command line', keys: [':'], run: () => hooks.openCommandLine(':') }
+    const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help'), desk: true }
+
     if (workspace.view === 'board') {
       return [
-        { key: 'o', caption: 'card', title: 'new card on this list (o)', run: () => hooks.openCommandLine(':card ') },
-        { key: '+', caption: 'list', title: 'new list (:list <name>)', run: () => hooks.openCommandLine(':list ') },
-        { key: 'b', caption: 'tree', title: 'back to the tree (b, q)', run: () => runCommand('board'), on: true },
-        { key: ':', caption: 'cmd', title: 'command line (:)', run: () => hooks.openCommandLine(':') },
-        { key: '?', caption: 'help', title: 'help (?)', run: () => runCommand('help') },
+        [
+          { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
+          { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
+          { icon: 'list', label: 'Back to the tree', keys: ['b', 'q'], run: () => runCommand('board'), on: true },
+        ],
+        [cmd, help],
       ]
     }
+
     const board: Door = workspace.space?.has_board
-      ? { key: 'b', caption: 'board', title: 'board (b)', run: () => runCommand('board') }
-      : { key: '+b', caption: 'board', title: 'give this space a board (:set board)', run: () => runCommand('set board') }
+      ? { icon: 'board', label: 'Board', keys: ['b'], run: () => runCommand('board') }
+      : { icon: 'board', label: 'Give this space a board', keys: [':set board'], run: () => runCommand('set board'), dim: true }
     return [
-      { key: 'o', caption: 'new', title: 'new document (o)', run: () => runCommand('new') },
-      { key: 'O', caption: 'dir', title: 'new folder (O)', run: () => hooks.openCommandLine(':mkdir ') },
-      ...(workspace.space ? [board] : []),
-      { key: 'w', caption: 'spaces', title: 'overview of every space (w)', run: () => hooks.openOverview() },
-      { key: 'f', caption: 'full', title: 'fullscreen the focused pane (f)', run: () => (workspace.fullscreen = !workspace.fullscreen), on: workspace.fullscreen },
-      { key: '/', caption: 'find', title: 'search (/)', run: () => hooks.openCommandLine('/') },
-      { key: ':', caption: 'cmd', title: 'command line (:)', run: () => hooks.openCommandLine(':') },
-      { key: '?', caption: 'help', title: 'help (?)', run: () => runCommand('help') },
+      [
+        { icon: 'doc-plus', label: 'New document', keys: ['o'], run: () => runCommand('new') },
+        { icon: 'folder-plus', label: 'New folder', keys: ['⇧ O'], run: () => hooks.openCommandLine(':mkdir ') },
+        ...(workspace.space ? [board] : []),
+      ],
+      [
+        { icon: 'grid', label: 'Every space', keys: ['w'], run: () => hooks.openOverview() },
+        {
+          icon: workspace.fullscreen ? 'shrink' : 'expand',
+          label: workspace.fullscreen ? 'Leave fullscreen' : 'Fullscreen the focused pane',
+          keys: ['f'],
+          run: () => (workspace.fullscreen = !workspace.fullscreen),
+          on: workspace.fullscreen,
+          desk: true,
+        },
+        { icon: 'search', label: 'Search this space', keys: ['/'], run: () => hooks.openCommandLine('/') },
+      ],
+      [cmd, help],
     ]
   })
+
+  const shown = $derived(dock ? [groups.flat().filter((door) => !door.desk)] : groups)
 </script>
 
-<nav class="rail" class:compact aria-label="tools">
-  {#each doors as door (door.caption)}
-    <button class="door" class:on={door.on} title={door.title} onclick={door.run}>
-      <span class="key">{door.key}</span>
-      <span class="caption">{door.caption}</span>
-    </button>
+<nav class="rail" class:dock aria-label="tools">
+  {#each shown as group, index (index)}
+    <div class="group" class:pinned={index === shown.length - 1 && !dock}>
+      {#each group as door (door.label)}
+        <button
+          class="door"
+          class:on={door.on}
+          class:dim={door.dim}
+          aria-label="{door.label} ({door.keys.join(', ')})"
+          onclick={door.run}
+        >
+          <Icon name={door.icon} />
+          {#if !dock}
+            <span class="tip" role="tooltip">
+              <span class="name">{door.label}</span>
+              {#each door.keys as key (key)}<span class="kbd">{key}</span>{/each}
+            </span>
+          {/if}
+        </button>
+      {/each}
+    </div>
   {/each}
 </nav>
 
@@ -54,73 +97,126 @@
     right: 0;
     bottom: var(--status-h);
     width: var(--rail-w);
+    z-index: 10;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
     padding: 6px 0;
   }
 
-  .door {
-    position: relative;
+  .group {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    width: 40px;
-    padding: 7px 0 6px;
+  }
+  /* A 16px hairline between groups, as on the desktop rail. */
+  .group + .group::before {
+    content: '';
+    width: 16px;
+    height: 1px;
+    margin: 8px 0;
+    background: color-mix(in oklab, var(--outline) 60%, transparent);
+  }
+  .group.pinned { margin-top: auto; }
+  .group.pinned::before { display: none; }
+
+  .door {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--rail-w);
+    height: 34px;
+    padding: 0;
     border: 0;
-    border-radius: var(--radius-s);
+    border-radius: 0;
     background: transparent;
-    color: var(--muted);
-    letter-spacing: 0;
-    text-transform: none;
+    color: var(--light-soft);
   }
 
-  /* A light bar grows down the left edge on hover, as on the desktop rail. */
+  /* The wipe down the leading edge on hover, held off the edge as on the desktop. */
   .door::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 6px;
-    bottom: 6px;
+    left: 5px;
+    top: 50%;
     width: 2px;
-    border-radius: 2px;
+    height: 16px;
+    margin-top: -8px;
+    border-radius: 1px;
     background: var(--light);
     transform: scaleY(0);
-    transform-origin: top;
     transition: transform var(--t-base) var(--ease-snap);
   }
-  .door:hover { background: var(--surface-alt); color: var(--light); }
-  .door:hover::before { transform: scaleY(1); }
+  .door:hover { background: transparent; color: var(--light); }
+  .door:hover::before, .door:focus-visible::before { transform: scaleY(1); }
+  .door:active { transform: none; }
+  .door :global(.icon) { transition: transform var(--t-base) var(--ease-snap); }
+  .door:hover :global(.icon) { transform: scale(1.08); }
   .door.on { color: var(--light); }
-  .door:focus-visible { background: var(--light); color: var(--ink); }
+  .door.on::before { transform: scaleY(1); background: var(--light-dim); }
+  .door.dim { color: var(--muted); }
+  .door:focus-visible { background: transparent; color: var(--light); }
 
-  .key {
-    font-size: 15px;
-    line-height: 1;
-    transition: transform var(--t-base) var(--ease-snap);
+  /*
+   * The tooltip opens into the porthole, to the left of the door: a small
+   * card with the name in the reading face and the key as a keycap. A short
+   * delay on the way in, so running the pointer down the rail does not flash
+   * every one of them.
+   */
+  .tip {
+    position: absolute;
+    right: calc(100% + 4px);
+    top: 50%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px 6px 10px;
+    border: 1px solid var(--overlay);
+    border-radius: var(--radius-s);
+    background: var(--surface);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(4px, -50%);
+    transition:
+      opacity var(--t-fast) var(--ease-glide),
+      transform var(--t-fast) var(--ease-glide);
   }
-  .door:hover .key { transform: scale(1.08); }
-  .caption {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+  .door:hover .tip, .door:focus-visible .tip {
+    opacity: 1;
+    transform: translate(0, -50%);
+    transition-delay: 250ms;
+    transition-duration: var(--t-base);
+  }
+  .name {
+    margin-right: 4px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--fg);
   }
 
   @media (max-width: 767px) {
-    .rail:not(.compact) { display: none; }
+    .rail:not(.dock) { display: none; }
   }
 
-  .compact {
+  /* The phone dock: the same doors in a row, each a thumb wide. */
+  .dock {
     position: static;
+    flex: 1;
     width: auto;
+    height: 100%;
     flex-direction: row;
     padding: 0;
-    gap: 2px;
   }
-  .compact .door { width: 38px; padding: 4px 0; }
-  .compact .door::before { display: none; }
-  .compact .caption { display: none; }
+  .dock .group {
+    flex: 1;
+    flex-direction: row;
+    justify-content: space-around;
+  }
+  .dock .door { width: 44px; height: 40px; border-radius: var(--radius-s); }
+  .dock .door::before { display: none; }
+  .dock .door:active { background: var(--surface-alt); }
 </style>

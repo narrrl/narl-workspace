@@ -3,7 +3,8 @@
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
   import { workspace } from './store.svelte'
-  import { formatStamp, formatWeekday, isTouchDevice, relative } from './util'
+  import Icon from './Icon.svelte'
+  import { formatStamp, formatWeekday, isTouchDevice, relative, scrollPage } from './util'
 
   const doc = $derived(workspace.open!)
   const html = $derived(renderMarkdown(workspace.editing ? workspace.draft.body : doc.body))
@@ -30,24 +31,7 @@
     // after the new one has set the hook — so it only clears its own.
     const scroll = (amount: ScrollAmount) => {
       if (!reader) return false
-      const line = parseFloat(getComputedStyle(reader).lineHeight) || 24
-      const half = reader.clientHeight / 2
-      switch (amount) {
-        case 'top':
-          reader.scrollTo({ top: 0 })
-          break
-        case 'bottom':
-          reader.scrollTo({ top: reader.scrollHeight })
-          break
-        case 'halfdown':
-          reader.scrollBy({ top: half })
-          break
-        case 'halfup':
-          reader.scrollBy({ top: -half })
-          break
-        default:
-          reader.scrollBy({ top: amount * line * 3 })
-      }
+      scrollPage(reader, amount)
       return true
     }
     hooks.scrollReader = scroll
@@ -74,6 +58,10 @@
 <section class="pane">
   <header>
     <div class="crumb label rule" title="{workspace.here}/{doc.slug}">
+      <!-- A phone has no crumbs on the bar and no h key: this is the way back. -->
+      <button class="back" aria-label="back to the list" onclick={() => runCommand('q')}>
+        <Icon name="back" size={16} />
+      </button>
       <span class="marker" class:live={workspace.editing}></span>
       <span class="path">{workspace.here}/{doc.slug}</span>
       {#if workspace.dirty}<span class="dirty">modified</span>{/if}
@@ -86,13 +74,10 @@
         <dt>edited</dt>
         <dd>{relative(doc.updated_at)}</dd>
         <dt>words</dt>
-        <dd>{words}</dd>
+        <dd>{words}<span class="unit">words</span></dd>
       </dl>
 
       <div class="actions">
-        {#if isTouchDevice}
-          <button onclick={() => runCommand('q')}>← list</button>
-        {/if}
         {#if workspace.editing}
           <button onclick={() => runCommand('w')}>:w</button>
           <button onclick={() => runCommand('upload')}>attach</button>
@@ -104,7 +89,7 @@
           {doc.shared ? 'unshare' : 'share'}
         </button>
         <button class="danger" onclick={() => runCommand('d')}>delete</button>
-        <button onclick={() => runCommand('q')}>close</button>
+        <button class="close" onclick={() => runCommand('q')}>close</button>
       </div>
     </div>
   </header>
@@ -277,7 +262,7 @@
     position: sticky;
     top: 0;
     max-width: 30ch;
-    padding: 6px 0 0 44px;
+    padding: 6px 0 0 32px;
   }
   @container (max-width: 1000px) {
     .side { display: none; }
@@ -302,9 +287,36 @@
   }
   .mobilebar button { flex: 1; padding: 8px; }
 
-  @media (max-width: 760px) {
-    header { padding: 14px 16px 10px; }
-    .row { flex-direction: column; align-items: flex-start; }
+  .back { display: none; }
+  .unit { display: none; }
+
+  /*
+   * A phone: a back button where the bar's crumbs would be, the readout on one
+   * line without its captions, and the actions as one row of equal buttons
+   * big enough for a thumb. Closing is the back button's job.
+   */
+  @media (max-width: 767px) {
+    header { padding: 10px 14px 10px 8px; gap: 8px; }
+    .crumb { gap: 8px; }
+    .back {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      flex: none;
+      padding: 0;
+      border: 0;
+      color: var(--light);
+    }
+    .row { flex-direction: column; align-items: stretch; gap: 10px; padding-left: 6px; }
+    .meta { flex-wrap: nowrap; gap: 0; overflow: hidden; white-space: nowrap; }
+    .meta dt { display: none; }
+    .meta dd { margin: 0; }
+    .meta dd + dt + dd::before { content: '·'; margin: 0 8px; color: var(--muted); }
+    .unit { display: inline; margin-left: 0.5ch; }
+    .actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+    .actions button { height: 36px; }
+    .actions .close { display: none; }
     .sharebar { margin: 0 16px 8px; }
     .title { margin: 8px 16px 4px; }
     .reading { padding: 14px 16px 30vh; grid-template-columns: minmax(0, 1fr); }

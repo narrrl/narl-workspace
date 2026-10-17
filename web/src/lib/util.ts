@@ -74,3 +74,28 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
 }
+
+/** How far a reading view is asked to scroll: lines, a half page, or an end. */
+export type ScrollAmount = number | 'top' | 'bottom' | 'halfdown' | 'halfup'
+
+/** j/k, gg/G and Ctrl-d/u on a scrolling element, three lines to a step. */
+export function scrollPage(el: HTMLElement, amount: ScrollAmount) {
+  const line = parseFloat(getComputedStyle(el).lineHeight) || 24
+  const half = el.clientHeight / 2
+  switch (amount) {
+    case 'top':
+      el.scrollTo({ top: 0 })
+      break
+    case 'bottom':
+      el.scrollTo({ top: el.scrollHeight })
+      break
+    case 'halfdown':
+      el.scrollBy({ top: half })
+      break
+    case 'halfup':
+      el.scrollBy({ top: -half })
+      break
+    default:
+      el.scrollBy({ top: amount * line * 3 })
+  }
+}

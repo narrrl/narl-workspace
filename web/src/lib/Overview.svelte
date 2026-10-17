@@ -86,7 +86,13 @@
     {/each}
   </ol>
 
-  <footer class="label">h j k l move · 1 … 9 or enter go · w closes</footer>
+  <footer class="label">
+    <span class="kbd">h</span><span class="kbd">j</span><span class="kbd">k</span><span class="kbd">l</span> move
+    <span class="gap"></span>
+    <span class="kbd">1…9</span><span class="kbd">↵</span> go
+    <span class="gap"></span>
+    <span class="kbd">w</span><span class="kbd">esc</span> close
+  </footer>
 </div>
 
 <style>
@@ -200,5 +206,15 @@
   .when { flex: none; font-size: 10px; color: var(--muted); }
   .empty { padding: 4px 8px; font-size: 12px; color: var(--muted); }
 
-  footer { font-size: 10px; }
+  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+  footer .kbd { margin-right: 2px; }
+  footer .gap { width: 14px; }
+
+  /* Keys mean nothing to a thumb. */
+  @media (max-width: 767px), (pointer: coarse) {
+    footer { display: none; }
+  }
+  @media (max-width: 767px) {
+    .sheet { padding: 14px; gap: 14px; }
+  }
 </style>

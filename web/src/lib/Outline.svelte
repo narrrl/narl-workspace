@@ -41,18 +41,31 @@
     headings = found
     current = found[0]?.id ?? ''
 
-    // The section whose heading last crossed the upper third is the one being
-    // read; a band rather than a line, so a short section still registers.
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) current = entry.target.id
-        }
-      },
-      { root: scroller, rootMargin: '-10% 0px -70% 0px' },
-    )
-    for (const element of elements) observer.observe(element)
-    return () => observer.disconnect()
+    // The section being read is the last one whose heading has passed the
+    // upper third of the view — worked out from positions on every scroll,
+    // so a jump with G or Ctrl-d lands on the right one too. Scrolled to the
+    // very end, the last heading wins even if it never got that high.
+    let frame = 0
+    const spy = () => {
+      frame = 0
+      const top = scroller.getBoundingClientRect().top
+      const line = top + scroller.clientHeight / 3
+      const room = scroller.scrollHeight - scroller.clientHeight
+      const end = room > 2 && scroller.scrollTop >= room - 2
+      let id = found[0]?.id ?? ''
+      for (const element of elements) {
+        if (end || element.getBoundingClientRect().top <= line) id = element.id
+        else break
+      }
+      current = id
+    }
+    const onscroll = () => (frame ||= requestAnimationFrame(spy))
+    scroller.addEventListener('scroll', onscroll, { passive: true })
+    spy()
+    return () => {
+      scroller.removeEventListener('scroll', onscroll)
+      cancelAnimationFrame(frame)
+    }
   })
 
   function jump(id: string) {
@@ -105,5 +118,6 @@
   button:focus-visible { background: var(--light); color: var(--ink); }
 
   .marker { width: 5px; height: 5px; transform: translateY(-2px); }
-  .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A margin is narrow: long headings wrap rather than lose their ends. */
+  .text { min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
 </style>

@@ -1,9 +1,8 @@
 import { api, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay } from './util'
+import { formatDay, parseDay, type ScrollAmount } from './util'
 
-/** How far the reading pane is asked to scroll: lines, a half page, or an end. */
-export type ScrollAmount = number | 'top' | 'bottom' | 'halfdown' | 'halfup'
+export type { ScrollAmount }
 
 /** Filled in by App.svelte so ex-commands can reach the DOM-bound bits. */
 export const hooks = {

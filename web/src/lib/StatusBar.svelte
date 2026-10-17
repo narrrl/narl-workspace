@@ -15,9 +15,10 @@
   const lines = $derived(workspace.editing ? workspace.draft.body.split('\n').length : null)
 </script>
 
-<footer>
+<footer class="status">
   <span
     class="mode"
+    class:editing={workspace.editing}
     class:insert={mode === 'INSERT' || mode === 'EDIT'}
     class:visual={mode.startsWith('VISUAL')}
   >
@@ -25,9 +26,7 @@
   </span>
   <span class="file">{file}{#if workspace.dirty}<span class="dirty"> [+]</span>{/if}</span>
 
-  <span class="msg" class:alarm={workspace.flash?.kind === 'error'}>
-    {workspace.flash?.text ?? ''}
-  </span>
+  <span class="msg" class:alarm={workspace.flash?.kind === 'error'}>{workspace.flash?.text ?? ''}</span>
 
   {#if workspace.fullscreen}<span class="flag">full</span>{/if}
   {#if lines !== null}<span class="readout">{lines}<span class="unit">L</span></span>{/if}
@@ -35,37 +34,10 @@
     {isTouchDevice ? 'tap : for commands' : '? help · : command · / search'}
   </span>
 
-  <div class="tools"><Rail compact /></div>
+  <div class="tools"><Rail dock /></div>
 </footer>
 
 <style>
-  footer {
-    position: absolute;
-    inset: auto 0 0 0;
-    height: var(--status-h);
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 0 calc(var(--rail-w) + 4px) 0 calc(var(--frame) + 4px);
-    font-size: 11px;
-    color: var(--subtle);
-    white-space: nowrap;
-    overflow: hidden;
-  }
-
-  .mode {
-    display: flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 8px;
-    border-radius: 4px;
-    flex: none;
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    background: var(--surface-alt);
-    color: var(--fg);
-    transition: background-color var(--t-base) var(--ease-glide), color var(--t-base) var(--ease-glide);
-  }
   .mode.insert { background: var(--light); color: var(--ink); }
   .mode.visual { background: var(--light-dim); color: var(--ink); }
 
@@ -73,16 +45,34 @@
   .dirty { color: var(--light); }
   .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
   .msg.alarm { color: var(--alarm); }
-  .readout { color: var(--fg); font-variant-numeric: tabular-nums; }
-  .unit { color: var(--muted); margin-left: 1px; }
-  .hint { color: var(--muted); letter-spacing: 0.06em; }
   .flag { color: var(--light); letter-spacing: 0.18em; text-transform: uppercase; }
 
   .tools { display: none; }
 
+  /*
+   * On a phone the band is the dock. The mode only shows while writing, and
+   * messages float just above the band as a toast, so they never squeeze the
+   * doors.
+   */
   @media (max-width: 767px) {
-    footer { padding-right: 6px; gap: 10px; }
-    .hint, .file, .readout { display: none; }
-    .tools { display: flex; flex: none; }
+    .status { padding: 0 6px; gap: 6px; overflow: visible; }
+    .hint, .file, .readout, .flag { display: none; }
+    .mode:not(.editing) { display: none; }
+    .tools { display: flex; flex: 1; height: 100%; }
+
+    .msg {
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      max-width: calc(100% - 24px);
+      padding: 6px 12px;
+      border: 1px solid var(--overlay);
+      border-radius: var(--radius-s);
+      background: var(--surface);
+      box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+      transform: translateX(-50%);
+      z-index: 20;
+    }
+    .msg:empty { display: none; }
   }
 </style>
