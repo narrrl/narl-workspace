@@ -277,17 +277,65 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
 
 /// The spaces, in display order. Their child counts are what the switcher shows.
 pub async fn spaces(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<NodeSummary>>> {
+    list_spaces(&state.db).await.map(Json)
+}
+
+async fn list_spaces(db: &SqlitePool) -> AppResult<Vec<NodeSummary>> {
     let rows = sqlx::query(&format!(
         "SELECT {SUMMARY_COLUMNS} FROM nodes n
          WHERE n.parent_id IS NULL AND n.kind = 'space'
          ORDER BY n.position, n.name"
     ))
-    .fetch_all(&state.db)
+    .fetch_all(db)
     .await?;
 
-    Ok(Json(
-        rows.iter().map(|row| row_to_summary(row, "")).collect(),
+    Ok(rows.iter().map(|row| row_to_summary(row, "")).collect())
+}
+
+/// How many documents each space shows in the overview.
+const OVERVIEW_RECENT: i64 = 4;
+
+#[derive(Serialize)]
+pub struct SpaceOverview {
+    pub space: NodeSummary,
+    pub recent: Vec<NodeSummary>,
+}
+
+/// Every space with the documents last written in it, from any depth: what
+/// the overview shows, the way the desktop's overview shows each workspace
+/// with its windows.
+pub async fn overview(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<SpaceOverview>>> {
+    let mut out = Vec::new();
+    for space in list_spaces(&state.db).await? {
+        let recent = recent_documents(&state.db, space.id, OVERVIEW_RECENT).await?;
+        out.push(SpaceOverview { space, recent });
+    }
+    Ok(Json(out))
+}
+
+/// The `limit` most recently edited documents anywhere under `root`.
+pub async fn recent_documents(db: &SqlitePool, root: i64, limit: i64) -> AppResult<Vec<NodeSummary>> {
+    let rows = sqlx::query(&format!(
+        "WITH RECURSIVE sub (id) AS (
+             SELECT id FROM nodes WHERE id = ?1
+             UNION ALL
+             SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+         )
+         SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
+         FROM nodes n
+         WHERE n.kind = 'document' AND n.id IN (SELECT id FROM sub)
+         ORDER BY n.updated_at DESC, n.id DESC
+         LIMIT ?2"
     ))
+    .bind(root)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|row| row_to_summary(row, &row.try_get::<String, _>("head").unwrap_or_default()))
+        .collect())
 }
 
 pub async fn create_space(
@@ -718,7 +766,55 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{excerpt, fts_query, next_slug, slugify, EXCERPT_CHARS, HEAD_CHARS};
+    use super::{
+        excerpt, fts_query, next_slug, recent_documents, slugify, EXCERPT_CHARS, HEAD_CHARS,
+    };
+
+    /// The overview reaches into folders, newest edit first, and stops at the
+    /// limit — and never lists a folder as if it were a document.
+    #[tokio::test]
+    async fn recent_documents_come_from_any_depth() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("an in-memory database");
+        sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
+
+        let insert = |parent: i64, kind: &'static str, slug: &'static str, at: i64| {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?3, '', ?4, ?4) RETURNING id",
+                )
+                .bind(parent)
+                .bind(kind)
+                .bind(slug)
+                .bind(at)
+                .fetch_one(&db)
+                .await
+                .expect("insert")
+            }
+        };
+        let space: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE slug = 'uni'")
+            .fetch_one(&db)
+            .await
+            .expect("the seeded space");
+        let folder = insert(space, "folder", "deep", 1).await;
+        let inner = insert(folder, "folder", "deeper", 2).await;
+        insert(space, "document", "a", 10).await;
+        insert(folder, "document", "b", 30).await;
+        insert(inner, "document", "c", 20).await;
+
+        let slugs: Vec<String> = recent_documents(&db, space, 2)
+            .await
+            .expect("query")
+            .into_iter()
+            .map(|n| n.slug)
+            .collect();
+        assert_eq!(slugs, ["b", "c"]);
+    }
 
     #[test]
     fn strips_markdown_furniture() {

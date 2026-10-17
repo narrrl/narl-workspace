@@ -1,6 +1,7 @@
 <script lang="ts">
   import { hooks, runCommand, type ScrollAmount } from './commands'
   import { renderMarkdown } from './markdown'
+  import Outline from './Outline.svelte'
   import { workspace } from './store.svelte'
   import { formatStamp, formatWeekday, isTouchDevice, relative } from './util'
 
@@ -17,6 +18,7 @@
   const sharePath = $derived(doc.share_token ? `${location.origin}/s/${doc.share_token}#…` : null)
 
   let reader = $state<HTMLElement>()
+  let article = $state<HTMLElement>()
 
   /*
    * j/k reach this pane through the window handler in App.svelte, which has no
@@ -24,7 +26,9 @@
    * says whether it scrolled anything at all.
    */
   $effect(() => {
-    hooks.scrollReader = (amount: ScrollAmount) => {
+    // A space switch remounts this pane, and the old one's cleanup can run
+    // after the new one has set the hook — so it only clears its own.
+    const scroll = (amount: ScrollAmount) => {
       if (!reader) return false
       const line = parseFloat(getComputedStyle(reader).lineHeight) || 24
       const half = reader.clientHeight / 2
@@ -46,7 +50,10 @@
       }
       return true
     }
-    return () => (hooks.scrollReader = () => false)
+    hooks.scrollReader = scroll
+    return () => {
+      if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
+    }
   })
 
   /**
@@ -144,7 +151,7 @@
   {:else}
     <div class="body reading" bind:this={reader}>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <article class="md resolve" onclick={follow}>
+      <article class="md resolve" bind:this={article} onclick={follow}>
         {#if doc.name.trim()}<h1 class="entrytitle">{doc.name}</h1>{/if}
         <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
         {@html html}
@@ -152,6 +159,9 @@
           <p class="muted">this document is empty — press <span class="key">i</span> to write.</p>
         {/if}
       </article>
+      <aside class="side">
+        <Outline root={article} scroller={reader} source={html} />
+      </aside>
     </div>
   {/if}
 </section>
@@ -249,7 +259,29 @@
   .loading { padding: 16px 28px; }
 
   .body { flex: 1; min-height: 0; overflow: hidden; }
-  .reading { overflow-y: auto; padding: 18px 28px 30vh; }
+  /*
+   * The text is a column in the middle of the pane, as on a page; the margin
+   * to its right holds the outline while there is room for one.
+   */
+  .reading {
+    overflow-y: auto;
+    padding: 18px 28px 30vh;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 46rem) minmax(0, 1fr);
+    align-items: start;
+    container-type: inline-size;
+  }
+  .reading > article { grid-column: 2; max-width: none; }
+  .side {
+    grid-column: 3;
+    position: sticky;
+    top: 0;
+    max-width: 30ch;
+    padding: 6px 0 0 44px;
+  }
+  @container (max-width: 1000px) {
+    .side { display: none; }
+  }
   .entrytitle { margin-top: 0 !important; font-size: 2.1em !important; }
 
   .key {
@@ -275,6 +307,7 @@
     .row { flex-direction: column; align-items: flex-start; }
     .sharebar { margin: 0 16px 8px; }
     .title { margin: 8px 16px 4px; }
-    .reading { padding: 14px 16px 30vh; }
+    .reading { padding: 14px 16px 30vh; grid-template-columns: minmax(0, 1fr); }
+    .reading > article { grid-column: 1; }
   }
 </style>

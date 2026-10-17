@@ -61,3 +61,16 @@ export const isTouchDevice =
   typeof window !== 'undefined' &&
   navigator.maxTouchPoints > 0 &&
   window.matchMedia('(pointer: coarse)').matches
+
+/** A heading as an anchor id: lowercase, dashes, the same idea as the server's slugs. */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+}

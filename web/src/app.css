@@ -44,6 +44,7 @@
   --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-glide: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-in: cubic-bezier(0.55, 0, 0.9, 0.35);
+  --ease-drift: cubic-bezier(0.35, 0, 0.15, 1);
   --t-fast: 120ms;
   --t-base: 220ms;
   --t-slow: 380ms;

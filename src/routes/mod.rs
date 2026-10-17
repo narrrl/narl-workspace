@@ -23,6 +23,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/export", get(export::export))
         .route("/backup", get(backup::status).post(backup::run))
         .route("/spaces", get(nodes::spaces).post(nodes::create_space))
+        .route("/spaces/overview", get(nodes::overview))
         .route("/spaces/{id}/board", get(boards::board))
         .route("/spaces/{id}/lists", post(boards::create_list))
         .route("/lists/{id}", put(boards::rename_list).delete(boards::remove_list))

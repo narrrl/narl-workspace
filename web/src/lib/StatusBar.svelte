@@ -29,6 +29,7 @@
     {workspace.flash?.text ?? ''}
   </span>
 
+  {#if workspace.fullscreen}<span class="flag">full</span>{/if}
   {#if lines !== null}<span class="readout">{lines}<span class="unit">L</span></span>{/if}
   <span class="hint">
     {isTouchDevice ? 'tap : for commands' : '? help · : command · / search'}
@@ -75,6 +76,7 @@
   .readout { color: var(--fg); font-variant-numeric: tabular-nums; }
   .unit { color: var(--muted); margin-left: 1px; }
   .hint { color: var(--muted); letter-spacing: 0.06em; }
+  .flag { color: var(--light); letter-spacing: 0.18em; text-transform: uppercase; }
 
   .tools { display: none; }
 

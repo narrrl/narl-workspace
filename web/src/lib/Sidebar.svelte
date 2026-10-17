@@ -79,9 +79,6 @@
     flex-direction: column;
     height: 100%;
     min-width: 0;
-    --pane: color-mix(in oklab, var(--surface) 55%, var(--base));
-    background: var(--pane);
-    border-right: 1px solid var(--rim);
   }
 
   .head {
@@ -120,7 +117,7 @@
     z-index: 1;
     padding: 14px 8px 6px 10px;
     font-size: 10px;
-    background: linear-gradient(var(--pane) 70%, transparent);
+    background: linear-gradient(var(--pane-bg) 70%, transparent);
   }
   .day { color: var(--subtle); }
 

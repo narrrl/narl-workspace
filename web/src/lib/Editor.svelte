@@ -25,6 +25,7 @@
 
   let host = $state<HTMLDivElement>()
   let view: EditorView | undefined
+  const focus = () => view?.focus()
 
   const markdownHighlight = HighlightStyle.define([
     { tag: tags.heading, color: 'var(--light)', fontWeight: '600' },
@@ -208,7 +209,7 @@
       parent: host!,
     })
 
-    hooks.focusEditor = () => view?.focus()
+    hooks.focusEditor = focus
     hooks.insertText = insertAtCursor
     view.focus()
 
@@ -234,9 +235,12 @@
   onDestroy(() => {
     view?.destroy()
     view = undefined
-    hooks.focusEditor = () => {}
-    hooks.insertText = () => {}
-    workspace.vimMode = 'normal'
+    // Only clear the hooks if no newer editor has taken them already.
+    if (hooks.focusEditor === focus) {
+      hooks.focusEditor = () => {}
+      hooks.insertText = () => {}
+      workspace.vimMode = 'normal'
+    }
   })
 </script>
 

@@ -26,13 +26,14 @@
   <span class="divider"></span>
 
   <nav class="spaces" aria-label="spaces">
-    {#each workspace.spaces as space (space.id)}
+    {#each workspace.spaces as space, index (space.id)}
       <button
         class="pill"
         aria-current={space.id === workspace.spaceId}
+        title="{space.name} ({index < 10 ? (index + 1) % 10 : ''})"
         onclick={() => workspace.guard(() => workspace.enterSpace(space.id))}
       >
-        {space.slug}
+        {#if index < 10}<span class="n">{(index + 1) % 10}</span>{/if}{space.slug}
       </button>
     {/each}
     <button class="pill add" title="new space (:space! <name>)" onclick={() => hooks.openCommandLine(':space! ')}>
@@ -129,10 +130,19 @@
   .crumbs { flex: 0 1 auto; }
 
   /* Workspace pills: muted at rest, light on hover, inverted when current. */
+  /* The focused pill widens, as the desktop's does, over the slow duration. */
   .pill {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     min-width: 22px;
     height: 20px;
     padding: 0 6px;
+    transition:
+      padding var(--t-slow) var(--ease-snap),
+      background-color var(--t-base) var(--ease-glide),
+      color var(--t-base) var(--ease-glide);
     border: 0;
     border-radius: 4px;
     font-size: 11px;
@@ -142,7 +152,10 @@
     background: transparent;
   }
   .pill:hover { background: transparent; color: var(--light); }
-  .pill[aria-current='true'] { background: var(--light); color: var(--ink); }
+  .pill[aria-current='true'] { background: var(--light); color: var(--ink); padding: 0 12px; }
+  .n { color: var(--overlay); font-size: 10px; }
+  .pill:hover .n { color: var(--muted); }
+  .pill[aria-current='true'] .n { color: var(--ink); opacity: 0.55; }
   .pill:focus-visible { background: var(--light); color: var(--ink); }
   .pill.add { color: var(--overlay); }
   .pill.add:hover { color: var(--light); }

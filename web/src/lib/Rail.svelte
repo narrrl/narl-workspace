@@ -29,6 +29,8 @@
       { key: 'o', caption: 'new', title: 'new document (o)', run: () => runCommand('new') },
       { key: 'O', caption: 'dir', title: 'new folder (O)', run: () => hooks.openCommandLine(':mkdir ') },
       ...(workspace.space ? [board] : []),
+      { key: 'w', caption: 'spaces', title: 'overview of every space (w)', run: () => hooks.openOverview() },
+      { key: 'f', caption: 'full', title: 'fullscreen the focused pane (f)', run: () => (workspace.fullscreen = !workspace.fullscreen), on: workspace.fullscreen },
       { key: '/', caption: 'find', title: 'search (/)', run: () => hooks.openCommandLine('/') },
       { key: ':', caption: 'cmd', title: 'command line (:)', run: () => hooks.openCommandLine(':') },
       { key: '?', caption: 'help', title: 'help (?)', run: () => runCommand('help') },

@@ -7,12 +7,16 @@ import {
   type WorkspaceNode,
   type MediaFile,
   type NodeSummary,
+  type SpaceOverview,
 } from './api'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
 export type View = 'tree' | 'board'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
+
+/** Where a space was left: the folder, the open document, the row, the pane. */
+type Spot = { parentId: number; openId: number | null; cursor: number; pane: Pane }
 
 /**
  * The whole application state. It is deliberately one object: the keyboard
@@ -60,8 +64,21 @@ class Workspace {
   vimMode = $state('normal')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview'>('none')
   media = $state<MediaFile[]>([])
+  overview = $state<SpaceOverview[]>([])
+  overviewCursor = $state(0)
+
+  /** `f`: the focused pane takes the whole porthole, like a fullscreen window. */
+  fullscreen = $state(false)
+  /** +1 when the last space switch went right along the bar, -1 when left. */
+  switchDirection = $state(1)
+
+  /*
+   * Spaces behave like the desktop's workspaces: each keeps the folder and the
+   * document it was left on, and coming back finds them where they were.
+   */
+  #spots: Record<number, Spot> = JSON.parse(localStorage.getItem('diary:spots') ?? '{}')
 
   vimEnabled = $state(localStorage.getItem('diary:vim') !== 'off')
 
@@ -246,11 +263,50 @@ class Workspace {
     if (start) await this.enterSpace(start.id)
   }
 
+  #rememberSpot() {
+    if (this.spaceId === null || this.parentId === null) return
+    this.#spots[this.spaceId] = {
+      parentId: this.parentId,
+      openId: this.open?.id ?? null,
+      cursor: this.cursor,
+      pane: this.pane,
+    }
+    localStorage.setItem('diary:spots', JSON.stringify(this.#spots))
+  }
+
   async enterSpace(id: number) {
+    const leaving = this.spaceId !== null && this.spaceId !== id
+    if (leaving) {
+      await this.flush()
+      this.#rememberSpot()
+      const from = this.spaces.findIndex((s) => s.id === this.spaceId)
+      const to = this.spaces.findIndex((s) => s.id === id)
+      this.switchDirection = to >= from ? 1 : -1
+      this.open = null
+      this.editing = false
+      this.pane = 'list'
+    }
     this.spaceId = id
     localStorage.setItem('diary:space', String(id))
     this.query = ''
-    await this.goTo(id)
+
+    // A remembered folder may have been deleted or moved to another space
+    // since; then the space's root is where it opens.
+    const spot = this.#spots[id]
+    try {
+      await this.goTo(spot?.parentId ?? id)
+      if (this.spaceId !== id) await this.goTo(id)
+    } catch {
+      await this.goTo(id)
+    }
+    if (spot && this.parentId === spot.parentId) {
+      if (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId)) {
+        await this.openNode(spot.openId)
+        this.pane = spot.pane
+      } else {
+        this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
+      }
+    }
     // The board belongs to the space, so switching space while looking at one
     // shows the new space's board — or drops back to the tree for a space that
     // has none, rather than leaving the previous board on screen.
@@ -265,9 +321,11 @@ class Workspace {
   /** Show the children of `id`, which must be a space or a folder. */
   async goTo(id: number, keep?: number) {
     await this.flush()
+    const folder = await api.getNode(id)
+    // Walking into another space by a link leaves this one where it was.
+    if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
     this.parentId = id
     this.query = ''
-    const folder = await api.getNode(id)
     this.path = folder.path
     this.spaceId = folder.path[0]?.id ?? id
     this.nodes = await api.listNodes({ parent: id })
@@ -477,6 +535,49 @@ class Workspace {
     await api.moveNode(id, parentId)
     await this.refresh()
     this.say(`moved #${id}`)
+  }
+
+  /** `1`..`9`, `0`: the space at that place on the bar. */
+  async switchSpace(index: number) {
+    const space = this.spaces[index]
+    if (!space) return this.say(`no space ${index + 1}`, 'error')
+    if (space.id !== this.spaceId) await this.enterSpace(space.id)
+  }
+
+  /** Tab / Shift-Tab: the next or previous space, wrapping round. */
+  async cycleSpace(delta: number) {
+    const count = this.spaces.length
+    if (count < 2) return
+    const at = this.spaces.findIndex((s) => s.id === this.spaceId)
+    await this.enterSpace(this.spaces[(at + delta + count) % count].id)
+  }
+
+  /**
+   * Shift+digit: send the marked node, or else the one under the cursor, to
+   * the root of the space at that place — the window moved to workspace N.
+   */
+  async sendToSpace(index: number) {
+    const space = this.spaces[index]
+    const node = this.marked ?? this.selected
+    if (!space) return this.say(`no space ${index + 1}`, 'error')
+    if (!node) return this.say('nothing selected', 'error')
+    if (node.parent_id === space.id) return this.say(`already in ${space.slug}`)
+
+    if (this.open?.id === node.id) {
+      await this.flush()
+      this.open = null
+      this.editing = false
+      this.pane = 'list'
+    }
+    await api.moveNode(node.id, space.id)
+    this.marked = null
+    await this.refresh()
+    this.spaces = await api.listSpaces()
+    this.say(`moved ${node.name.trim() || node.slug} → ${index + 1} ${space.slug}`)
+  }
+
+  async loadOverview() {
+    this.overview = await api.overview()
   }
 
   /** `m`: pick the node under the cursor up, or put it back down unmoved. */

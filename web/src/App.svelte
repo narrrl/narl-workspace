@@ -7,6 +7,7 @@
   import DocumentPane from './lib/DocumentPane.svelte'
   import Help from './lib/Help.svelte'
   import Login from './lib/Login.svelte'
+  import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
   import Rail from './lib/Rail.svelte'
   import Shared from './lib/Shared.svelte'
@@ -43,6 +44,7 @@
     hooks.pickArchive = () => importInput?.click()
     hooks.focusList = () => shell?.focus()
     hooks.openCommandLine = (initial) => (cmdline = initial)
+    hooks.openOverview = () => void openOverview()
   })
 
   /*
@@ -92,13 +94,86 @@
   const offers: [string, string][] = [
     ['o', 'write a new document'],
     ['O', 'make a folder'],
-    ['R', 'rename what is marked'],
-    ['b', "this space's board"],
     ['j / k', 'browse, l opens'],
-    ['h', 'up one level'],
+    ['1 … 9', 'switch space, Tab cycles'],
+    ['w', 'overview of every space'],
+    ['b', "this space's board"],
     ['/', 'search this space'],
     ['?', 'help'],
   ]
+
+  /*
+   * Spaces are workspaces: digits jump to one, shifted digits send the node
+   * there, Tab walks along the bar. `event.code` rather than `event.key`, so
+   * Shift+1 means space 1 whatever symbol the layout puts on that key.
+   */
+  function spaceKey(event: KeyboardEvent): boolean {
+    const digit = /^Digit(\d)$/.exec(event.code)?.[1]
+    if (digit !== undefined) {
+      const index = digit === '0' ? 9 : Number(digit) - 1
+      void workspace.guard(() =>
+        event.shiftKey ? workspace.sendToSpace(index) : workspace.switchSpace(index),
+      )
+      return true
+    }
+    if (event.key === 'Tab') {
+      void workspace.guard(() => workspace.cycleSpace(event.shiftKey ? -1 : 1))
+      return true
+    }
+    if (event.key === 'w') {
+      void openOverview()
+      return true
+    }
+    return false
+  }
+
+  async function openOverview() {
+    await workspace.guard(() => workspace.loadOverview())
+    workspace.overviewCursor = Math.max(
+      workspace.overview.findIndex((entry) => entry.space.id === workspace.spaceId),
+      0,
+    )
+    workspace.overlay = 'overview'
+  }
+
+  /** The overview's own keys: hjkl across the grid, a digit or Enter to go. */
+  function overviewKey(event: KeyboardEvent): boolean {
+    const count = workspace.overview.length
+    const columns = hooks.overviewColumns()
+    const go = (index: number) => {
+      const entry = workspace.overview[index]
+      if (!entry) return
+      workspace.overlay = 'none'
+      void workspace.guard(() => workspace.enterSpace(entry.space.id))
+    }
+    const digit = /^Digit(\d)$/.exec(event.code)?.[1]
+    if (digit !== undefined) {
+      go(digit === '0' ? 9 : Number(digit) - 1)
+      return true
+    }
+    const step: Record<string, number> = { h: -1, ArrowLeft: -1, l: 1, ArrowRight: 1, k: -columns, ArrowUp: -columns, j: columns, ArrowDown: columns }
+    if (event.key in step) {
+      workspace.overviewCursor = Math.min(Math.max(workspace.overviewCursor + step[event.key], 0), count - 1)
+      return true
+    }
+    if (event.key === 'Enter') {
+      go(workspace.overviewCursor)
+      return true
+    }
+    if (event.key === 'w' || event.key === 'q') {
+      workspace.overlay = 'none'
+      return true
+    }
+    return false
+  }
+
+  /** Alt+h / Alt+l: focus moves between the panes, out of the editor too. */
+  function focusPane(pane: 'list' | 'document') {
+    if (pane === 'document' && !workspace.open) return
+    workspace.pane = pane
+    if (pane === 'document' && workspace.editing) hooks.focusEditor()
+    else shell?.focus()
+  }
 
   /*
    * The board reads the same keys as the list, one dimension wider: h/l walk
@@ -185,6 +260,19 @@
       return
     }
 
+    if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === 'h' || event.key === 'l')) {
+      event.preventDefault()
+      focusPane(event.key === 'h' ? 'list' : 'document')
+      return
+    }
+
+    if (workspace.overlay === 'overview' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (overviewKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
+
     if (event.key === 'Escape') {
       if (workspace.overlay !== 'none') {
         workspace.overlay = 'none'
@@ -193,6 +281,10 @@
       if (cmdline !== null) {
         cmdline = null
         shell?.focus()
+        return
+      }
+      if (workspace.fullscreen && !workspace.editing) {
+        workspace.fullscreen = false
         return
       }
     }
@@ -222,6 +314,16 @@
     const previous = pending
     pending = ''
 
+    if (spaceKey(event)) {
+      event.preventDefault()
+      return
+    }
+    if (key === 'f') {
+      event.preventDefault()
+      workspace.fullscreen = !workspace.fullscreen
+      return
+    }
+
     if (workspace.view === 'board') {
       if (previous === 'g' && key === 'g') {
         event.preventDefault()
@@ -239,11 +341,11 @@
     }
 
     /*
-     * With a document open and not being edited, the reading pane owns j/k:
-     * the keys scroll what is on screen, and `h` backs out to the list, where
-     * they walk the rows again.
+     * The focused pane owns j/k. In the document they scroll what is on
+     * screen; `h` moves focus to the list with the document still open, where
+     * they walk the rows again, and `l` goes back.
      */
-    const reading = !!workspace.open && !workspace.editing
+    const reading = !!workspace.open && !workspace.editing && workspace.pane === 'document'
 
     // Two-key sequences: gg and dd.
     if (previous === 'g' && key === 'g') {
@@ -284,7 +386,8 @@
       case 'l':
       case 'ArrowRight':
         event.preventDefault()
-        void workspace.guard(() => workspace.openSelected())
+        if (workspace.open && workspace.selected?.id === workspace.open.id) focusPane('document')
+        else void workspace.guard(() => workspace.openSelected())
         break
       case 'm':
         // Pick a node up here, walk to a folder, put it down with `p`.
@@ -323,10 +426,10 @@
         break
       case 'h':
       case 'ArrowLeft':
-        // Out of the document if one is open, otherwise up a level — the same
-        // key means "leftwards" at both depths.
+        // Leftwards at every depth: from the document to the list, from the
+        // list up a level.
         event.preventDefault()
-        if (workspace.open) void runCommand('q')
+        if (workspace.open && workspace.pane === 'document') focusPane('list')
         else void workspace.guard(() => workspace.up())
         break
       case 'q':
@@ -382,13 +485,34 @@
 
     <!-- The opening in the frame: everything that scrolls is seen through it. -->
     <main class="porthole">
+      <!-- Keyed on the space, so a switch slides the new one in, as the desktop
+           does between workspaces: from below when moving right, above when left. -->
+      {#key workspace.spaceId}
       {#if workspace.view === 'board'}
         <!-- The board takes the whole width: its columns are the two panes. -->
-        <div class="panes board"><Board /></div>
+        <div class="panes board switch" style="--dir: {workspace.switchDirection}">
+          <div class="window focused"><Board /></div>
+        </div>
       {:else}
-        <div class="panes" class:reading={!!workspace.open}>
-          <div class="list"><Sidebar /></div>
-          <div class="entry">
+        <div
+          class="panes switch"
+          class:reading={!!workspace.open}
+          class:full={workspace.fullscreen}
+          class:focus-doc={!!workspace.open && workspace.pane === 'document'}
+          style="--dir: {workspace.switchDirection}"
+        >
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="window list"
+            class:focused={!workspace.open || workspace.pane === 'list'}
+            onpointerdown={() => (workspace.pane = 'list')}
+          ><Sidebar /></div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="window entry"
+            class:focused={!!workspace.open && workspace.pane === 'document'}
+            onpointerdown={() => workspace.open && (workspace.pane = 'document')}
+          >
             {#if workspace.open}
               <DocumentPane />
             {:else}
@@ -409,6 +533,7 @@
           </div>
         </div>
       {/if}
+      {/key}
     </main>
 
     <StatusBar />
@@ -421,7 +546,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>
@@ -473,15 +598,64 @@
     z-index: 5;
   }
 
+  /*
+   * The panes tile the porthole like windows tile a workspace: a gap round
+   * and between them, each rounded to sit concentric with the frame.
+   */
   .panes {
+    --gap: 7px;
     height: 100%;
     display: grid;
     grid-template-columns: minmax(32ch, 24vw) 1fr;
+    gap: var(--gap);
+    padding: var(--gap);
   }
 
   .panes.board { grid-template-columns: 1fr; }
 
-  .list, .entry { min-width: 0; min-height: 0; overflow: hidden; }
+  /*
+   * A window: opaque, a hairline border in overlay. The focused one gets the
+   * desktop's active border — a light gradient at 135° — and its shadow.
+   */
+  .window {
+    --pane-bg: color-mix(in oklab, var(--surface) 40%, var(--base));
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: calc(var(--frame-radius) - var(--gap));
+    background:
+      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
+      linear-gradient(var(--overlay), var(--overlay)) border-box;
+    transition: box-shadow var(--t-base) var(--ease-glide);
+  }
+  .window.list { --pane-bg: color-mix(in oklab, var(--surface) 60%, var(--base)); }
+  .window.focused {
+    background:
+      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
+      linear-gradient(135deg, var(--light), var(--light-dim)) border-box;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+  }
+  /* Only one pane on screen: nothing to tell apart, so no active border. */
+  .panes:not(.reading) .window.list,
+  .panes.board .window {
+    background:
+      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
+      linear-gradient(var(--overlay), var(--overlay)) border-box;
+    box-shadow: none;
+  }
+  .panes:not(.reading) .window.entry { border-color: transparent; background: transparent; }
+
+  /* `f`: the focused pane fills the porthole. */
+  .panes.full { grid-template-columns: 1fr; }
+  .panes.full .window:not(.focused) { display: none; }
+  .panes.full:not(.reading) .window.entry { display: none; }
+
+  /* hypr: workspaces, slidefadevert 18%, 550ms on the drift curve. */
+  .switch { animation: slidefadevert 550ms var(--ease-drift) both; }
+  @keyframes slidefadevert {
+    from { opacity: 0; transform: translateY(calc(var(--dir, 1) * 18%)); }
+  }
 
   .placeholder { display: grid; place-items: center; height: 100%; padding: 24px; }
   .standby { width: min(100%, 44ch); }
@@ -515,7 +689,7 @@
   .hidden { display: none; }
 
   @media (max-width: 760px) {
-    .panes { grid-template-columns: 1fr; }
+    .panes { grid-template-columns: 1fr; --gap: 4px; }
     .panes .entry { display: none; }
     .panes.reading .list { display: none; }
     .panes.reading .entry { display: block; }

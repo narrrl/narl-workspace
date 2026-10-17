@@ -31,6 +31,12 @@ export interface WorkspaceNode extends NodeSummary {
 }
 
 /** A public key allowed to mount the workspace over SFTP. */
+/** A space as the overview shows it: itself, and what was last written in it. */
+export interface SpaceOverview {
+  space: NodeSummary
+  recent: NodeSummary[]
+}
+
 export interface SshKey {
   id: number
   name: string
@@ -151,6 +157,8 @@ export const api = {
   logout: () => request<{ ok: true }>('/logout', { method: 'POST' }),
 
   listSpaces: () => request<NodeSummary[]>('/spaces'),
+
+  overview: () => request<SpaceOverview[]>('/spaces/overview'),
 
   createSpace: (name: string, has_board = true) =>
     request<WorkspaceNode>('/spaces', { method: 'POST', body: body({ name, has_board }) }),

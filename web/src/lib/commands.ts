@@ -16,6 +16,9 @@ export const hooks = {
   /* Filled in while a document is on screen and not being edited: the reading
      pane owns the scrollback, so the list keys have somewhere to send it. */
   scrollReader: (_amount: ScrollAmount): boolean => false,
+  /** How many space cards the overview fits in a row, for j/k to step by. */
+  overviewColumns: (): number => 1,
+  openOverview: () => {},
   openCommandLine: (_initial: string) => {},
 }
 
