@@ -1,5 +1,5 @@
 import { api, type BackupStatus } from './api'
-import { workspace, type Theme } from './store.svelte'
+import { workspace } from './store.svelte'
 import { formatDay, parseDay } from './util'
 
 /** How far the reading pane is asked to scroll: lines, a half page, or an end. */
@@ -56,16 +56,6 @@ const findFolder = (target: string) => {
     (node) =>
       node.kind !== 'document' && (node.slug === wanted || node.name.toLowerCase() === wanted),
   )
-}
-
-const themes: Theme[] = ['mocha', 'green', 'amber', 'ice']
-
-const setTheme = (name: string) => {
-  if (!themes.includes(name as Theme)) {
-    return workspace.say(`unknown theme: ${name} — try ${themes.join(', ')}`, 'error')
-  }
-  workspace.setTheme(name as Theme)
-  workspace.say(`theme ${name}`)
 }
 
 /** `3 minutes ago`, or `never`. Backups are read at a glance, not to the second. */
@@ -650,17 +640,10 @@ export const commands: CommandSpec[] = [
     },
   },
   {
-    name: 'theme',
-    args: '<mocha|green|amber|ice>',
-    group: 'view',
-    help: 'switch the colour scheme',
-    run: (arg) => setTheme(arg.trim() || workspace.theme),
-  },
-  {
     name: 'set',
     args: '<option>',
     group: 'view',
-    help: 'theme=mocha|green|amber|ice, vim, novim, clipboard, noclipboard, board, noboard',
+    help: 'vim, novim, clipboard, noclipboard, board, noboard',
     run: (arg) => {
       const option = arg.trim()
       if (option === 'vim') return workspace.setVim(true), workspace.say('vim keys on')
@@ -673,8 +656,6 @@ export const commands: CommandSpec[] = [
       // options above this one goes to the server.
       if (option === 'board') return workspace.guard(() => workspace.setBoard(true))
       if (option === 'noboard') return workspace.guard(() => workspace.setBoard(false))
-      const theme = /^theme=(\w+)$/.exec(option)?.[1]
-      if (theme) return setTheme(theme)
       workspace.say(`unknown option: ${option}`, 'error')
     },
   },
@@ -756,7 +737,7 @@ for (const spec of commands) {
   for (const alias of spec.aliases ?? []) lookup.set(alias, spec)
 }
 
-/** Run an ex-command line such as `w`, `date 2026-01-01` or `set theme=amber`. */
+/** Run an ex-command line such as `w`, `date 2026-01-01` or `set novim`. */
 export async function runCommand(line: string): Promise<void> {
   const input = line.trim().replace(/^:/, '')
   if (!input) return

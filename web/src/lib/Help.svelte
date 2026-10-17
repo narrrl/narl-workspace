@@ -60,8 +60,7 @@
 
 <div class="sheet">
   <header>
-    <span class="accent">:help</span>
-    <span class="faint">everything is a key or a `:` command</span>
+    <span class="label rule"><span class="marker"></span><span class="title">help</span> everything is a key or a `:` command</span>
     <button onclick={() => (workspace.overlay = 'none')}>esc</button>
   </header>
 
@@ -92,7 +91,7 @@
         <dl>
           {#each specs as spec (spec.name)}
             <dt>
-              {signature(spec)}{#if spec.args}<span class="args faint">{spec.args}</span>{/if}
+              {signature(spec)}{#if spec.args}<span class="args muted">{spec.args}</span>{/if}
             </dt>
             <dd>{spec.help}</dd>
             {#if spec.bang}
@@ -105,59 +104,69 @@
     {/each}
   </div>
 
-  <footer class="faint">
+  <footer>
     inside the editor the full vim keymap is live — hjkl, w/b, dd, ciw, visual mode, macros, and
-    <span class="accent">:w</span> to write. drop or paste an image, video or audio file into the
-    editor to attach it. <span class="accent">:12</span> jumps straight to entry 12. yanks and
+    <span class="key">:w</span> to write. drop or paste an image, video or audio file into the
+    editor to attach it. <span class="key">:12</span> jumps straight to entry 12. yanks and
     deletes are copied to the system clipboard —
-    <span class="accent">:set noclipboard</span> keeps them in vim's registers.
+    <span class="key">:set noclipboard</span> keeps them in vim's registers.
   </footer>
 </div>
 
 <style>
+  /* A free-standing panel, as the desktop draws one: hull, one rim, the frame's radius. */
   .sheet {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    width: min(100%, 110ch);
+    gap: 18px;
     max-height: 100%;
-    background: var(--bg-alt);
-    border: 1px solid var(--accent-dim);
-    border-radius: var(--radius);
-    padding: 14px 16px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    background: color-mix(in oklab, var(--hull) 97%, transparent);
+    border: 1px solid var(--surface-alt);
+    border-radius: var(--frame-radius);
+    padding: 20px 24px;
   }
 
-  header { display: flex; align-items: baseline; gap: 12px; }
-  header .faint { flex: 1; font-size: 12px; }
-  header button { align-self: center; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header .label { flex: 1; }
+  header .marker { background: var(--light); }
+  header .title { color: var(--light); }
+  .sheet { width: min(100%, 112ch); overflow-y: auto; overflow-x: hidden; }
 
   /* Newspaper columns, so the short groups fill the gaps under the long ones. */
-  .cols { columns: 38ch; column-gap: 28px; }
+  .cols { columns: 38ch; column-gap: 32px; }
 
-  section { break-inside: avoid; min-width: 0; margin: 0 0 16px; }
+  section { break-inside: avoid; min-width: 0; margin: 0 0 20px; }
 
   h2 {
-    font-size: 12px;
-    color: var(--fg-dim);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 8px;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin: 0 0 6px;
-    border-bottom: 1px dashed var(--line);
-    padding-bottom: 4px;
+    color: var(--muted);
   }
+  h2::after { content: ''; height: 1px; flex: 1; background: var(--overlay); }
 
   dl {
     margin: 0;
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: 3px 12px;
+    gap: 4px 14px;
     font-size: 12px;
   }
-  dt { color: var(--accent); white-space: nowrap; }
+  dt { color: var(--light); white-space: nowrap; }
   .args { margin-left: 0.6ch; }
-  dd { margin: 0; color: var(--fg-dim); overflow-wrap: anywhere; }
+  dd { margin: 0; color: var(--subtle); overflow-wrap: anywhere; }
 
-  footer { font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  footer {
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--overlay);
+    padding-top: 12px;
+    line-height: 1.7;
+  }
+  .key { color: var(--light); }
 </style>

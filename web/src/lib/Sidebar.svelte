@@ -1,7 +1,5 @@
 <script lang="ts">
   import type { NodeSummary } from './api'
-  import { hooks, runCommand } from './commands'
-  import SpaceBar from './SpaceBar.svelte'
   import { workspace } from './store.svelte'
   import { formatDay, formatTime, formatWeekday } from './util'
 
@@ -29,33 +27,16 @@
 </script>
 
 <div class="sidebar">
-  <div class="head">
-    <span class="accent name">~/{workspace.space?.slug ?? 'diary'}</span>
-    <span class="faint count">
-      {workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}
-    </span>
-    <span class="tools">
-      <!-- The board is the one view with no row in the list to click, so it
-           needs a door of its own; a space without one is offered the switch. -->
-      {#if workspace.space?.has_board}
-        <button class="board" title="board (b)" onclick={() => runCommand('board')}>board</button>
-      {:else if workspace.space}
-        <button class="board faint" title="give this space a board (:set board)" onclick={() => runCommand('set board')}>+board</button>
-      {/if}
-      <button title="new document (o)" onclick={() => runCommand('new')}>+</button>
-      <button title="new folder (O)" onclick={() => hooks.openCommandLine(':mkdir ')}>[+]</button>
-      <button title="search (/)" onclick={() => hooks.openCommandLine('/')}>/</button>
-      <button title="command line (:)" onclick={() => hooks.openCommandLine(':')}>:</button>
-      <button title="help (?)" onclick={() => runCommand('help')}>?</button>
-    </span>
+  <div class="head label rule">
+    <span class="marker"></span>
+    <span class="name">{workspace.space?.slug ?? 'diary'}</span>
+    <span class="count">{workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}</span>
   </div>
-
-  <SpaceBar />
 
   {#if workspace.query}
     <div class="filter">
-      <span class="faint">/</span>{workspace.query}
-      <button title="clear search" onclick={() => workspace.guard(() => workspace.search(''))}>esc</button>
+      <span class="muted">/</span><span class="query">{workspace.query}</span>
+      <button title="clear search (n)" onclick={() => workspace.guard(() => workspace.search(''))}>esc</button>
     </div>
   {/if}
 
@@ -65,9 +46,8 @@
       <!-- Day headings only make sense in a list that is a journal: documents,
            in date order, not a search and not a folder listing. -->
       {#if !workspace.query && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
-        <li class="daybreak">
-          <span>{formatDay(node.created_at)}</span>
-          <span class="faint">{formatWeekday(node.created_at)}</span>
+        <li class="daybreak label rule">
+          <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>
       {/if}
       <li>
@@ -78,15 +58,15 @@
           data-index={index}
           onclick={() => pick(index)}
         >
-          <span class="caret">{index === workspace.cursor ? '>' : ' '}</span>
-          {#if workspace.marked?.id === node.id}<span class="marked" title="marked — p drops it in a folder">m</span>{/if}
-          <span class="time">{aside(node)}</span>
-          <span class="title">{node.kind === 'document' ? '' : '/'}{label(node)}</span>
-          {#if node.shared}<span class="shared" title="shared">◉</span>{/if}
+          <span class="dot"></span>
+          <span class="title">{label(node)}{#if node.kind !== 'document'}<span class="slash">/</span>{/if}</span>
+          {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
+          {#if node.shared}<span class="shared" title="shared"></span>{/if}
+          <span class="aside">{aside(node)}</span>
         </button>
       </li>
     {:else}
-      <li class="empty faint">
+      <li class="empty muted">
         {workspace.query ? 'no matches' : 'nothing here yet — o writes, O makes a folder'}
       </li>
     {/each}
@@ -98,87 +78,112 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--bg-alt);
-    border-right: 1px solid var(--line);
     min-width: 0;
+    --pane: color-mix(in oklab, var(--surface) 55%, var(--base));
+    background: var(--pane);
+    border-right: 1px solid var(--rim);
   }
 
-  .head,
-  .filter {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--line);
+  .head {
     flex: none;
-  }
-
-  .filter {
-    color: var(--warn);
-    overflow: hidden;
+    padding: 16px 16px 10px 18px;
     white-space: nowrap;
   }
+  .head .marker { background: var(--light); }
+  .name { color: var(--light); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .count { flex: none; }
+
+  .filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 10px 6px;
+    padding: 4px 6px 4px 10px;
+    border-radius: var(--radius-s);
+    background: var(--surface-alt);
+    font-size: 12px;
+    flex: none;
+  }
+  .query { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--light); }
 
   ul {
     list-style: none;
     margin: 0;
-    padding: 4px 0 24px;
+    padding: 2px 8px 24px;
     overflow-y: auto;
     flex: 1;
   }
 
   .daybreak {
-    display: flex;
-    gap: 8px;
-    padding: 10px 10px 2px;
-    color: var(--fg-dim);
-    font-size: 12px;
     position: sticky;
     top: 0;
-    background: var(--bg-alt);
+    z-index: 1;
+    padding: 14px 8px 6px 10px;
+    font-size: 10px;
+    background: linear-gradient(var(--pane) 70%, transparent);
   }
+  .day { color: var(--subtle); }
 
+  /*
+   * A row rests bare, lifts a step on hover, and the cursor inverts it — light
+   * fill, ink text — the same mark focus makes everywhere else.
+   */
   .row {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
     width: 100%;
+    margin: 1px 0;
+    padding: 5px 10px;
     border: 0;
-    border-radius: 0;
-    padding: 2px 10px;
+    border-radius: var(--radius-s);
     text-align: left;
-    color: var(--fg-dim);
+    font-size: 13px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--subtle);
   }
+  .row:hover { background: var(--surface-alt); color: var(--light); border-color: transparent; }
+  .row:active { transform: none; }
+  .row.open { color: var(--light); }
+  .row.active, .row:focus-visible { background: var(--light); color: var(--ink); }
+  .row.active :is(.aside, .slash, .badge), .row:focus-visible :is(.aside, .slash, .badge) { color: var(--ink); }
 
-  .row:hover { background: var(--bg-lift); color: var(--fg); }
-  .row.open { color: var(--fg); }
-  .row.active { background: var(--select); color: var(--fg); }
-
-  .caret { color: var(--accent); flex: none; width: 1ch; }
-  .time { color: var(--fg-faint); flex: none; font-size: 12px; }
-  .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .shared { color: var(--accent); flex: none; }
-  .marked { color: var(--warn); flex: none; font-weight: 700; }
-  .empty { padding: 12px 10px; }
-
-  .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* The count is short and fixed-width-ish; the space name is the part that
-     can give way when the sidebar is narrow. */
-  .count { flex: none; white-space: nowrap; display: none; }
-  .tools { display: flex; gap: 1px; flex: none; }
-  .tools button { padding: 0 5px; line-height: 18px; }
-
-  @media (min-width: 480px) {
-    .count { display: inline; }
+  /* The open document carries a dot; the others keep its place. */
+  .dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 999px;
+    background: transparent;
+    transition: background-color var(--t-base) var(--ease-glide);
   }
-  .tools .board { color: var(--accent); }
-  .tools .board.faint { color: var(--fg-faint); }
+  .row.open .dot { background: var(--light); }
+  .row.open.active .dot { background: var(--ink); }
+
+  .title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-sans);
+    font-size: 14px;
+  }
+  .slash { color: var(--muted); margin-left: 1px; }
+  .aside { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .badge { flex: none; font-size: 11px; font-weight: 700; color: var(--light-dim); }
+  .shared {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border: 1.5px solid currentColor;
+    border-radius: 999px;
+  }
+  .empty { padding: 12px 10px; font-size: 12px; }
 
   /* Roomier tap targets where there is no keyboard. */
   @media (pointer: coarse) {
-    .row { padding: 7px 10px; }
-    .tools button { padding: 4px 10px; }
-    .count { display: none; }
+    .row { padding: 9px 10px; }
   }
 </style>

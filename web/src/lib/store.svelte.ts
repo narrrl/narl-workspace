@@ -13,7 +13,6 @@ export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
 export type View = 'tree' | 'board'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
-export type Theme = 'mocha' | 'green' | 'amber' | 'ice'
 
 /**
  * The whole application state. It is deliberately one object: the keyboard
@@ -63,8 +62,6 @@ class Workspace {
 
   overlay = $state<'none' | 'help' | 'media'>('none')
   media = $state<MediaFile[]>([])
-
-  theme = $state<Theme>((localStorage.getItem('diary:theme') as Theme) ?? 'mocha')
 
   vimEnabled = $state(localStorage.getItem('diary:vim') !== 'off')
 
@@ -745,11 +742,6 @@ class Workspace {
 
   async loadMedia() {
     this.media = await api.listMedia()
-  }
-
-  setTheme(theme: Theme) {
-    this.theme = theme
-    localStorage.setItem('diary:theme', theme)
   }
 
   setVim(enabled: boolean) {

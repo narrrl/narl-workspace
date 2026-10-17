@@ -73,7 +73,7 @@ The desktop UI is modal. In the browse pane:
 Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:w`, `:wq`, `:q!`, `:new [yyyy-mm-dd]`, `:date`, `:name`, `:share`, `:link`,
-`:upload`, `:media`, `:search`, `:backup`, `:set theme=mocha|green|amber|ice` and
+`:upload`, `:media`, `:search`, `:backup` and
 `:set novim`. The tree has its own: `:space [name]` switches (`:space! <name>`
 makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..>` moves what is

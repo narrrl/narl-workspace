@@ -1,12 +1,14 @@
 <script lang="ts">
   import { hooks, runCommand } from './lib/commands'
   import { embedSnippet } from './lib/markdown'
+  import Bar from './lib/Bar.svelte'
   import Board from './lib/Board.svelte'
   import CommandLine from './lib/CommandLine.svelte'
   import DocumentPane from './lib/DocumentPane.svelte'
   import Help from './lib/Help.svelte'
   import Login from './lib/Login.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
+  import Rail from './lib/Rail.svelte'
   import Shared from './lib/Shared.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
@@ -30,10 +32,6 @@
   let pending = $state('')
 
   if (!shareToken) void workspace.boot()
-
-  $effect(() => {
-    document.documentElement.dataset.theme = workspace.theme
-  })
 
   $effect(() => {
     folderInput?.setAttribute('webkitdirectory', '')
@@ -89,6 +87,18 @@
     if (files.length === 0) return
     await workspace.guard(() => workspace.importFolder(files))
   }
+
+  // What the empty pane offers, in the key/value shape of a status readout.
+  const offers: [string, string][] = [
+    ['o', 'write a new document'],
+    ['O', 'make a folder'],
+    ['R', 'rename what is marked'],
+    ['b', "this space's board"],
+    ['j / k', 'browse, l opens'],
+    ['h', 'up one level'],
+    ['/', 'search this space'],
+    ['?', 'help'],
+  ]
 
   /*
    * The board reads the same keys as the list, one dimension wider: h/l walk
@@ -361,40 +371,45 @@
 {#if shareToken}
   <Shared token={shareToken} shareKey={shareKey} />
 {:else if workspace.booting}
-  <div class="boot faint">booting ~/workspace…</div>
+  <div class="boot label">booting ~/workspace<span class="cursor">_</span></div>
 {:else if !workspace.user}
   <Login />
 {:else}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="shell" bind:this={shell} tabindex="-1">
-    {#if workspace.view === 'board'}
-      <!-- The board takes the whole width: its columns are the two panes. -->
-      <div class="panes board"><Board /></div>
-    {:else}
-    <div class="panes" class:reading={!!workspace.open}>
-      <div class="list"><Sidebar /></div>
-      <div class="entry">
-        {#if workspace.open}
-          <DocumentPane />
-        {:else}
-          <div class="placeholder faint">
-            <pre>{`  ┌─────────────────────────────┐
-  │  nothing open               │
-  │                             │
-  │  o   write a new document   │
-  │  O   make a folder          │
-  │  R   rename what is marked  │
-  │  b   this space's board     │
-  │  j/k browse, l opens        │
-  │  h   up one level           │
-  │  /   search this space      │
-  │  ?   help                   │
-  └─────────────────────────────┘`}</pre>
+    <Bar />
+    <Rail />
+
+    <!-- The opening in the frame: everything that scrolls is seen through it. -->
+    <main class="porthole">
+      {#if workspace.view === 'board'}
+        <!-- The board takes the whole width: its columns are the two panes. -->
+        <div class="panes board"><Board /></div>
+      {:else}
+        <div class="panes" class:reading={!!workspace.open}>
+          <div class="list"><Sidebar /></div>
+          <div class="entry">
+            {#if workspace.open}
+              <DocumentPane />
+            {:else}
+              <div class="placeholder">
+                <div class="standby resolve">
+                  <h2 class="label rule">nothing open</h2>
+                  <dl>
+                    {#each offers as [key, what] (key)}
+                      <dt>{key}</dt>
+                      <dd>{what}</dd>
+                    {/each}
+                    <dt>status</dt>
+                    <dd class="light">standing by<span class="cursor">_</span></dd>
+                  </dl>
+                </div>
+              </div>
+            {/if}
+          </div>
         </div>
-        {/if}
-      </div>
-    </div>
-    {/if}
+      {/if}
+    </main>
 
     <StatusBar />
 
@@ -426,25 +441,63 @@
 
   .shell {
     position: relative;
-    display: flex;
-    flex-direction: column;
     height: 100%;
     outline: none;
+    background: var(--hull);
+  }
+
+  /*
+   * The porthole: a rounded opening in the hull, outlined by a single rim. The
+   * rim is drawn on top by ::after, so the panes scroll underneath it the way
+   * windows sit under the frame on the desktop.
+   */
+  .porthole {
+    position: absolute;
+    top: var(--bar-h);
+    right: var(--rail-w);
+    bottom: var(--status-h);
+    left: var(--frame);
+    overflow: hidden;
+    border-radius: var(--frame-radius);
+    background:
+      radial-gradient(120% 70% at 30% 0%, #141713 0%, transparent 60%),
+      var(--base);
+  }
+  .porthole::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px var(--rim);
+    pointer-events: none;
+    z-index: 5;
   }
 
   .panes {
-    flex: 1;
-    min-height: 0;
+    height: 100%;
     display: grid;
-    grid-template-columns: minmax(30ch, 22vw) 1fr;
+    grid-template-columns: minmax(32ch, 24vw) 1fr;
   }
 
   .panes.board { grid-template-columns: 1fr; }
 
-  .list, .entry { min-width: 0; overflow: hidden; }
+  .list, .entry { min-width: 0; min-height: 0; overflow: hidden; }
 
-  .placeholder { display: grid; place-items: center; height: 100%; }
-  .placeholder pre { margin: 0; font-size: 12px; line-height: 1.5; }
+  .placeholder { display: grid; place-items: center; height: 100%; padding: 24px; }
+  .standby { width: min(100%, 44ch); }
+  .standby h2 { margin: 0 0 18px; font-weight: 400; }
+  .standby dl {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    gap: 6px 0;
+    margin: 0;
+    font-size: 12px;
+  }
+  /* Keys keep their case: `o` and `O` are different keys. */
+  .standby dt { color: var(--light); letter-spacing: 0.08em; }
+  .standby dt:last-of-type { color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
+  .standby dd { margin: 0; color: var(--fg); }
+  .standby dd.light { color: var(--light); }
 
   .overlay {
     position: absolute;
@@ -452,9 +505,12 @@
     z-index: 30;
     display: grid;
     place-items: center;
-    padding: 24px;
-    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    padding: calc(var(--bar-h) + 8px) 24px 24px;
+    background: color-mix(in oklab, var(--ink) 72%, transparent);
+    animation: fade var(--t-base) var(--ease-glide) both;
   }
+
+  @keyframes fade { from { opacity: 0; } }
 
   .hidden { display: none; }
 
@@ -463,5 +519,6 @@
     .panes .entry { display: none; }
     .panes.reading .list { display: none; }
     .panes.reading .entry { display: block; }
+    .overlay { padding: 12px; }
   }
 </style>

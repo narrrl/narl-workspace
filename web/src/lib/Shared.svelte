@@ -25,20 +25,21 @@
 
 <main>
   {#if error}
-    <p class="error">{error}</p>
+    <p class="alarm">{error}</p>
   {:else if doc}
-    <article class="md">
-      <div class="meta faint">
-        {formatStamp(doc.created_at)} {formatWeekday(doc.created_at)}
+    <article class="md resolve">
+      <div class="meta label rule">
+        <span class="marker"></span>
+        <span>{formatStamp(doc.created_at)} {formatWeekday(doc.created_at)}</span>
         <span class="tag">shared document</span>
       </div>
       {#if doc.name.trim()}<h1>{doc.name}</h1>{/if}
       <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
       {@html renderMarkdown(doc.body, { token, key: shareKey })}
     </article>
-    <footer class="faint">— written in ~/workspace</footer>
+    <footer class="label">— written in ~/workspace</footer>
   {:else}
-    <p class="faint">loading…</p>
+    <p class="label">loading<span class="cursor">_</span></p>
   {/if}
 </main>
 
@@ -46,26 +47,24 @@
   main {
     height: 100%;
     overflow-y: auto;
-    padding: 40px 20px 20vh;
+    padding: 56px 20px 20vh;
     display: flex;
     flex-direction: column;
     align-items: center;
+    background:
+      radial-gradient(120% 70% at 30% 0%, #141713 0%, transparent 60%),
+      var(--base);
   }
 
-  article { width: min(100%, 78ch); }
+  article { width: min(100%, 72ch); }
 
-  .meta { display: flex; gap: 10px; align-items: center; font-size: 12px; margin-bottom: 12px; }
+  .meta { margin-bottom: 28px; font-size: 10px; }
+  .meta .marker { background: var(--light); }
 
-  .tag {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 0 6px;
-    color: var(--accent-dim);
-  }
+  .tag { color: var(--light); }
 
-  h1 { margin-top: 0 !important; }
-  h1::before { content: none !important; }
+  h1 { margin-top: 0 !important; font-size: 2.1em !important; }
 
-  footer { width: min(100%, 78ch); margin-top: 40px; font-size: 12px; }
-  p { width: min(100%, 78ch); }
+  footer { width: min(100%, 72ch); margin-top: 56px; font-size: 10px; }
+  p { width: min(100%, 72ch); }
 </style>

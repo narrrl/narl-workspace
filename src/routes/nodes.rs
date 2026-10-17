@@ -300,10 +300,18 @@ pub async fn create_space(
         return Err(AppError::BadRequest("a space needs a name".into()));
     }
 
-    let slug = unique_slug(&state.db, None, &slugify(name), None).await?;
+    let id = insert_space(&state.db, name, input.has_board.unwrap_or(true)).await?;
+    state.backup.signal();
+    load(&state, id).await.map(Json)
+}
+
+/// A new space, last in the switcher. Shared by the API and by `mkdir` at the
+/// root of the SFTP mount, which is why it takes a pool and not the state.
+pub async fn insert_space(db: &SqlitePool, name: &str, has_board: bool) -> AppResult<i64> {
+    let slug = unique_slug(db, None, &slugify(name), None).await?;
     let now = crate::now();
     let position: i64 = sqlx::query("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM nodes WHERE parent_id IS NULL")
-        .fetch_one(&state.db)
+        .fetch_one(db)
         .await?
         .get("next");
 
@@ -315,14 +323,13 @@ pub async fn create_space(
     .bind(name)
     .bind(&slug)
     .bind(position)
-    .bind(i64::from(input.has_board.unwrap_or(true)))
+    .bind(i64::from(has_board))
     .bind(now)
-    .fetch_one(&state.db)
+    .fetch_one(db)
     .await?
     .get("id");
 
-    state.backup.signal();
-    load(&state, id).await.map(Json)
+    Ok(id)
 }
 
 pub async fn list(

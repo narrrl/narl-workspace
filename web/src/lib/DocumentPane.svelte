@@ -66,19 +66,21 @@
 
 <section class="pane">
   <header>
-    <div class="crumb" title="{workspace.here}/{doc.slug}">
-      <span class="accent">{workspace.here}/{doc.slug}</span>
-      {#if workspace.dirty}<span class="warn">[+]</span>{/if}
+    <div class="crumb label rule" title="{workspace.here}/{doc.slug}">
+      <span class="marker" class:live={workspace.editing}></span>
+      <span class="path">{workspace.here}/{doc.slug}</span>
+      {#if workspace.dirty}<span class="dirty">modified</span>{/if}
     </div>
 
     <div class="row">
-      <div class="meta">
-        <span class="faint">{formatStamp(workspace.draft.created_at)} {formatWeekday(workspace.draft.created_at)}</span>
-        <span class="faint">·</span>
-        <span class="faint">edited {relative(doc.updated_at)}</span>
-        <span class="faint">·</span>
-        <span class="faint">{words} words</span>
-      </div>
+      <dl class="meta">
+        <dt>written</dt>
+        <dd>{formatStamp(workspace.draft.created_at)} {formatWeekday(workspace.draft.created_at)}</dd>
+        <dt>edited</dt>
+        <dd>{relative(doc.updated_at)}</dd>
+        <dt>words</dt>
+        <dd>{words}</dd>
+      </dl>
 
       <div class="actions">
         {#if isTouchDevice}
@@ -94,7 +96,7 @@
         <button class:on={doc.shared} onclick={() => runCommand(doc.shared ? 'unshare' : 'share')}>
           {doc.shared ? 'unshare' : 'share'}
         </button>
-        <button onclick={() => runCommand('d')}>delete</button>
+        <button class="danger" onclick={() => runCommand('d')}>delete</button>
         <button onclick={() => runCommand('q')}>close</button>
       </div>
     </div>
@@ -102,8 +104,9 @@
 
   {#if sharePath}
     <div class="sharebar">
-      <span class="accent">◉ public</span>
-      <span class="faint">{sharePath}</span>
+      <span class="ring"></span>
+      <span class="label public">public</span>
+      <span class="link">{sharePath}</span>
       <button onclick={() => runCommand('link')}>new link</button>
     </div>
   {/if}
@@ -111,7 +114,7 @@
   {#if workspace.editing}
     <input
       class="title"
-      placeholder="name (optional)"
+      placeholder="Untitled"
       bind:value={workspace.draft.name}
       oninput={() => workspace.touch()}
       onkeydown={(event) => {
@@ -124,7 +127,7 @@
     <div class="body">
       {#key doc.id}
         {#await import('./Editor.svelte')}
-          <div class="loading faint">loading editor…</div>
+          <div class="loading label">loading editor<span class="cursor">_</span></div>
         {:then module}
           {@const Editor = module.default}
           <Editor />
@@ -141,12 +144,12 @@
   {:else}
     <div class="body reading" bind:this={reader}>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <article class="md" onclick={follow}>
+      <article class="md resolve" onclick={follow}>
         {#if doc.name.trim()}<h1 class="entrytitle">{doc.name}</h1>{/if}
         <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
         {@html html}
         {#if !doc.body.trim()}
-          <p class="faint">this document is empty — press <span class="accent">i</span> to write.</p>
+          <p class="muted">this document is empty — press <span class="key">i</span> to write.</p>
         {/if}
       </article>
     </div>
@@ -164,74 +167,114 @@
   header {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--line);
+    gap: 10px;
+    padding: 16px 24px 12px 28px;
     flex: none;
   }
 
-  .crumb {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
+  .crumb { min-width: 0; white-space: nowrap; }
+  .crumb .marker.live { background: var(--light); }
+  .path {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    color: var(--subtle);
+    letter-spacing: 0.08em;
+    text-transform: none;
   }
+  .dirty { flex: none; color: var(--light); }
 
   .row {
     display: flex;
-    gap: 8px;
+    gap: 12px;
     align-items: center;
     justify-content: space-between;
     min-width: 0;
   }
 
-  .meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12px; min-width: 0; }
-  .warn { color: var(--warn); flex: none; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 0;
+    font-size: 11px;
+    min-width: 0;
+  }
+  .meta dt { color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
+  .meta dd { margin: 0 10px 0 0; color: var(--fg); }
+
   .actions { display: flex; gap: 4px; flex-wrap: wrap; flex: none; }
-  .actions .on { color: var(--accent); border-color: var(--accent-dim); }
+  .actions .on { color: var(--light); border-color: var(--light-dim); }
+  .actions .danger:hover { background: var(--alarm); border-color: var(--alarm); color: var(--ink); }
 
   .sharebar {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
-    padding: 4px 12px;
-    background: var(--bg-lift);
-    border-bottom: 1px solid var(--line);
+    margin: 0 24px 8px 28px;
+    padding: 6px 6px 6px 12px;
+    border: 1px solid var(--rim);
+    border-radius: var(--radius-m);
+    background: var(--surface);
     font-size: 12px;
     overflow-x: auto;
     white-space: nowrap;
     flex: none;
   }
+  .ring {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border: 1.5px solid var(--light);
+    border-radius: 999px;
+  }
+  .public { color: var(--light); }
+  .sharebar .link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 
   .title {
     flex: none;
-    margin: 8px 12px 0;
+    margin: 8px 24px 4px 28px;
+    padding: 2px 0 6px;
     background: transparent;
     border: 0;
-    border-bottom: 1px dashed var(--line);
+    border-bottom: 1px solid var(--overlay);
     border-radius: 0;
-    color: var(--accent);
-    font-weight: 700;
-    padding: 2px 4px;
+    color: var(--light);
+    font-family: var(--font-sans);
+    font-size: 24px;
+    font-weight: 300;
   }
+  .title:focus { border-bottom-color: var(--light-dim); }
 
-  .loading { padding: 16px 20px; }
+  .loading { padding: 16px 28px; }
 
   .body { flex: 1; min-height: 0; overflow: hidden; }
-  .reading { overflow-y: auto; padding: 16px 20px 30vh; }
-  .entrytitle { margin-top: 0 !important; }
-  .entrytitle::before { content: none !important; }
+  .reading { overflow-y: auto; padding: 18px 28px 30vh; }
+  .entrytitle { margin-top: 0 !important; font-size: 2.1em !important; }
+
+  .key {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--light);
+    color: var(--ink);
+  }
 
   .mobilebar {
     display: flex;
     gap: 6px;
-    padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: var(--bg-alt);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--rim);
     flex: none;
   }
   .mobilebar button { flex: 1; padding: 8px; }
+
+  @media (max-width: 760px) {
+    header { padding: 14px 16px 10px; }
+    .row { flex-direction: column; align-items: flex-start; }
+    .sharebar { margin: 0 16px 8px; }
+    .title { margin: 8px 16px 4px; }
+    .reading { padding: 14px 16px 30vh; }
+  }
 </style>

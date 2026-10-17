@@ -1,67 +1,64 @@
 /* ── palette ─────────────────────────────────────────────────────────────── */
-/* Catppuccin Mocha, accented with the palette's red. */
-:root, [data-theme='mocha'] {
-  --bg: #1e1e2e;
-  --bg-alt: #181825;
-  --bg-lift: #313244;
-  --line: #45475a;
-  --fg: #cdd6f4;
-  --fg-dim: #a6adc8;
-  --fg-faint: #6c7086;
-  --accent: #f38ba8;
-  --accent-dim: #a35b70;
-  --warn: #f9e2af;
-  --error: #eba0ac;
-  --select: #4a3543;
+/*
+ * YoRHa dark, the palette of the desktop this runs on (quickshell Theme.qml,
+ * hypr palette.lua) and of narl.io. A green-black ramp, sage-grey text, and
+ * only two colours that mean anything: `light` is focus, selection and
+ * whatever is live; `alarm` is something wrong. Nothing else carries hue.
+ */
+:root {
+  --ink: #090a08;
+  --hull: #0c0d0b;
+  --base: #0f110e;
+  --surface: #161915;
+  --surface-alt: #20241f;
+  --rim: #2a2f28;
+  --overlay: #383e35;
+  --outline: #545c52;
 
-  --font: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
-  --radius: 2px;
+  --fg: #ccd2cb;
+  --subtle: #9fa7a2;
+  --muted: #79847a;
+
+  --light: #eef1ea;
+  --light-dim: #8e978d;
+  --light-soft: #bcc1bf;
+  --alarm: #c8684f;
+
+  --font-sans: "Noto Sans Variable", "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* The frame: a bar on top, a rail on the right, a band at the bottom, and a
+     rounded opening between them that the panes are seen through. */
+  --bar-h: 40px;
+  --rail-w: 48px;
+  --status-h: 28px;
+  --frame: 8px;
+  --frame-radius: 18px;
+
+  /* Concentric with the frame: 18 outside, 12 one step in, 6 for the small things. */
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 12px;
+
+  /* Quick start, long settle, no overshoot. */
+  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-glide: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.55, 0, 0.9, 0.35);
+  --t-fast: 120ms;
+  --t-base: 220ms;
+  --t-slow: 380ms;
+  --t-lazy: 700ms;
+
   color-scheme: dark;
 }
 
-[data-theme='green'] {
-  --bg: #0b0e0d;
-  --bg-alt: #101513;
-  --bg-lift: #161d1a;
-  --line: #1e2b26;
-  --fg: #cfe3d9;
-  --fg-dim: #6f8a7f;
-  --fg-faint: #3f5049;
-  --accent: #54f2a1;
-  --accent-dim: #2f9c69;
-  --warn: #f2c14e;
-  --error: #ff6b6b;
-  --select: #1c3a2c;
-}
-
-[data-theme='amber'] {
-  --bg: #0e0b06;
-  --bg-alt: #151009;
-  --bg-lift: #1d160c;
-  --line: #2e2413;
-  --fg: #e8d5ae;
-  --fg-dim: #8d7550;
-  --fg-faint: #4d3f28;
-  --accent: #ffb454;
-  --accent-dim: #b57a25;
-  --warn: #f2c14e;
-  --error: #ff6b6b;
-  --select: #3a2a10;
-}
-
-[data-theme='ice'] {
-  --bg: #080b10;
-  --bg-alt: #0d1219;
-  --bg-lift: #121a24;
-  --line: #1c2836;
-  --fg: #cddbe8;
-  --fg-dim: #6d8399;
-  --fg-faint: #3d4f60;
-  --accent: #7cc7ff;
-  --accent-dim: #3d84b8;
-  --warn: #f2c14e;
-  --error: #ff6b6b;
-  --select: #17324a;
+@media (max-width: 767px) {
+  :root {
+    --rail-w: var(--frame);
+    --status-h: 40px;
+    --frame: 6px;
+    --frame-radius: 14px;
+  }
 }
 
 /* ── base ────────────────────────────────────────────────────────────────── */
@@ -73,10 +70,10 @@ html, body {
 }
 
 body {
-  background: var(--bg);
+  background: var(--hull);
   color: var(--fg);
-  font-family: var(--font);
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 13px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -85,118 +82,260 @@ body {
 
 #app { height: 100%; }
 
-a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-dim); }
-a:hover { background: var(--select); }
+a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--overlay);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: color var(--t-base) var(--ease-glide), text-decoration-color var(--t-base) var(--ease-glide);
+}
+a:hover { color: var(--light); text-decoration-color: var(--light); }
+a:focus-visible { background: var(--light); color: var(--ink); text-decoration: none; outline: none; }
 
+/*
+ * A button rests as a hairline and a label. Hover lifts it a step and lights
+ * the label; only focus inverts — the NieR cursor, light fill and ink text.
+ */
 button {
   font: inherit;
-  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--subtle);
   background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid color-mix(in oklab, var(--outline) 55%, transparent);
+  border-radius: var(--radius-s);
   padding: 2px 8px;
   cursor: pointer;
+  transition:
+    background-color var(--t-base) var(--ease-glide),
+    color var(--t-base) var(--ease-glide),
+    border-color var(--t-base) var(--ease-glide);
 }
-button:hover { color: var(--accent); border-color: var(--accent-dim); }
-button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+button:hover { background: var(--surface-alt); color: var(--light); border-color: var(--outline); }
+button:active { transform: translateY(1px); }
+button:focus-visible { background: var(--light); color: var(--ink); border-color: var(--light); outline: none; }
+button:disabled { color: var(--muted); cursor: default; }
 
 input, textarea {
   font: inherit;
   color: var(--fg);
-  background: var(--bg-alt);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--rim);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  transition: border-color var(--t-base) var(--ease-glide);
 }
-input::placeholder { color: var(--fg-faint); }
+input:focus, textarea:focus { border-color: var(--light-dim); outline: none; }
+input::placeholder { color: var(--muted); }
 
-::selection { background: var(--select); color: var(--fg); }
+::selection { background: var(--light); color: var(--ink); }
 
 /* thin, unobtrusive scrollbars everywhere */
-* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--overlay) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: var(--line); }
+*::-webkit-scrollbar-thumb { background: var(--overlay); border-radius: 4px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
-.dim { color: var(--fg-dim); }
-.faint { color: var(--fg-faint); }
-.accent { color: var(--accent); }
-.error { color: var(--error); }
+.subtle { color: var(--subtle); }
+.muted { color: var(--muted); }
+.light { color: var(--light); }
+.alarm { color: var(--alarm); }
+
+/* ── vocabulary ──────────────────────────────────────────────────────────── */
+/* A caption: small, mono, upper case and spaced out. */
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A caption followed by a hairline that runs to the end of the row. */
+.rule {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.rule::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--overlay);
+}
+
+/* The square that says "this one": overlay at rest, light when it matters. */
+.marker {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  background: var(--overlay);
+  transition: background-color var(--t-base) var(--ease-glide);
+}
+
+.display {
+  font-family: var(--font-sans);
+  font-weight: 200;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--light);
+}
+
+/* The blinking block after "standing by". */
+.cursor { margin-left: 2px; animation: blink 1.1s steps(1) infinite; }
+
+/* ── motion ──────────────────────────────────────────────────────────────── */
+@keyframes resolve {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Things settle into place; `--i` staggers a group of them. */
+.resolve {
+  animation: resolve var(--t-lazy) var(--ease-snap) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* ── rendered markdown ───────────────────────────────────────────────────── */
-.md { max-width: 78ch; }
+/* Reading is set in the sans; anything that is code stays mono. */
+.md {
+  max-width: 72ch;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--fg);
+}
 .md > :first-child { margin-top: 0; }
 .md h1, .md h2, .md h3, .md h4 {
-  color: var(--accent);
-  font-size: 1em;
-  font-weight: 700;
-  margin: 1.6em 0 0.6em;
-  letter-spacing: 0.02em;
+  color: var(--light);
+  font-weight: 400;
+  line-height: 1.3;
+  margin: 1.8em 0 0.6em;
 }
-.md h1::before { content: '# '; color: var(--fg-faint); }
-.md h2::before { content: '## '; color: var(--fg-faint); }
-.md h3::before { content: '### '; color: var(--fg-faint); }
-.md h4::before { content: '#### '; color: var(--fg-faint); }
+.md h1 { font-size: 1.7em; font-weight: 300; letter-spacing: 0.01em; }
+.md h2 {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 1.25em;
+}
+.md h2::after { content: ''; height: 1px; flex: 1; background: var(--overlay); }
+.md h3 { font-size: 1.05em; font-weight: 500; }
+.md h4 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
 .md p { margin: 0 0 1em; }
-.md ul, .md ol { margin: 0 0 1em; padding-left: 2ch; }
-.md li { margin: 0.15em 0; }
-.md ul { list-style: none; }
-.md ul > li::before { content: '- '; color: var(--fg-faint); margin-left: -2ch; }
+.md strong { color: var(--light); font-weight: 600; }
+.md ul, .md ol { margin: 0 0 1em; padding-left: 1.6em; }
+.md li { margin: 0.2em 0; }
+.md li::marker { color: var(--muted); }
+.md ul { list-style: none; padding-left: 1.4em; }
+.md ul > li { position: relative; }
+.md ul > li::before {
+  content: '';
+  position: absolute;
+  left: -1.1em;
+  top: 0.72em;
+  width: 5px;
+  height: 5px;
+  background: var(--overlay);
+}
+.md ul > li:has(> input[type='checkbox'])::before { content: none; }
 .md blockquote {
   margin: 0 0 1em;
-  padding-left: 1.5ch;
-  border-left: 2px solid var(--accent-dim);
-  color: var(--fg-dim);
+  padding-left: 1.2em;
+  border-left: 1px solid var(--outline);
+  color: var(--subtle);
 }
 .md code {
-  background: var(--bg-lift);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0 4px;
-  font-size: 0.92em;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface);
+  border: 1px solid var(--rim);
+  border-radius: 4px;
+  padding: 0 5px;
 }
 .md pre {
-  background: var(--bg-alt);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--rim);
+  border-radius: var(--radius-s);
+  padding: 12px 14px;
   overflow-x: auto;
   margin: 0 0 1em;
 }
-.md pre code { background: none; border: 0; padding: 0; }
-.md hr { border: 0; border-top: 1px dashed var(--line); margin: 2em 0; }
+.md pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.md hr { border: 0; border-top: 1px solid var(--overlay); margin: 2.4em 0; }
 .md img, .md video {
   max-width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid var(--rim);
+  border-radius: var(--radius-s);
   display: block;
   margin: 0 0 1em;
 }
 .md audio { width: 100%; margin: 0 0 1em; }
-.md table { border-collapse: collapse; margin: 0 0 1em; display: block; overflow-x: auto; }
-.md th, .md td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
-.md th { color: var(--accent); }
-.md input[type='checkbox'] { accent-color: var(--accent-dim); }
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  display: block;
+  overflow-x: auto;
+  font-size: 14px;
+}
+.md th, .md td { border-bottom: 1px solid var(--rim); padding: 6px 14px 6px 0; text-align: left; }
+.md th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom-color: var(--overlay);
+}
+.md input[type='checkbox'] { accent-color: var(--light-dim); margin-right: 0.5em; }
 
 /* ── codemirror ──────────────────────────────────────────────────────────── */
 .cm-editor { height: 100%; background: transparent; }
 .cm-editor.cm-focused { outline: none; }
 .cm-scroller {
-  font-family: var(--font) !important;
+  font-family: var(--font-mono) !important;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   padding-bottom: 40vh;
 }
-.cm-content { caret-color: var(--accent); }
-.cm-gutters { background: transparent; border: 0; color: var(--fg-faint); }
-.cm-editor .cm-activeLineGutter { background: transparent; color: var(--fg-dim); }
+.cm-content { caret-color: var(--light); }
+.cm-gutters { background: transparent; border: 0; color: var(--muted); }
+.cm-editor .cm-activeLineGutter { background: transparent; color: var(--subtle); }
 /*
  * CodeMirror injects its own `.cm-activeLine` rule (a light blue #cceeff44)
  * into the document after this stylesheet, so an equally specific selector
  * loses and the current line renders as a bright box. Qualify it to win.
  */
-.cm-editor .cm-activeLine { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-.cm-selectionBackground, .cm-content ::selection { background: var(--select) !important; }
+.cm-editor .cm-activeLine { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+.cm-selectionBackground, .cm-content ::selection { background: var(--overlay) !important; }
 
 /*
  * Insert mode: a 2px bar reads far better than the browser's hairline caret.
@@ -207,29 +346,29 @@ input::placeholder { color: var(--fg-faint); }
 .cm-editor .cm-cursor,
 .cm-editor .cm-cursor-primary,
 .cm-editor .cm-dropCursor {
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--light);
   border-right: 0;
   margin-left: -1px;
 }
-.cm-editor .cm-cursor-secondary { border-left-color: var(--accent-dim); }
+.cm-editor .cm-cursor-secondary { border-left-color: var(--light-dim); }
 
 /*
  * Normal mode: the vim plugin paints the character *inside* the block cursor,
- * inheriting its syntax colour, so an accent-coloured glyph — a heading's `#`,
- * a link — disappears against the accent-coloured block. Force the glyph to the
- * background colour instead, which is legible whatever the token was.
+ * inheriting its syntax colour, so a light glyph — a heading's `#`, a link —
+ * disappears against the light block. Force the glyph to ink instead, which
+ * is legible whatever the token was: the same inversion as everywhere else.
  */
 .cm-fat-cursor,
 .cm-animate-fat-cursor {
-  background: var(--accent) !important;
-  color: var(--bg) !important;
+  background: var(--light) !important;
+  color: var(--ink) !important;
   opacity: 1 !important;
 }
-.cm-fat-cursor.cm-cursor-secondary { background: var(--accent-dim) !important; }
+.cm-fat-cursor.cm-cursor-secondary { background: var(--light-dim) !important; }
 /* Unfocused, the plugin hardcodes a pink outline; keep it on-theme. */
 .cm-editor:not(.cm-focused) .cm-fat-cursor {
   background: none !important;
-  outline: 1px solid var(--accent-dim) !important;
+  outline: 1px solid var(--light-dim) !important;
   color: transparent !important;
 }
 /* The panel and vim `:` prompt are themed in Editor.svelte — see the note there. */

@@ -27,16 +27,16 @@
   let view: EditorView | undefined
 
   const markdownHighlight = HighlightStyle.define([
-    { tag: tags.heading, color: 'var(--accent)', fontWeight: '700' },
-    { tag: tags.strong, color: 'var(--fg)', fontWeight: '700' },
-    { tag: tags.emphasis, color: 'var(--fg)', fontStyle: 'italic' },
-    { tag: tags.link, color: 'var(--accent)' },
-    { tag: tags.url, color: 'var(--accent-dim)' },
-    { tag: tags.monospace, color: 'var(--warn)' },
-    { tag: tags.quote, color: 'var(--fg-dim)', fontStyle: 'italic' },
-    { tag: tags.list, color: 'var(--accent-dim)' },
-    { tag: tags.contentSeparator, color: 'var(--fg-faint)' },
-    { tag: tags.processingInstruction, color: 'var(--fg-faint)' },
+    { tag: tags.heading, color: 'var(--light)', fontWeight: '600' },
+    { tag: tags.strong, color: 'var(--light)', fontWeight: '700' },
+    { tag: tags.emphasis, color: 'var(--subtle)', fontStyle: 'italic' },
+    { tag: tags.link, color: 'var(--light)', textDecoration: 'underline', textDecorationColor: 'var(--overlay)' },
+    { tag: tags.url, color: 'var(--light-dim)' },
+    { tag: tags.monospace, color: 'var(--light-soft)', backgroundColor: 'var(--surface)' },
+    { tag: tags.quote, color: 'var(--subtle)', fontStyle: 'italic' },
+    { tag: tags.list, color: 'var(--light-dim)' },
+    { tag: tags.contentSeparator, color: 'var(--muted)' },
+    { tag: tags.processingInstruction, color: 'var(--muted)' },
   ])
 
   /*
@@ -49,23 +49,23 @@
   const editorTheme = EditorView.theme(
     {
       '&': { color: 'var(--fg)', backgroundColor: 'transparent', height: '100%' },
-      '.cm-content': { padding: '12px 16px', maxWidth: '90ch' },
+      '.cm-content': { padding: '12px 28px', maxWidth: '90ch' },
       '.cm-line': { padding: '0' },
-      '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--accent)' },
+      '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--light)' },
       '.cm-panels': {
-        backgroundColor: 'var(--bg-alt)',
+        backgroundColor: 'var(--hull)',
         color: 'var(--fg)',
-        borderColor: 'var(--line)',
+        borderColor: 'var(--rim)',
       },
-      '.cm-panels-bottom': { borderTop: '1px solid var(--line)' },
+      '.cm-panels-bottom': { borderTop: '1px solid var(--rim)' },
       /*
        * The `:` prompt is a bare text node in the panel; the input follows it.
        * The input is an inline-block whose baseline sits below the text node's,
        * so the two are laid out as flex items instead of aligned by baseline.
        */
       '.cm-vim-panel': {
-        padding: '2px 8px',
-        color: 'var(--accent)',
+        padding: '4px 12px',
+        color: 'var(--light)',
         display: 'flex',
         alignItems: 'center',
       },
@@ -73,8 +73,8 @@
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
-        color: 'var(--accent)',
-        caretColor: 'var(--accent)',
+        color: 'var(--light)',
+        caretColor: 'var(--light)',
         flex: '1',
       },
     },

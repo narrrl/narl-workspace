@@ -21,8 +21,7 @@
 
 <div class="sheet">
   <header>
-    <span class="accent">:media</span>
-    <span class="faint">{workspace.media.length} files</span>
+    <span class="label rule"><span class="marker"></span><span class="title">media</span> {workspace.media.length} files</span>
     <button onclick={() => (workspace.overlay = 'none')}>esc</button>
   </header>
 
@@ -33,13 +32,13 @@
           {#if file.mime.startsWith('image/')}
             <img src={file.url} alt={file.filename} loading="lazy" />
           {:else}
-            <span class="faint">{file.mime.split('/')[0]}</span>
+            <span class="label">{file.mime.split('/')[0]}</span>
           {/if}
         </div>
 
         <div class="info">
           <span class="name">{file.filename}</span>
-          <span class="faint">
+          <span class="muted">
             {formatBytes(file.size)} · {formatStamp(file.created_at)} ·
             {usage(file.node_ids)}
           </span>
@@ -55,50 +54,65 @@
             >
           {/if}
           <button onclick={() => workspace.copy(location.origin + file.url)}>copy url</button>
-          <button onclick={() => remove(file.id, file.filename, file.node_ids)}>rm</button>
+          <button class="danger" onclick={() => remove(file.id, file.filename, file.node_ids)}>rm</button>
         </div>
       </li>
     {:else}
-      <li class="faint">nothing uploaded yet — attach a file from the editor.</li>
+      <li class="muted">nothing uploaded yet — attach a file from the editor.</li>
     {/each}
   </ul>
 </div>
 
 <style>
+  /* A free-standing panel, as the desktop draws one: hull, one rim, the frame's radius. */
   .sheet {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    width: min(100%, 90ch);
+    gap: 18px;
     max-height: 100%;
-    background: var(--bg-alt);
-    border: 1px solid var(--accent-dim);
-    border-radius: var(--radius);
-    padding: 14px 16px;
-    overflow: hidden;
+    background: color-mix(in oklab, var(--hull) 97%, transparent);
+    border: 1px solid var(--surface-alt);
+    border-radius: var(--frame-radius);
+    padding: 20px 24px;
+    animation: resolve var(--t-slow) var(--ease-snap) both;
   }
 
-  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header .label { flex: 1; }
+  header .marker { background: var(--light); }
+  header .title { color: var(--light); }
+  .sheet { width: min(100%, 92ch); overflow: hidden; }
 
   ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 
-  li { display: flex; align-items: center; gap: 12px; padding: 4px; border-bottom: 1px solid var(--line); }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 8px;
+    border-radius: var(--radius-m);
+    transition: background-color var(--t-base) var(--ease-glide);
+  }
+  li:hover { background: var(--surface); }
 
   .thumb {
-    width: 48px;
-    height: 36px;
+    width: 52px;
+    height: 38px;
     flex: none;
     display: grid;
     place-items: center;
-    background: var(--bg);
-    border: 1px solid var(--line);
+    background: var(--surface);
+    border: 1px solid var(--rim);
+    border-radius: var(--radius-s);
     overflow: hidden;
-    font-size: 10px;
   }
+  .thumb .label { font-size: 9px; letter-spacing: 0.14em; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
 
   .info { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 12px; }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--font-sans); font-size: 14px; }
+  .muted { font-size: 11px; }
 
   .actions { display: flex; gap: 4px; flex: none; }
+  .danger:hover { background: var(--alarm); border-color: var(--alarm); color: var(--ink); }
 </style>
