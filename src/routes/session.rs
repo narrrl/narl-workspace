@@ -25,13 +25,13 @@ pub async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<impl IntoResponse> {
-    state.login_throttle.check().map_err(|wait| {
+    let attempt = state.login_throttle.begin().map_err(|wait| {
         tracing::warn!("login refused, {wait}s of backoff remaining");
         AppError::TooManyRequests(wait)
     })?;
 
     if !auth::credentials_match(&state.config, &body.username, &body.password) {
-        let failures = state.login_throttle.record_failure();
+        let failures = attempt.failed();
         // Worth a mail once someone is past guessing and into trying.
         if failures > FREE_ATTEMPTS {
             state.notify.note_failed_logins(failures).await;
@@ -39,7 +39,7 @@ pub async fn login(
         return Err(AppError::Unauthorized);
     }
 
-    state.login_throttle.record_success();
+    attempt.succeeded();
     let user_agent = headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
@@ -57,9 +57,13 @@ pub async fn login(
     ))
 }
 
-pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
-    // Leaving is the moment the vault should not outlive.
-    state.vault.lock();
+pub async fn logout(session: Option<Session>, State(state): State<AppState>) -> impl IntoResponse {
+    // Leaving is the moment the vault should not outlive — but only the owner
+    // leaving: anyone may clear a cookie they do not have, and that must not
+    // be a way to shut the vault on the one who does.
+    if session.is_some() {
+        state.vault.lock();
+    }
     (
         StatusCode::OK,
         [(header::SET_COOKIE, auth::clear_cookie(&state.config))],

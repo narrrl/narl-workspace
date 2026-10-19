@@ -129,7 +129,12 @@ async fn main() -> Result<()> {
         });
     }
 
-    serve(bind, max_upload, state).await
+    let db = state.db.clone();
+    serve(bind, max_upload, state).await?;
+    // Checkpoints the write-ahead log, so what was written is in diary.db
+    // itself and not only beside it.
+    db.close().await;
+    Ok(())
 }
 
 /// Open the workspace database and bring it up to date. Both the server and the
@@ -162,9 +167,9 @@ async fn open_db(config: &Config) -> Result<sqlx::SqlitePool> {
 
 async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -> Result<()> {
     let app = Router::new()
-        .nest("/api", routes::api_router())
+        .nest("/api", routes::api_router(max_upload))
         .fallback(static_files::handler)
-        .layer(axum::extract::DefaultBodyLimit::max(max_upload + 1024 * 1024))
+        .layer(axum::middleware::from_fn(auth::same_origin))
         .layer(CompressionLayer::new())
         .layer(security_headers())
         .layer(TraceLayer::new_for_http())
@@ -176,11 +181,25 @@ async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -
 
     tracing::info!("narl-workspace listening on http://{bind}");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let server = axum::serve(listener, app).with_graceful_shutdown(async {
+        shutdown_signal().await;
+        tracing::info!("shutting down");
+    });
+    // Requests in flight get a few seconds to finish; an upload that would
+    // take longer is cut off rather than holding the process past the point
+    // where a supervisor stops asking and kills it.
+    tokio::select! {
+        result = server => result?,
+        () = async {
+            shutdown_signal().await;
+            tokio::time::sleep(SHUTDOWN_GRACE).await;
+        } => tracing::warn!("requests still open after {SHUTDOWN_GRACE:?}, closing anyway"),
+    }
     Ok(())
 }
+
+/// Below the ten seconds `docker stop` waits before it sends SIGKILL.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Content-Security-Policy for the app shell. `unsafe-inline` is granted to
 /// styles only, because CodeMirror injects its theme as a <style> element at
@@ -209,7 +228,30 @@ fn security_headers() -> (HeaderLayer, HeaderLayer, HeaderLayer, HeaderLayer) {
     )
 }
 
+/// Ctrl-C at a terminal, SIGTERM from anything that supervises the process —
+/// docker, systemd. In a container this is PID 1, and the kernel gives PID 1 no
+/// default action for SIGTERM: unless it is handled here, it is ignored.
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
-    tracing::info!("shutting down");
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                tracing::warn!("cannot listen for SIGTERM: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate => {}
+    }
 }

@@ -422,7 +422,13 @@ pub async fn stream_media(state: &AppState, id: &str, private: bool) -> AppResul
         [
             (header::CONTENT_TYPE, mime),
             (header::CONTENT_LENGTH, size.to_string()),
-            (header::CACHE_CONTROL, "private, max-age=31536000".to_string()),
+            // An upload never changes under its id, so the browser may keep
+            // it — unless it was sealed: the plaintext would then sit in the
+            // browser's cache long after the vault had been shut.
+            (
+                header::CACHE_CONTROL,
+                if encrypted { "no-store" } else { "private, max-age=31536000" }.to_string(),
+            ),
             (
                 header::CONTENT_DISPOSITION,
                 format!(
@@ -470,12 +476,27 @@ async fn open_stream(
     }))
 }
 
+/// The id as it is stored and as it names the file on disk, or `None` for
+/// anything that is not a uuid. Every id that reaches the filesystem from a
+/// request goes through here first: `Path` is percent-decoded, so an id is
+/// otherwise free to be `../diary.db`.
+pub(crate) fn canonical_id(id: &str) -> Option<String> {
+    Uuid::try_parse(id).ok().map(|uuid| uuid.to_string())
+}
+
 pub async fn delete_media(state: &AppState, id: &str) -> AppResult<()> {
-    sqlx::query("DELETE FROM media WHERE id = ?1")
-        .bind(id)
+    let id = canonical_id(id).ok_or(AppError::NotFound)?;
+    let deleted = sqlx::query("DELETE FROM media WHERE id = ?1")
+        .bind(&id)
         .execute(&state.db)
-        .await?;
-    let path = state.config.uploads_dir().join(id);
+        .await?
+        .rows_affected();
+    // No row, no file of ours: nothing on disk is removed on the word of a
+    // request alone.
+    if deleted == 0 {
+        return Err(AppError::NotFound);
+    }
+    let path = state.config.uploads_dir().join(&id);
     if let Err(e) = tokio::fs::remove_file(&path).await {
         if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
@@ -565,7 +586,17 @@ fn urlencode(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_mime;
+    use super::{canonical_id, sanitize_mime};
+
+    #[test]
+    fn only_a_uuid_is_an_id() {
+        let id = "0b9e3c1a-5f2d-4e7a-9c3b-1d2e3f4a5b6c";
+        assert_eq!(canonical_id(id).as_deref(), Some(id));
+        assert_eq!(canonical_id(&id.to_uppercase()).as_deref(), Some(id));
+        for bad in ["../diary.db", "/etc/passwd", "", "..", "0b9e3c1a/../../x"] {
+            assert_eq!(canonical_id(bad), None, "{bad:?}");
+        }
+    }
 
     #[test]
     fn keeps_types_that_cannot_execute() {

@@ -438,6 +438,14 @@ re-run `:share` on those entries to publish them again.
 Uploaded files are only ever served as types that cannot execute — anything else
 is handed back as an opaque download.
 
+A write that a browser says came from another origin — `Sec-Fetch-Site`, or
+`Origin` against `Host` where a browser is too old to send that — is refused,
+so a proxy must pass the `Host` header through unchanged (traefik and nginx's
+`proxy_set_header Host $host` both do). Only the upload routes accept a body as
+large as `WORKSPACE_MAX_UPLOAD_MB`; everything else stops at 16 MiB, and the
+login at 16 KiB, before anyone has proved who they are. `SIGTERM` gets in-flight
+requests eight seconds to finish, inside the ten `docker stop` waits.
+
 ### Docker
 
 ```sh

@@ -3,6 +3,8 @@ services:
     build: .
     image: narl-workspace:latest
     restart: unless-stopped
+    # tini as PID 1: forwards SIGTERM and reaps anything the binary leaves behind.
+    init: true
     env_file:
       - .env
     environment:

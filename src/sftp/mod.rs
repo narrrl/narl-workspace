@@ -38,13 +38,18 @@ fn load_or_create_host_key(path: &std::path::Path) -> Result<PrivateKey> {
             .with_context(|| format!("could not read {}", path.display()));
     }
     let key = PrivateKey::random(&mut rand10::rng(), Algorithm::Ed25519)?;
-    key.write_openssh_file(path, russh::keys::ssh_key::LineEnding::LF)
-        .with_context(|| format!("could not write {}", path.display()))?;
+    let pem = key.to_openssh(russh::keys::ssh_key::LineEnding::LF)?;
+    // Created owner-only rather than narrowed afterwards, so the private key
+    // is never on disk under the default umask, not even for a moment.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("could not write {}", path.display()))?;
+    std::io::Write::write_all(&mut file, pem.as_bytes())?;
+    file.sync_all()?;
     Ok(key)
 }
 

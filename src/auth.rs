@@ -1,6 +1,11 @@
+use std::convert::Infallible;
+
 use axum::{
-    extract::FromRequestParts,
-    http::{header, request::Parts},
+    extract::{FromRequestParts, OptionalFromRequestParts, Request},
+    http::{header, request::Parts, HeaderMap, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use hmac::{Hmac, Mac};
@@ -97,9 +102,66 @@ impl FromRequestParts<AppState> for Session {
     }
 }
 
+/// For a handler that behaves differently for a caller who is logged in, but
+/// must also answer one who is not.
+impl OptionalFromRequestParts<AppState> for Session {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(<Session as FromRequestParts<AppState>>::from_request_parts(parts, state)
+            .await
+            .ok())
+    }
+}
+
+/// Refuse a write that another site's page asked the browser to make.
+/// `SameSite=Lax` already keeps the cookie off a cross-site POST, but not off
+/// one from a sibling subdomain, which counts as the same site — and a
+/// multipart form needs no preflight to get sent. A browser says where a
+/// request came from; a request that says nothing is not from a browser page
+/// and carries no ambient cookie worth stealing.
+pub async fn same_origin(request: Request, next: Next) -> Response {
+    if !request.method().is_safe() && !is_same_origin(request.headers()) {
+        tracing::warn!(
+            "refused a cross-origin {} {}",
+            request.method(),
+            request.uri().path()
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "cross-origin request refused" })),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
+fn is_same_origin(headers: &HeaderMap) -> bool {
+    // Every current browser sends this, and it cannot be set from a page.
+    if let Some(site) = headers.get("sec-fetch-site") {
+        return matches!(site.as_bytes(), b"same-origin" | b"none");
+    }
+    // Older browsers: the Origin they send against the host they asked.
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let origin_host = origin
+        .to_str()
+        .ok()
+        .and_then(|origin| origin.split_once("://"))
+        .map(|(_, host)| host);
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok());
+    matches!((origin_host, host), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{credentials_match, issue_token, verify_token};
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::{credentials_match, is_same_origin, issue_token, verify_token};
     use crate::config::{BackupConfig, Config, MailConfig, SftpConfig};
 
     fn config(session_days: i64) -> Config {
@@ -187,5 +249,28 @@ mod tests {
         assert!(!credentials_match(&config, "narl", "hunter22"));
         assert!(!credentials_match(&config, "nar", "hunter2"));
         assert!(!credentials_match(&config, "", ""));
+    }
+
+    fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, HeaderValue::from_static(value));
+        }
+        map
+    }
+
+    #[test]
+    fn only_same_origin_writes_get_through() {
+        assert!(is_same_origin(&headers(&[("sec-fetch-site", "same-origin")])));
+        assert!(!is_same_origin(&headers(&[("sec-fetch-site", "same-site")])));
+        assert!(!is_same_origin(&headers(&[("sec-fetch-site", "cross-site")])));
+
+        let host = ("host", "diary.example.org");
+        assert!(is_same_origin(&headers(&[("origin", "https://diary.example.org"), host])));
+        assert!(!is_same_origin(&headers(&[("origin", "https://evil.example.org"), host])));
+        assert!(!is_same_origin(&headers(&[("origin", "null"), host])));
+
+        // curl, the CLI, a script with its own credentials.
+        assert!(is_same_origin(&headers(&[host])));
     }
 }

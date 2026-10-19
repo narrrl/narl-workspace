@@ -654,7 +654,10 @@ pub async fn remove(
     }
 
     for media_id in orphans {
-        media::delete_media(&state, &media_id).await?;
+        match media::delete_media(&state, &media_id).await {
+            Ok(()) | Err(AppError::NotFound) => {}
+            Err(e) => return Err(e),
+        }
     }
 
     state.backup.signal();

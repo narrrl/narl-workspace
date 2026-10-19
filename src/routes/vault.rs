@@ -7,6 +7,7 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     state::AppState,
+    throttle::Attempt,
     vault::{Status, Unlock, MIN_PASSWORD},
 };
 
@@ -53,21 +54,21 @@ pub async fn setup(
 
 /// Wrong guesses are slowed down exactly like logins. Argon2 already makes
 /// each one cost a fraction of a second; this makes a run of them cost minutes.
-fn throttle(state: &AppState) -> AppResult<()> {
-    state.vault_throttle.check().map_err(|wait| {
+fn throttle(state: &AppState) -> AppResult<Attempt<'_>> {
+    state.vault_throttle.begin().map_err(|wait| {
         tracing::warn!("vault unlock refused, {wait}s of backoff remaining");
         AppError::TooManyRequests(wait)
     })
 }
 
-fn answer(state: &AppState, outcome: Unlock) -> AppResult<()> {
+fn answer(attempt: Attempt<'_>, outcome: Unlock) -> AppResult<()> {
     match outcome {
         Unlock::Opened => {
-            state.vault_throttle.record_success();
+            attempt.succeeded();
             Ok(())
         }
         Unlock::WrongPassword => {
-            state.vault_throttle.record_failure();
+            attempt.failed();
             Err(AppError::BadRequest("wrong vault password".into()))
         }
         Unlock::NotConfigured => Err(AppError::BadRequest(
@@ -81,8 +82,8 @@ pub async fn unlock(
     State(state): State<AppState>,
     Json(input): Json<PasswordInput>,
 ) -> AppResult<Json<Status>> {
-    throttle(&state)?;
-    answer(&state, state.vault.unlock(input.password).await?)?;
+    let attempt = throttle(&state)?;
+    answer(attempt, state.vault.unlock(input.password).await?)?;
     Ok(Json(state.vault.status().await?))
 }
 
@@ -96,9 +97,9 @@ pub async fn change_password(
     State(state): State<AppState>,
     Json(input): Json<ChangeInput>,
 ) -> AppResult<Json<Status>> {
-    throttle(&state)?;
     strong_enough(&input.password)?;
-    answer(&state, state.vault.change_password(input.current, input.password).await?)?;
+    let attempt = throttle(&state)?;
+    answer(attempt, state.vault.change_password(input.current, input.password).await?)?;
     tracing::info!("vault password changed");
     state.backup.signal();
     Ok(Json(state.vault.status().await?))

@@ -136,9 +136,11 @@ fn percent_decode(value: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // Hex digits are read as bytes, never as a slice of the string: the
+        // two after a `%` may well be the first half of a multi-byte character.
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(&value[i + 1..i + 3], 16) {
-                out.push(byte);
+            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(hi << 4 | lo);
                 i += 3;
                 continue;
             }
@@ -147,6 +149,10 @@ fn percent_decode(value: &str) -> String {
         i += 1;
     }
     String::from_utf8(out).unwrap_or_else(|_| value.to_string())
+}
+
+fn hex(digit: u8) -> Option<u8> {
+    (digit as char).to_digit(16).map(|d| d as u8)
 }
 
 /// Split a link target into the part that names a file and the `#fragment` or
@@ -679,8 +685,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        expand_zip, is_markdown, join_relative, normalize_path, rewrite_links, split_target,
-        split_title, Content, Landed,
+        expand_zip, is_markdown, join_relative, normalize_path, percent_decode, rewrite_links,
+        split_target, split_title, Content, Landed,
     };
 
     /// A zip with a note and a 4 KiB blob in it, written to `dir/in.zip`.
@@ -777,6 +783,17 @@ mod tests {
         assert!(split_target("/api/media/x").is_none());
         assert!(split_target("mailto:someone@example.org").is_none());
         assert_eq!(split_target("a%20b.md#top"), Some(("a b.md".into(), "#top")));
+    }
+
+    #[test]
+    fn escapes_next_to_multibyte_characters_do_not_panic() {
+        assert_eq!(percent_decode("%aé"), "%aé");
+        assert_eq!(percent_decode("é%"), "é%");
+        assert_eq!(percent_decode("%é"), "%é");
+        assert_eq!(percent_decode("a%20"), "a ");
+        assert_eq!(percent_decode("%C3%A9"), "é");
+        // Bytes that do not decode to UTF-8 leave the target as it was written.
+        assert_eq!(percent_decode("%FF"), "%FF");
     }
 
     #[test]

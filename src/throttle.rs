@@ -16,6 +16,10 @@ pub struct LoginThrottle {
 struct State {
     failures: u32,
     next_allowed: i64,
+    /// An attempt has been let through and not yet settled. Checking and
+    /// recording are otherwise two steps, and a burst of guesses sent at once
+    /// would all pass the check before the first failure was written down.
+    in_flight: bool,
 }
 
 /// Wrong passwords happen; the first few are answered at full speed.
@@ -31,32 +35,63 @@ fn delay_after(failures: u32) -> i64 {
 }
 
 impl LoginThrottle {
-    /// `Err(seconds)` when this attempt is too soon after the last failure.
-    pub fn check(&self) -> Result<(), i64> {
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+    /// Let one attempt through, or `Err(seconds)` to wait first. Attempts go
+    /// one at a time: a second one while the first is still being decided is
+    /// told to come back in a second, so guesses cannot be made in parallel —
+    /// and neither can the Argon2 runs behind a vault password, each of which
+    /// takes 64 MiB.
+    pub fn begin(&self) -> Result<Attempt<'_>, i64> {
+        let mut state = self.lock();
+        if state.in_flight {
+            return Err(1);
+        }
         match state.next_allowed - crate::now() {
             wait if wait > 0 => Err(wait),
-            _ => Ok(()),
+            _ => {
+                state.in_flight = true;
+                Ok(Attempt { throttle: self })
+            }
         }
     }
 
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// One attempt that [`LoginThrottle::begin`] let through. Dropping it without
+/// a verdict — a request that failed for some other reason — counts for
+/// nothing either way.
+pub struct Attempt<'a> {
+    throttle: &'a LoginThrottle,
+}
+
+impl Attempt<'_> {
     /// Returns how many failures have piled up, so the caller can decide
     /// whether this one is worth telling anybody about.
-    pub fn record_failure(&self) -> u32 {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+    pub fn failed(self) -> u32 {
+        let mut state = self.throttle.lock();
         state.failures = state.failures.saturating_add(1);
         state.next_allowed = crate::now() + delay_after(state.failures);
         state.failures
     }
 
-    pub fn record_success(&self) {
-        *self.state.lock().unwrap_or_else(|e| e.into_inner()) = State::default();
+    pub fn succeeded(self) {
+        let mut state = self.throttle.lock();
+        state.failures = 0;
+        state.next_allowed = 0;
+    }
+}
+
+impl Drop for Attempt<'_> {
+    fn drop(&mut self) {
+        self.throttle.lock().in_flight = false;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{delay_after, LoginThrottle, MAX_DELAY};
+    use super::{delay_after, Attempt, LoginThrottle, MAX_DELAY};
 
     #[test]
     fn the_first_few_mistakes_are_free() {
@@ -77,11 +112,21 @@ mod tests {
     #[test]
     fn a_correct_password_clears_the_debt() {
         let throttle = LoginThrottle::default();
+        // Made directly: past the free attempts `begin` would make them wait.
         for _ in 0..10 {
-            throttle.record_failure();
+            Attempt { throttle: &throttle }.failed();
         }
-        assert!(throttle.check().is_err());
-        throttle.record_success();
-        assert!(throttle.check().is_ok());
+        assert!(throttle.begin().is_err());
+        Attempt { throttle: &throttle }.succeeded();
+        assert!(throttle.begin().is_ok());
+    }
+
+    #[test]
+    fn attempts_go_one_at_a_time() {
+        let throttle = LoginThrottle::default();
+        let first = throttle.begin().unwrap();
+        assert_eq!(throttle.begin().err(), Some(1));
+        drop(first);
+        assert!(throttle.begin().is_ok());
     }
 }

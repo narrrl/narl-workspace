@@ -145,11 +145,13 @@ fn split_heading(text: &str) -> (Option<String>, String) {
 }
 
 fn write_at(buf: &mut Vec<u8>, offset: u64, data: &[u8]) -> SftpResult<()> {
+    // Checked before anything is cast: an offset is the client's to choose,
+    // and one near `u64::MAX` must not wrap past the size limit.
+    let end = offset
+        .checked_add(data.len() as u64)
+        .filter(|&end| end <= MAX_FILE as u64)
+        .ok_or(StatusCode::Failure)? as usize;
     let offset = offset as usize;
-    let end = offset + data.len();
-    if end > MAX_FILE {
-        return Err(StatusCode::Failure);
-    }
     if buf.len() < end {
         buf.resize(end, 0);
     }
@@ -891,7 +893,17 @@ mod tests {
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
-    use super::{doc_slug, normalize, render_doc, segments, split_heading, SpaceFs};
+    use super::{doc_slug, normalize, render_doc, segments, split_heading, write_at, SpaceFs, MAX_FILE};
+
+    #[test]
+    fn writes_past_the_limit_fail_instead_of_wrapping() {
+        let mut buf = Vec::new();
+        assert!(write_at(&mut buf, u64::MAX - 1, b"abc").is_err());
+        assert!(write_at(&mut buf, MAX_FILE as u64, b"a").is_err());
+        assert!(buf.is_empty());
+        write_at(&mut buf, 2, b"ab").unwrap();
+        assert_eq!(buf, b"\0\0ab");
+    }
 
     #[test]
     fn dot_dot_climbs_and_stops_at_the_root() {
