@@ -1,6 +1,7 @@
 <script lang="ts">
   import { hooks, runCommand } from './lib/commands'
   import { embedSnippet } from './lib/markdown'
+  import Agenda from './lib/Agenda.svelte'
   import Bar from './lib/Bar.svelte'
   import Board from './lib/Board.svelte'
   import CommandLine from './lib/CommandLine.svelte'
@@ -26,6 +27,7 @@
   const shareKey = shareToken ? decodeURIComponent(location.hash.slice(1)) : ''
 
   let cmdline = $state<string | null>(null)
+  let cmdGlobal = $state(false)
   let fileInput = $state<HTMLInputElement>()
   let folderInput = $state<HTMLInputElement>()
   let importInput = $state<HTMLInputElement>()
@@ -44,7 +46,10 @@
     hooks.pickFolder = () => folderInput?.click()
     hooks.pickArchive = () => importInput?.click()
     hooks.focusList = () => shell?.focus()
-    hooks.openCommandLine = (initial) => (cmdline = initial)
+    hooks.openCommandLine = (initial) => {
+      cmdGlobal = false
+      cmdline = initial
+    }
     hooks.openOverview = () => void openOverview()
   })
 
@@ -74,6 +79,24 @@
     }
     window.addEventListener('keydown', answer, true)
     return () => window.removeEventListener('keydown', answer, true)
+  })
+
+  /*
+   * The agenda is what the bar counts from, so it is kept fresh without being
+   * asked: on coming back to the tab, and every few minutes while it is open
+   * — which is also when a new day can make it open itself.
+   */
+  $effect(() => {
+    if (!workspace.user) return
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void workspace.loadAgenda().then(() => workspace.openAgendaIfDue())
+    }
+    const timer = setInterval(refresh, 5 * 60 * 1000)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+    }
   })
 
   // Guard against losing a half-written entry to a stray refresh.
@@ -117,6 +140,9 @@
     [['1…9'], 'switch space, Tab cycles'],
     [['w'], 'overview of every space'],
     [['b'], "this space's board"],
+    [['t'], 'agenda — late, due, in hand'],
+    [['c'], 'capture a card to the inbox'],
+    [['⌃ P'], 'find in every space'],
     [['/'], 'search this space'],
     [['?'], 'help'],
   ]
@@ -184,6 +210,38 @@
       return true
     }
     return false
+  }
+
+  /** The agenda's keys: j/k down the list, Enter to the card, Space finishes it. */
+  function agendaKey(event: KeyboardEvent): boolean {
+    const cards = workspace.agendaCards
+    const card = cards[workspace.agendaCursor]
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        workspace.agendaCursor = Math.min(workspace.agendaCursor + 1, Math.max(cards.length - 1, 0))
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.agendaCursor = Math.max(workspace.agendaCursor - 1, 0)
+        return true
+      case 'Enter':
+        if (card) void workspace.guard(() => workspace.goToCard(card))
+        return true
+      case ' ':
+        if (card) void workspace.guard(() => workspace.finishCard(card))
+        return true
+      case 'T':
+        workspace.overlay = 'none'
+        void runCommand('today')
+        return true
+      case 't':
+      case 'q':
+        workspace.overlay = 'none'
+        return true
+      default:
+        return false
+    }
   }
 
   /** Alt+h / Alt+l: focus moves between the panes, out of the editor too. */
@@ -298,6 +356,12 @@
         return
       }
     }
+    if (workspace.overlay === 'agenda' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (agendaKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
 
     if (event.key === 'Escape') {
       if (workspace.overlay !== 'none') {
@@ -325,6 +389,15 @@
 
     if (cmdline !== null || isTypingTarget(event.target)) return
 
+    // Ctrl-P: find anything, in any space — the one search that is not
+    // confined to where you are.
+    if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'p') {
+      event.preventDefault()
+      cmdGlobal = true
+      cmdline = '/'
+      return
+    }
+
     // Ctrl-D / Ctrl-U page the open document, as they do in a pager.
     if (event.ctrlKey && !event.metaKey && !event.altKey && (event.key === 'd' || event.key === 'u')) {
       if (workspace.open && !workspace.editing) {
@@ -349,6 +422,18 @@
       workspace.fullscreen = !workspace.fullscreen
       return
     }
+    // The agenda and today's entry are a key away from anywhere, the board
+    // included: they are the two questions asked most.
+    if (key === 't') {
+      event.preventDefault()
+      void runCommand('agenda')
+      return
+    }
+    if (key === 'T') {
+      event.preventDefault()
+      void runCommand('today')
+      return
+    }
 
     if (workspace.view === 'board') {
       if (previous === 'g' && key === 'g') {
@@ -371,7 +456,10 @@
       }
       if (key === ':' || key === '?') {
         event.preventDefault()
-        if (key === ':') cmdline = ':'
+        if (key === ':') {
+          cmdGlobal = false
+          cmdline = ':'
+        }
         else void runCommand('help')
       }
       return
@@ -497,6 +585,7 @@
         break
       case '/':
         event.preventDefault()
+        cmdGlobal = false
         cmdline = '/'
         break
       case ':':
@@ -581,7 +670,7 @@
     <StatusBar />
 
     {#if cmdline !== null}
-      <CommandLine initial={cmdline} close={() => (cmdline = null)} />
+      <CommandLine initial={cmdline} global={cmdGlobal} close={() => ((cmdline = null), (cmdGlobal = false))} />
     {/if}
 
     <Prompt />
@@ -590,7 +679,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

@@ -121,7 +121,12 @@ export const commands: CommandSpec[] = [
     aliases: ['q'],
     group: 'editing',
     help: 'close the editor, or the document when already reading',
-    run: () => {
+    run: async () => {
+      // A document `o` made and nothing was written in is not kept.
+      if (await workspace.abandonIfBlank()) {
+        if (workspace.returnTo === 'board') await workspace.guard(() => workspace.returnToBoard())
+        return hooks.focusList()
+      }
       if (workspace.dirty) {
         workspace.say('unsaved changes — :w to write, :q! to discard', 'error')
         return
@@ -330,6 +335,18 @@ export const commands: CommandSpec[] = [
       })
       hooks.focusEditor()
     },
+  },
+  {
+    name: 'agenda',
+    aliases: ['ag'],
+    group: 'board',
+    help: 'what is late, due this week, or in hand — across every board',
+    run: () =>
+      workspace.guard(async () => {
+        await workspace.loadAgenda()
+        workspace.agendaCursor = 0
+        workspace.overlay = workspace.overlay === 'agenda' ? 'none' : 'agenda'
+      }),
   },
   {
     name: 'today',
@@ -616,8 +633,12 @@ export const commands: CommandSpec[] = [
     aliases: ['se'],
     args: '[text]',
     group: 'documents',
-    help: 'full-text search (empty clears)',
-    run: (arg) => workspace.guard(() => workspace.search(arg)),
+    help: 'full-text search in this space (empty clears)',
+    run: (arg) => workspace.guard(() => workspace.search(arg, false)),
+    bang: {
+      help: 'full-text search across every space — Ctrl-P',
+      run: (arg) => workspace.guard(() => workspace.search(arg, true)),
+    },
   },
   {
     name: 'clear',

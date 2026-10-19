@@ -63,9 +63,13 @@ it; in the document pane it is that document. In the browse pane:
 | `i`, `a` | edit the open entry |
 | `R` | rename what is highlighted — document, folder or space |
 | `b` | the board of this space |
+| `t` | the agenda: what is late, due this week, or in hand, on every board |
+| `T` | today's diary entry, started if there is none |
+| `c` | capture a card into this space's inbox without leaving where you are |
 | `Esc`, `q` | back out to the document |
 | `h` | up one level in the tree |
-| `/` | full-text search (`n` clears it) |
+| `/` | full-text search in this space (`n` clears it) |
+| `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
 | `s` / `y` | toggle sharing / mint a new share link |
 | `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
 | `:` | command line |
@@ -128,11 +132,22 @@ closing that document returns to the board on the same card. The link is deliber
 deleting the document leaves the card standing, because the work is still open
 once its notes are gone.
 
+## The agenda
+
+`t` (or `:agenda`) gathers every unfinished card from every board that is late,
+due within the week, or sitting in a column between the inbox and done — the
+work already in hand — and says whether the diary has an entry for today. `j`/`k`
+walk it, `Enter` goes to the card on its own board, `Space` finishes it where
+it stands, and `T` writes today's entry. The bar shows `late` and `today` counts
+whenever either is above zero, and the agenda opens by itself once a day when
+something is late or due, so nothing has to be remembered to be looked at.
+
 ## Not losing things
 
 Every change is written to `localStorage` as it is typed and to the server a
 couple of seconds after typing stops, so `:w` is a habit rather than a
-necessity. If a tab dies mid-document, opening it again restores the draft and
+necessity. A document made with `o` and left with neither a name nor a word in
+it is removed again on the way out, so abandoned starts do not pile up. If a tab dies mid-document, opening it again restores the draft and
 says so — `:e!` throws it away, the way vim handles a swap file.
 
 `:export` downloads the open document as markdown. `:export!` downloads the
@@ -298,6 +313,7 @@ Everything except the two share routes requires the session cookie.
 | `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create |
 | `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete (a delete takes the subtree) |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
+| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, and whether the diary has today |
 | `POST` | `/api/spaces/{id}/lists` | add a list |
 | `PUT`/`DELETE` | `/api/lists/{id}` | rename / delete a list and its cards |
 | `POST` | `/api/lists/{id}/cards` | add a card |

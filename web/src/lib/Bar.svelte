@@ -6,11 +6,12 @@
    * that is genuinely faster to walk with a pointer than with `:cd`.
    */
   import Clock from './Clock.svelte'
-  import { hooks } from './commands'
+  import { hooks, runCommand } from './commands'
   import { workspace } from './store.svelte'
 
   // The space is the first crumb, and it is already named by its pill.
   const crumbs = $derived(workspace.path.slice(1))
+  const due = $derived(workspace.dueCounts)
 
 </script>
 
@@ -62,10 +63,19 @@
 
   <span class="spacer"></span>
 
-  <span class="readout user">
-    <span class="key">user</span>
-    <span class="value">{workspace.user}</span>
-  </span>
+  <!-- What is late or due today, always in sight: the point is not having to
+       remember to look. Quiet when there is nothing. -->
+  {#if due.late + due.today > 0}
+    <button class="readout due" title="agenda (t)" onclick={() => runCommand('agenda')}>
+      {#if due.late > 0}<span class="key">late</span><span class="value late">{due.late}</span>{/if}
+      {#if due.today > 0}<span class="key">today</span><span class="value now">{due.today}</span>{/if}
+    </button>
+  {:else}
+    <span class="readout user">
+      <span class="key">user</span>
+      <span class="value">{workspace.user}</span>
+    </span>
+  {/if}
   <span class="divider wide"></span>
   <Clock />
 </header>
@@ -83,6 +93,20 @@
   .crumbs { flex: 0 1 auto; }
 
   .n { color: var(--muted); font-size: 10px; }
+
+  .due {
+    align-items: center;
+    padding: 2px 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .due:hover { border-color: var(--rim); background: transparent; }
+  .due .late { color: var(--alarm); }
+  .due .now { color: var(--light); }
+  .due .value + .key { margin-left: 6px; }
   .pill:hover .n { color: var(--light-dim); }
   .pill[aria-current='true'] .n { color: var(--ink); opacity: 0.55; }
   .pill.add { color: var(--muted); }
@@ -124,6 +148,7 @@
    */
   @media (max-width: 767px) {
     .crumbs, .divider.path, .bar .user, .divider.wide { display: none; }
+    .due { margin-left: auto; padding: 2px 4px; }
     .spaces { max-width: none; flex: 0 1 auto; gap: 2px; }
     .pill:not([aria-current='true']) .slug { display: none; }
     .pill:not([aria-current='true']) { min-width: 28px; height: 24px; }

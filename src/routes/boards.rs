@@ -124,6 +124,91 @@ fn reordered(ids: &[i64], card: i64, to: usize) -> Vec<i64> {
     rest
 }
 
+/// How far ahead the agenda looks for due dates.
+const AGENDA_DAYS: i64 = 7;
+
+/// What is open across every board: the answer to "what should I be doing",
+/// asked without having to remember which space to look in.
+#[derive(Serialize)]
+pub struct Agenda {
+    pub cards: Vec<AgendaCard>,
+    /// Whether the diary has an entry for today, in the configured timezone —
+    /// `None` when there is no diary space to ask about.
+    pub diary_today: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct AgendaCard {
+    #[serde(flatten)]
+    pub card: Card,
+    pub space_id: i64,
+    pub space_slug: String,
+    pub list_name: String,
+    /// `inbox` for the first list, `doing` for any list between it and done.
+    pub role: &'static str,
+}
+
+/// Every unfinished card that is due within a week (or overdue), or that sits
+/// in a list between a board's inbox and its done list — work in hand. The
+/// last list of each board is done by definition, so nothing there is asked.
+pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json<Agenda>> {
+    let cards = agenda_cards(&state.db, crate::now() + (AGENDA_DAYS + 1) * 86400).await?;
+
+    let has_diary: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM nodes WHERE parent_id IS NULL AND slug = 'diary'")
+            .fetch_optional(&state.db)
+            .await?;
+    let diary_today = match has_diary {
+        Some(_) => {
+            let tz = state.config.mail.timezone;
+            let today = crate::notify::local_day(tz, crate::now());
+            Some(crate::notify::diary_written(&state.db, tz, today).await?)
+        }
+        None => None,
+    };
+
+    Ok(Json(Agenda { cards, diary_today }))
+}
+
+/// The agenda's cards, due before `horizon` or in hand. Apart from the handler
+/// so the selection can be tested against a real schema.
+async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard>> {
+    let rows = sqlx::query(
+        "WITH bounds AS (
+             SELECT space_id, MIN(position) AS first, MAX(position) AS last
+             FROM board_lists GROUP BY space_id
+         )
+         SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
+                c.position, c.created_at, c.updated_at,
+                (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name,
+                s.id AS space_id, s.slug AS space_slug, l.name AS list_name,
+                l.position = b.first AS is_first
+         FROM cards c
+         JOIN board_lists l ON l.id = c.list_id
+         JOIN bounds b ON b.space_id = l.space_id
+         JOIN nodes s ON s.id = l.space_id
+         WHERE s.has_board <> 0
+           AND c.done_at IS NULL
+           AND (l.position < b.last OR b.first = b.last)
+           AND ((c.due_at IS NOT NULL AND c.due_at < ?1) OR (l.position > b.first))
+         ORDER BY c.due_at IS NULL, c.due_at, s.position, l.position, c.position",
+    )
+    .bind(horizon)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|row| AgendaCard {
+            card: row_to_card(row),
+            space_id: row.get("space_id"),
+            space_slug: row.get("space_slug"),
+            list_name: row.get("list_name"),
+            role: if row.get::<bool, _>("is_first") { "inbox" } else { "doing" },
+        })
+        .collect())
+}
+
 /// `done_at` after a card moves from list `from` to list `to` on a board whose
 /// last list is `last`. Shuffling inside one list changes nothing; arriving in
 /// the last list finishes the card (keeping an earlier stamp), leaving it
@@ -580,7 +665,73 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::{done_after_move, reordered};
+    use super::{agenda_cards, done_after_move, reordered};
+
+    /// The agenda asks for what is due soon or in hand, and never for what is
+    /// finished, parked in the inbox without a date, or due far off.
+    #[tokio::test]
+    async fn the_agenda_holds_what_is_due_or_in_hand() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("an in-memory database");
+        sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
+
+        let space: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, body, has_board, created_at, updated_at)
+             VALUES (NULL, 'space', 'job', 'job', '', 1, 0, 0) RETURNING id",
+        )
+        .fetch_one(&db)
+        .await
+        .expect("a space");
+        let mut lists = Vec::new();
+        for (position, name) in ["inbox", "doing", "done"].iter().enumerate() {
+            let id: i64 = sqlx::query_scalar(
+                "INSERT INTO board_lists (space_id, name, position, created_at)
+                 VALUES (?1, ?2, ?3, 0) RETURNING id",
+            )
+            .bind(space)
+            .bind(name)
+            .bind(position as i64)
+            .fetch_one(&db)
+            .await
+            .expect("a list");
+            lists.push(id);
+        }
+        let card = |list: i64, title: &'static str, due: Option<i64>, done: Option<i64>| {
+            let db = db.clone();
+            async move {
+                sqlx::query(
+                    "INSERT INTO cards (list_id, title, due_at, done_at, position, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, 0, 0, 0)",
+                )
+                .bind(list)
+                .bind(title)
+                .bind(due)
+                .bind(done)
+                .execute(&db)
+                .await
+                .expect("a card");
+            }
+        };
+        card(lists[0], "someday", None, None).await;
+        card(lists[0], "due soon", Some(500), None).await;
+        card(lists[0], "due later", Some(5000), None).await;
+        card(lists[1], "in hand", None, None).await;
+        card(lists[2], "finished", Some(500), Some(600)).await;
+
+        let titles: Vec<(String, &str)> = agenda_cards(&db, 1000)
+            .await
+            .expect("the agenda")
+            .into_iter()
+            .map(|c| (c.card.title, c.role))
+            .collect();
+        assert_eq!(
+            titles,
+            vec![("due soon".to_string(), "inbox"), ("in hand".to_string(), "doing")]
+        );
+    }
 
     #[test]
     fn arriving_in_the_last_list_finishes_a_card_and_leaving_reopens_it() {

@@ -77,6 +77,20 @@ export interface Card {
   updated_at: number
 }
 
+/** An open card as the agenda lists it, with the board it lives on. */
+export interface AgendaCard extends Card {
+  space_id: number
+  space_slug: string
+  list_name: string
+  role: 'inbox' | 'doing'
+}
+
+export interface Agenda {
+  cards: AgendaCard[]
+  /** Whether the diary has an entry today; null when there is no diary. */
+  diary_today: boolean | null
+}
+
 export interface BoardList {
   id: number
   name: string
@@ -212,6 +226,9 @@ export const api = {
     request<{ token: string; key: string; path: string }>(`/nodes/${id}/share`, { method: 'POST' }),
 
   unshare: (id: number) => request<{ ok: true }>(`/nodes/${id}/share`, { method: 'DELETE' }),
+
+  /** Open cards across every board: due within a week, overdue, or in hand. */
+  agenda: () => request<Agenda>('/agenda'),
 
   /** The board of a space. Fails for a space that has none, such as the diary. */
   board: (spaceId: number) => request<Board>(`/spaces/${spaceId}/board`),

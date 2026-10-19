@@ -36,6 +36,7 @@
   {#if workspace.query}
     <div class="filter">
       <span class="muted">/</span><span class="query">{workspace.query}</span>
+      {#if workspace.globalSearch}<span class="muted scope">all spaces</span>{/if}
       <button title="clear search (n)" onclick={() => workspace.guard(() => workspace.search(''))}>esc</button>
     </div>
   {/if}
@@ -105,6 +106,7 @@
     font-size: 12px;
     flex: none;
   }
+  .scope { flex: none; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
   .query { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--light); }
 
   ul {

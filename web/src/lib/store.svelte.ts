@@ -1,6 +1,8 @@
 import {
   api,
   ApiError,
+  type Agenda,
+  type AgendaCard,
   type Board,
   type Card,
   type Crumb,
@@ -92,7 +94,23 @@ class Workspace {
   vimMode = $state('normal')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda'>('none')
+
+  /*
+   * What is due or in hand on every board, kept loaded all the time: the bar
+   * counts from it, so what is late is in sight without going to look.
+   */
+  agenda = $state<Agenda>({ cards: [], diary_today: null })
+  agendaCursor = $state(0)
+
+  /** A search across every space rather than the one being browsed — Ctrl-P. */
+  globalSearch = $state(false)
+
+  /*
+   * The document `o` just made. If it is left with neither a name nor a word
+   * in it, it is removed on the way out rather than left as an empty row.
+   */
+  #fresh: number | null = null
 
   /*
    * A `[y/N]` question in the command line's place, instead of the browser's
@@ -151,6 +169,31 @@ class Workspace {
 
   get card(): Card | undefined {
     return this.list?.cards[this.cardCursor]
+  }
+
+  /** The agenda in the order it is drawn and walked, bucketed by urgency. */
+  get agendaGroups(): { key: 'overdue' | 'today' | 'week' | 'doing'; cards: AgendaCard[] }[] {
+    const midnight = new Date()
+    midnight.setHours(0, 0, 0, 0)
+    const start = Math.floor(midnight.getTime() / 1000)
+    const groups = { overdue: [] as AgendaCard[], today: [] as AgendaCard[], week: [] as AgendaCard[], doing: [] as AgendaCard[] }
+    for (const card of this.agenda.cards) {
+      if (card.due_at !== null && card.due_at < start) groups.overdue.push(card)
+      else if (card.due_at !== null && card.due_at < start + 86400) groups.today.push(card)
+      else if (card.due_at !== null && card.due_at < start + 8 * 86400) groups.week.push(card)
+      else if (card.role === 'doing') groups.doing.push(card)
+    }
+    return (['overdue', 'today', 'week', 'doing'] as const).map((key) => ({ key, cards: groups[key] }))
+  }
+
+  get agendaCards(): AgendaCard[] {
+    return this.agendaGroups.flatMap((group) => group.cards)
+  }
+
+  /** `late 1 · today 2` — what the bar shows. */
+  get dueCounts(): { late: number; today: number } {
+    const [overdue, today] = this.agendaGroups
+    return { late: overdue.cards.length, today: today.cards.length }
   }
 
   ask(text: string): Promise<boolean> {
@@ -242,7 +285,35 @@ class Workspace {
       clearTimeout(this.#autosave)
       this.#autosave = null
     }
+    if (await this.abandonIfBlank()) return
     if (this.open && this.dirty) await this.guard(() => this.save({ quiet: true }))
+  }
+
+  /**
+   * Drop the document `o` made if nothing was ever put in it. True when it
+   * went, so the caller knows there is nothing open any more.
+   */
+  async abandonIfBlank(): Promise<boolean> {
+    const open = this.open
+    if (!open || open.id !== this.#fresh) return false
+    if (this.draft.name.trim() || this.draft.body.trim()) return false
+    this.#fresh = null
+    if (this.#autosave) {
+      clearTimeout(this.#autosave)
+      this.#autosave = null
+    }
+    this.dropStash(open.id)
+    this.open = null
+    this.editing = false
+    this.dirty = false
+    this.pane = 'list'
+    try {
+      await api.deleteNode(open.id)
+    } catch {
+      /* already gone, or the server is away; an empty row is no great loss */
+    }
+    await this.refresh()
+    return true
   }
 
   async boot() {
@@ -250,6 +321,8 @@ class Workspace {
       const { user } = await api.me()
       this.user = user
       await this.loadSpaces(Workspace.addressedPath())
+      await this.loadAgenda()
+      await this.openAgendaIfDue()
     } catch {
       this.user = null
     } finally {
@@ -261,6 +334,8 @@ class Workspace {
     const { user } = await api.login(username, password)
     this.user = user
     await this.loadSpaces(Workspace.addressedPath())
+    await this.loadAgenda()
+    await this.openAgendaIfDue()
   }
 
   async logout() {
@@ -385,6 +460,7 @@ class Workspace {
     if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
     this.parentId = id
     this.query = ''
+    this.globalSearch = false
     this.path = folder.path
     this.spaceId = folder.path[0]?.id ?? id
     this.nodes = await api.listNodes({ parent: id })
@@ -405,14 +481,15 @@ class Workspace {
   async refresh(keep?: number) {
     const keepId = keep ?? this.selected?.id
     this.nodes = this.query
-      ? await api.listNodes({ q: this.query, space: this.spaceId ?? undefined })
+      ? await api.listNodes({ q: this.query, space: this.globalSearch ? undefined : (this.spaceId ?? undefined) })
       : await api.listNodes({ parent: this.parentId ?? undefined })
     const index = this.nodes.findIndex((n) => n.id === keepId)
     this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(this.nodes.length - 1, 0))
   }
 
-  async search(query: string) {
+  async search(query: string, global = this.globalSearch) {
     this.query = query
+    this.globalSearch = global && query !== ''
     this.cursor = 0
     await this.refresh()
   }
@@ -456,6 +533,11 @@ class Workspace {
   async openSelected(edit = false) {
     const selected = this.selected
     if (!selected) return
+    // A match from anywhere is gone to, not opened beside a list it is not in.
+    if (this.globalSearch) {
+      const node = await api.getNode(selected.id)
+      return this.openPath(node.path.map((crumb) => crumb.slug).join('/'))
+    }
     if (selected.kind === 'document') await this.openNode(selected.id, edit)
     else await this.goTo(selected.id)
   }
@@ -466,8 +548,10 @@ class Workspace {
     if (parent === null) return
     const node = await api.createNode({ parent_id: parent, name, body: '' })
     this.query = ''
+    this.globalSearch = false
     await this.refresh()
     await this.openNode(node.id, true)
+    this.#fresh = node.id
     this.enterInsert = true
     this.say(`new document ${this.here}/${node.slug}`)
   }
@@ -639,6 +723,47 @@ class Workspace {
     this.say(`moved ${node.name.trim() || node.slug} → ${index + 1} ${space.slug}`)
   }
 
+  async loadAgenda() {
+    try {
+      this.agenda = await api.agenda()
+    } catch {
+      /* the counter is a convenience; a failed refresh leaves the last one up */
+    }
+    this.agendaCursor = Math.min(this.agendaCursor, Math.max(this.agendaCards.length - 1, 0))
+  }
+
+  /**
+   * The agenda opens itself once a day when something is late or due — the
+   * point is to be told, not to have to remember to ask.
+   */
+  async openAgendaIfDue() {
+    const today = new Date().toDateString()
+    if (localStorage.getItem('diary:agenda-seen') === today) return
+    const { late, today: due } = this.dueCounts
+    if (late + due === 0) return
+    localStorage.setItem('diary:agenda-seen', today)
+    this.agendaCursor = 0
+    this.overlay = 'agenda'
+  }
+
+  /** Enter in the agenda: to the card, on its own board. */
+  async goToCard(card: AgendaCard) {
+    this.overlay = 'none'
+    if (this.spaceId !== card.space_id) await this.enterSpace(card.space_id)
+    await this.reloadBoard(card.space_id, card.id)
+    this.view = 'board'
+  }
+
+  /** Space in the agenda: into that board's done list, from wherever it is. */
+  async finishCard(card: AgendaCard) {
+    const done = (await api.board(card.space_id)).lists.at(-1)
+    if (!done) return
+    await api.moveCard(card.id, done.id, done.cards.length)
+    await this.loadAgenda()
+    if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
+    this.say(`done: ${card.title}`)
+  }
+
   async loadOverview() {
     this.overview = await api.overview()
   }
@@ -703,6 +828,7 @@ class Workspace {
   async reloadBoard(spaceId = this.spaceId, keep = this.card?.id) {
     if (spaceId === null) return
     this.rawBoard = await api.board(spaceId)
+    void this.loadAgenda()
     // Follow the card that was just moved rather than whatever now sits under
     // the cursor, so J J J walks one card down instead of shuffling three.
     if (keep !== undefined) {
@@ -799,6 +925,7 @@ class Workspace {
     const inbox = (await api.board(space.id)).lists[0]
     if (!inbox) return this.say(`${space.slug} has no lists — :board, then :list <name>`, 'error')
     const card = await api.createCard(inbox.id, { title, node_id: nodeId })
+    await this.loadAgenda()
     this.say(`carded "${card.title}" → ${space.slug}/${inbox.name}`)
   }
 

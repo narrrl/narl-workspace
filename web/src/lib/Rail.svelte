@@ -34,7 +34,7 @@
       return [
         [
           { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
-          { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
+          { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list '), desk: true },
           { icon: 'list', label: 'Back to the tree', keys: ['b', 'q'], run: () => runCommand('board'), on: true },
         ],
         [
@@ -56,6 +56,10 @@
         { icon: 'doc-plus', label: 'New document', keys: ['o'], run: () => runCommand('new') },
         { icon: 'folder-plus', label: 'New folder', keys: ['⇧ O'], run: () => hooks.openCommandLine(':mkdir ') },
         ...(workspace.space ? [board] : []),
+      ],
+      [
+        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => runCommand('agenda') },
+        { icon: 'capture', label: 'Capture a card to the inbox', keys: ['c'], run: () => hooks.openCommandLine(':card ') },
       ],
       [
         { icon: 'grid', label: 'Every space', keys: ['w'], run: () => hooks.openOverview() },

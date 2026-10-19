@@ -5,10 +5,12 @@
 
   interface Props {
     initial: string
+    /** A `/` search across every space rather than this one — Ctrl-P. */
+    global?: boolean
     close: () => void
   }
 
-  const { initial, close }: Props = $props()
+  const { initial, global = false, close }: Props = $props()
 
   let value = $state(untrack(() => initial))
   let input = $state<HTMLInputElement>()
@@ -23,7 +25,7 @@
   $effect(() => {
     if (!isSearch) return
     const query = value.slice(1)
-    const timer = setTimeout(() => void workspace.guard(() => workspace.search(query)), 120)
+    const timer = setTimeout(() => void workspace.guard(() => workspace.search(query, global)), 120)
     return () => clearTimeout(timer)
   })
 
@@ -67,6 +69,7 @@
   {/if}
 
   <form onsubmit={submit}>
+    {#if isSearch}<span class="scope label">{global ? 'all spaces' : (workspace.space?.slug ?? '')}</span>{/if}
     <input bind:this={input} bind:value {onkeydown} spellcheck="false" autocomplete="off" />
   </form>
 </div>
@@ -92,7 +95,8 @@
     animation: rise var(--t-slow) var(--ease-snap) both;
   }
 
-  form { display: flex; padding: 6px; }
+  form { display: flex; align-items: center; gap: 8px; padding: 6px; }
+  .scope { flex: none; padding-left: 6px; font-size: 10px; color: var(--muted); }
 
   input {
     flex: 1;

@@ -93,23 +93,7 @@ impl Notifier {
     /// "You have not written today." Asked once the reminder time has passed,
     /// and only if the diary space gained no document that local day.
     async fn sweep_reminder(&self, today: NaiveDate) -> Result<()> {
-        let (start, end) = day_bounds(self.config.mail.timezone, today);
-        let written: i64 = sqlx::query_scalar(
-            "WITH RECURSIVE tree (id) AS (
-                 SELECT id FROM nodes WHERE parent_id IS NULL AND slug = 'diary'
-                 UNION ALL
-                 SELECT n.id FROM nodes n JOIN tree t ON n.parent_id = t.id
-             )
-             SELECT count(*) FROM nodes
-             WHERE kind = 'document' AND id IN (SELECT id FROM tree)
-               AND created_at >= ? AND created_at < ?",
-        )
-        .bind(start)
-        .bind(end)
-        .fetch_one(&self.db)
-        .await?;
-
-        if written > 0 {
+        if diary_written(&self.db, self.config.mail.timezone, today).await? {
             return Ok(());
         }
 
@@ -398,8 +382,30 @@ fn device_hash(user_agent: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Whether the diary space gained a document on the local day `day`. Shared
+/// by the evening reminder and the agenda, so the two can never disagree about
+/// whether today has been written.
+pub(crate) async fn diary_written(db: &SqlitePool, tz: Tz, day: NaiveDate) -> sqlx::Result<bool> {
+    let (start, end) = day_bounds(tz, day);
+    let written: i64 = sqlx::query_scalar(
+        "WITH RECURSIVE tree (id) AS (
+             SELECT id FROM nodes WHERE parent_id IS NULL AND slug = 'diary'
+             UNION ALL
+             SELECT n.id FROM nodes n JOIN tree t ON n.parent_id = t.id
+         )
+         SELECT count(*) FROM nodes
+         WHERE kind = 'document' AND id IN (SELECT id FROM tree)
+           AND created_at >= ? AND created_at < ?",
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_one(db)
+    .await?;
+    Ok(written > 0)
+}
+
 /// The local date an instant falls on.
-fn local_day(tz: Tz, at: i64) -> NaiveDate {
+pub(crate) fn local_day(tz: Tz, at: i64) -> NaiveDate {
     Utc.timestamp_opt(at, 0)
         .single()
         .unwrap_or_else(Utc::now)
