@@ -48,9 +48,37 @@ class Workspace {
 
   /** The board of the current space, loaded only while it is being looked at. */
   view = $state<View>('tree')
-  board = $state<Board | null>(null)
+  /** The board as the server sent it. */
+  rawBoard = $state<Board | null>(null)
+  /*
+   * The board as it is walked and drawn: the done list keeps only what was
+   * finished this past week unless `z` asks for the rest, so the cursor
+   * indices and what is on screen are always the same thing.
+   */
+  board = $derived.by((): Board | null => {
+    const raw = this.rawBoard
+    if (!raw || this.showOldDone) return raw
+    const since = Math.floor(Date.now() / 1000) - Workspace.RECENT_DONE_DAYS * 86400
+    const last = raw.lists.length - 1
+    return {
+      ...raw,
+      lists: raw.lists.map((list, index) =>
+        index === last && index > 0
+          ? { ...list, cards: list.cards.filter((card) => (card.done_at ?? 0) >= since) }
+          : list,
+      ),
+    }
+  })
   listCursor = $state(0)
   cardCursor = $state(0)
+  /** `z` on the board: show done cards older than a week too. */
+  showOldDone = $state(false)
+  /*
+   * Set when a card's document was opened from the board, so closing the
+   * document goes back to the board — on the same card — rather than leaving
+   * you in a tree you never asked for.
+   */
+  returnTo = $state<'board' | null>(null)
 
   /*
    * The node picked up by `m`, waiting for the `p` that drops it into whatever
@@ -155,6 +183,7 @@ class Workspace {
    */
 
   static readonly AUTOSAVE_MS = 2500
+  static readonly RECENT_DONE_DAYS = 7
 
   #stashKey(id: number) {
     return `diary:draft:${id}`
@@ -311,6 +340,7 @@ class Workspace {
       const from = this.spaces.findIndex((s) => s.id === this.spaceId)
       const to = this.spaces.findIndex((s) => s.id === id)
       this.switchDirection = to >= from ? 1 : -1
+      this.returnTo = null
       this.open = null
       this.editing = false
       this.pane = 'list'
@@ -547,7 +577,7 @@ class Workspace {
     const { removed } = await api.deleteNode(id)
     this.open = null
     this.editing = false
-    this.board = null
+    this.rawBoard = null
     this.view = 'tree'
     this.spaces = await api.listSpaces()
     const next = this.spaces.find((space) => space.slug === 'diary') ?? this.spaces[0]
@@ -662,6 +692,7 @@ class Workspace {
 
   closeBoard() {
     this.view = 'tree'
+    this.returnTo = null
   }
 
   async toggleBoardView() {
@@ -671,7 +702,7 @@ class Workspace {
 
   async reloadBoard(spaceId = this.spaceId, keep = this.card?.id) {
     if (spaceId === null) return
-    this.board = await api.board(spaceId)
+    this.rawBoard = await api.board(spaceId)
     // Follow the card that was just moved rather than whatever now sits under
     // the cursor, so J J J walks one card down instead of shuffling three.
     if (keep !== undefined) {
@@ -723,27 +754,52 @@ class Workspace {
     if (!card || !list) return
     const to = this.cardCursor + delta
     if (to < 0 || to >= list.cards.length) return
-    await api.moveCard(card.id, list.id, to)
+    // The neighbour's own position, not its index: older done cards may be
+    // hidden above it.
+    await api.moveCard(card.id, list.id, list.cards[to].position)
     await this.reloadBoard(this.spaceId, card.id)
   }
 
   /** `H`/`L`: the same card, one list over — the move a board is really for. */
   async sendCard(delta: number) {
-    const card = this.card
-    const lists = this.board?.lists ?? []
-    const target = lists[this.listCursor + delta]
-    if (!card || !target) return
-    await api.moveCard(card.id, target.id, target.cards.length)
-    await this.reloadBoard(this.spaceId, card.id)
-    this.say(`"${card.title}" → ${target.name}`)
+    await this.sendCardTo(this.listCursor + delta)
   }
 
-  async createCard(title: string, nodeId: number | null = null) {
-    const list = this.list
-    if (!list) return this.say('no list to put it on', 'error')
-    const card = await api.createCard(list.id, { title, node_id: nodeId })
+  /*
+   * The last list is "done": the server stamps a card finished as it arrives
+   * there and clears the stamp as it leaves, so moving is all there is to it.
+   */
+  async sendCardTo(index: number) {
+    const card = this.card
+    const lists = this.board?.lists ?? []
+    const target = lists[index]
+    if (!card || !target || index === this.listCursor) return
+    await api.moveCard(card.id, target.id, target.cards.length)
     await this.reloadBoard(this.spaceId, card.id)
-    this.say(nodeId === null ? `carded "${card.title}"` : `carded "${card.title}" → #${nodeId}`)
+    this.say(index === lists.length - 1 ? `done: ${card.title}` : `"${card.title}" → ${target.name}`)
+  }
+
+  /**
+   * A card lands in the first list — the inbox — of this space's board, or of
+   * the first space that has one, without leaving the view you are in: writing
+   * a thought down must not cost the place you were at. On the board itself
+   * it goes on the list under the cursor instead.
+   */
+  async createCard(title: string, nodeId: number | null = null) {
+    if (this.view === 'board') {
+      const list = this.list
+      if (!list) return this.say('no list to put it on', 'error')
+      const card = await api.createCard(list.id, { title, node_id: nodeId })
+      await this.reloadBoard(this.spaceId, card.id)
+      return this.say(nodeId === null ? `carded "${card.title}"` : `carded "${card.title}" → #${nodeId}`)
+    }
+
+    const space = this.space?.has_board ? this.space : this.spaces.find((s) => s.has_board)
+    if (!space) return this.say('no space has a board — :set board turns one on', 'error')
+    const inbox = (await api.board(space.id)).lists[0]
+    if (!inbox) return this.say(`${space.slug} has no lists — :board, then :list <name>`, 'error')
+    const card = await api.createCard(inbox.id, { title, node_id: nodeId })
+    this.say(`carded "${card.title}" → ${space.slug}/${inbox.name}`)
   }
 
   async patchCard(patch: Parameters<typeof api.updateCard>[1]) {
@@ -753,12 +809,19 @@ class Workspace {
     await this.reloadBoard(this.spaceId, card.id)
   }
 
+  /** Space: into the done list, or back out of it to the inbox. */
   async toggleDone() {
     const card = this.card
+    const lists = this.board?.lists ?? []
     if (!card) return this.say('no card selected', 'error')
-    await api.updateCard(card.id, { done: card.done_at === null })
-    await this.reloadBoard(this.spaceId, card.id)
-    this.say(card.done_at === null ? `done: ${card.title}` : `reopened: ${card.title}`)
+    if (lists.length < 2) return this.say('a board needs two lists for one to mean done', 'error')
+    const last = lists.length - 1
+    if (this.listCursor === last) {
+      await this.sendCardTo(0)
+      this.say(`reopened: ${card.title}`)
+    } else {
+      await this.sendCardTo(last)
+    }
   }
 
   async deleteCard() {
@@ -771,29 +834,61 @@ class Workspace {
 
   async createList(name: string) {
     if (this.spaceId === null) return
-    this.board = await api.createList(this.spaceId, name)
-    this.listCursor = this.board.lists.length - 1
+    this.rawBoard = await api.createList(this.spaceId, name)
+    // It goes in front of the done list, so it is not simply the last one.
+    const names = this.rawBoard.lists.map((list) => list.name)
+    this.listCursor = Math.max(names.lastIndexOf(name), 0)
     this.cardCursor = 0
     this.say(`new list ${name}`)
+  }
+
+  async renameList(name: string) {
+    const list = this.list
+    if (!list) return this.say('no list selected', 'error')
+    this.rawBoard = await api.renameList(list.id, name)
+    this.clampBoard()
+    this.say(`list renamed to ${name}`)
   }
 
   async deleteList() {
     const list = this.list
     if (!list) return this.say('no list selected', 'error')
-    this.board = await api.deleteList(list.id)
+    this.rawBoard = await api.deleteList(list.id)
     this.clampBoard()
     this.say(`deleted list ${list.name}`)
   }
 
-  /** Open the document a card points at, leaving the board behind. */
+  /**
+   * Open the document a card points at. A card without one gets one, named
+   * after it, in the space's root — so Enter always leads to a place to write
+   * the notes down. `q` on that document comes back here.
+   */
   async openCard() {
     const card = this.card
-    if (!card) return
-    if (card.node_id === null) {
-      return this.say(`"${card.title}" is not linked to a document — :card! links one`, 'error')
+    const space = this.spaceId
+    if (!card || space === null) return
+    let nodeId = card.node_id
+    if (nodeId === null) {
+      const node = await api.createNode({ parent_id: space, name: card.title, body: '' })
+      await api.updateCard(card.id, { node_id: node.id })
+      nodeId = node.id
     }
     this.view = 'tree'
-    await this.openNode(card.node_id)
+    if (this.parentId !== space) await this.goTo(space)
+    else await this.refresh()
+    await this.openNode(nodeId, card.node_id === null)
+    if (card.node_id === null) this.enterInsert = true
+    this.returnTo = 'board'
+  }
+
+  /** Back to the board a card's document was opened from. */
+  async returnToBoard() {
+    this.returnTo = null
+    this.open = null
+    this.editing = false
+    this.pane = 'list'
+    await this.reloadBoard()
+    this.view = 'board'
   }
 
   /** Turn a space's board on or off. The diary ships with it off. */
@@ -805,7 +900,7 @@ class Workspace {
     if (on) await this.openBoard()
     else {
       this.closeBoard()
-      this.board = null
+      this.rawBoard = null
     }
     this.say(on ? `${space.slug} has a board` : `${space.slug} has no board any more`)
   }

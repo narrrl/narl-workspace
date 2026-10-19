@@ -24,6 +24,13 @@
       'M12 17h.01',
     ],
     back: ['M15 5l-7 7 7 7'],
+    left: ['M19 12H5', 'M11 6l-6 6 6 6'],
+    right: ['M5 12h14', 'M13 6l6 6-6 6'],
+    check: ['M5 12.5l4.5 4.5L19 7'],
+    calendar: ['M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z', 'M4 10h16', 'M8 4v4', 'M16 4v4'],
+    doc: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5', 'M9 13h6', 'M9 17h4'],
+    agenda: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z', 'M12 7v5l3 2'],
+    capture: ['M12 5v14', 'M5 12h14'],
   } satisfies Record<string, string[]>
 
   export type IconName = keyof typeof PATHS

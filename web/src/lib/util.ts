@@ -52,6 +52,37 @@ export function parseDay(input: string): number | null {
   return Number.isNaN(date.getTime()) ? null : Math.floor(date.getTime() / 1000)
 }
 
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+/**
+ * A due date the way it is said rather than written: `today`, `tm` or
+ * `tomorrow`, a weekday (`fri` is the next Friday, never today), `+3d`, `+2w`,
+ * `10-31` (this year, or next if that has passed) or a full `2026-10-31`.
+ * Noon, like `parseDay`, so no timezone shift can tip it into another day.
+ */
+export function parseDue(input: string, now = new Date()): number | null {
+  const text = input.trim().toLowerCase()
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0)
+  const at = (d: Date) => Math.floor(d.getTime() / 1000)
+  const shifted = (days: number) => at(new Date(day.getFullYear(), day.getMonth(), day.getDate() + days, 12))
+
+  if (text === 'today' || text === 'td') return at(day)
+  if (text === 'tomorrow' || text === 'tm') return shifted(1)
+  const weekday = text.length >= 2 ? WEEKDAYS.findIndex((name) => name.startsWith(text)) : -1
+  if (weekday >= 0) return shifted(((weekday - day.getDay() + 6) % 7) + 1)
+  const offset = /^\+(\d+)([dw])$/.exec(text)
+  if (offset) return shifted(Number(offset[1]) * (offset[2] === 'w' ? 7 : 1))
+  const monthDay = /^(\d{1,2})-(\d{1,2})$/.exec(text)
+  if (monthDay) {
+    const [m, d] = [Number(monthDay[1]) - 1, Number(monthDay[2])]
+    let date = new Date(day.getFullYear(), m, d, 12)
+    if (date.getMonth() !== m) return null
+    if (date < day) date = new Date(day.getFullYear() + 1, m, d, 12)
+    return at(date)
+  }
+  return parseDay(text)
+}
+
 /**
  * True on phones and tablets, where modal editing would be a burden. Both
  * checks are needed: a touchscreen laptop reports touch points but still has a

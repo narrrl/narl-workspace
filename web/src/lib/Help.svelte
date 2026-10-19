@@ -20,6 +20,7 @@
     ['R', 'rename what is under the cursor — document, folder or card'],
     ['m / p', 'pick a node up, then drop it into the folder you walk to'],
     ['b', "open this space's board"],
+    ['c', "capture a card into this space's inbox, without leaving here"],
     ['Esc · q', 'close the document'],
     ['/', 'full-text search, inside the current space'],
     ['n', 'clear the search'],
@@ -34,15 +35,18 @@
   /* The board rebinds most keys, so it gets its own column rather than
      footnotes on the list keys. */
   const boardKeys: [string, string][] = [
+    ['rule', 'the first list is the inbox, the last list is done'],
     ['h / l', 'to the list left / right'],
     ['j / k', 'down / up the cards'],
     ['J / K', 'move the card down / up its list'],
     ['H / L', 'move the card to the list left / right'],
-    ['Enter', 'open the document the card links to'],
-    ['t · Space', 'tick the card off, or un-tick it'],
-    ['o', 'new card on this list'],
-    ['R', 'rename the card'],
-    ['x', 'delete the card (asks first)'],
+    ['Space', 'into the done list, or back out to the inbox'],
+    ['Enter', "the card's notes — a document, made on first use; q comes back"],
+    ['o · c', 'new card on this list'],
+    ['D', 'due date: fri, tm, +3d, 10-31 …'],
+    ['R', 'rename the card, or the list when it is empty'],
+    ['z', 'show done cards older than a week'],
+    ['x · dd', 'delete the card (asks y/N)'],
     ['q · Esc', 'back to the tree'],
   ]
 

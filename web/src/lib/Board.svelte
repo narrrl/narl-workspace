@@ -30,6 +30,19 @@
     return card.due_at < start + 86400 ? 'today' : ''
   }
 
+  const total = $derived(workspace.board?.lists.reduce((n, list) => n + list.cards.length, 0) ?? 0)
+  const lastIndex = $derived((workspace.board?.lists.length ?? 0) - 1)
+  /** Done cards older than a week, kept off the board until `z` asks. */
+  const hidden = $derived(
+    (workspace.rawBoard?.lists.at(-1)?.cards.length ?? 0) - (workspace.board?.lists.at(-1)?.cards.length ?? 0),
+  )
+
+  /** What a column is for, by where it stands — the names are yours to choose. */
+  function role(index: number): 'inbox' | 'done' | '' {
+    if (lastIndex < 1) return ''
+    return index === 0 ? 'inbox' : index === lastIndex ? 'done' : ''
+  }
+
   function pick(list: number, card: number) {
     workspace.listCursor = list
     workspace.cardCursor = card
@@ -41,17 +54,18 @@
     <span class="marker"></span>
     <span class="name">{workspace.space?.slug ?? ''}</span>
     <span>board</span>
-    <span class="count">
-      {workspace.board?.lists.reduce((n, list) => n + list.cards.length, 0) ?? 0} cards
-    </span>
+    <span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>
   </div>
 
   <div class="columns" bind:this={columns}>
     {#each workspace.board?.lists ?? [] as list, listIndex (list.id)}
-      <section class="column" class:on={listIndex === workspace.listCursor}>
-        <header class="label">
+      {@const kind = role(listIndex)}
+      <section class="column" class:on={listIndex === workspace.listCursor} class:finished={kind === 'done'}>
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <header class="label" onclick={() => pick(listIndex, 0)}>
           <span class="marker"></span>
           <span class="name">{list.name}</span>
+          {#if kind}<span class="role">{kind}</span>{/if}
           <span class="n">{list.cards.length}</span>
         </header>
 
@@ -65,6 +79,7 @@
                 data-at="{listIndex}:{cardIndex}"
                 onclick={() => pick(listIndex, cardIndex)}
                 ondblclick={() => workspace.guard(() => workspace.openCard())}
+                title={card.node_id === null ? 'Enter starts a document for it' : 'Enter opens its document'}
               >
                 <span class="title">
                   <span class="tick" class:ticked={card.done_at !== null}></span>
@@ -76,15 +91,24 @@
                       <span class={urgency(card)}>due {formatDay(card.due_at)}</span>
                     {/if}
                     {#if card.node_id !== null}
-                      <span class="doc" title="Enter opens it">→ {card.node_name ?? `#${card.node_id}`}</span>
+                      <span class="doc">→ {card.node_name ?? `#${card.node_id}`}</span>
                     {/if}
                   </span>
                 {/if}
               </button>
             </li>
           {:else}
-            <li class="empty muted">no cards — o adds one</li>
+            <li class="empty muted">
+              {#if kind === 'done'}nothing finished this week{:else if kind === 'inbox'}empty — c captures from anywhere{:else}no cards — o adds one{/if}
+            </li>
           {/each}
+          {#if kind === 'done' && (hidden > 0 || workspace.showOldDone)}
+            <li>
+              <button class="older" onclick={() => (workspace.showOldDone = !workspace.showOldDone)}>
+                {workspace.showOldDone ? 'hide older' : `+${hidden} older`} <span class="kbd">z</span>
+              </button>
+            </li>
+          {/if}
         </ul>
       </section>
     {:else}
@@ -93,6 +117,20 @@
       </div>
     {/each}
   </div>
+
+  <!-- The board's keys are not the list's, so they are spelled out where they apply. -->
+  <footer class="label keys">
+    <span><span class="kbd">h</span><span class="kbd">j</span><span class="kbd">k</span><span class="kbd">l</span> move</span>
+    <span><span class="kbd">H</span><span class="kbd">L</span> send</span>
+    <span><span class="kbd">␣</span> done</span>
+    <span><span class="kbd">↵</span> notes</span>
+    <span><span class="kbd">o</span> new</span>
+    <span><span class="kbd">D</span> due</span>
+    <span><span class="kbd">R</span> rename</span>
+    <span><span class="kbd">dd</span> delete</span>
+    <span><span class="kbd">q</span> tree</span>
+    <span class="rule-hint">first list is the inbox · last list is done</span>
+  </footer>
 </div>
 
 <style>
@@ -147,6 +185,34 @@
   .column.on header .marker { background: var(--light); }
   .column.on header .name { color: var(--light); }
   .n { font-variant-numeric: tabular-nums; }
+  .role { color: var(--muted); font-size: 10px; letter-spacing: 0.18em; }
+  .column header { cursor: default; }
+  .column.finished:not(.on) { opacity: 0.7; }
+
+  .older {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    margin-top: 4px;
+    padding: 4px 10px;
+    border: 0;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .older:hover { color: var(--light); background: transparent; }
+
+  .keys {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    align-items: center;
+    padding: 8px 22px 12px;
+    font-size: 11px;
+  }
+  .keys > span { display: flex; gap: 4px; align-items: center; }
+  .keys .rule-hint { margin-left: auto; color: var(--muted); text-transform: none; letter-spacing: 0.04em; }
 
   ul {
     list-style: none;
@@ -202,5 +268,9 @@
 
   @media (pointer: coarse) {
     .card { padding: 10px; }
+  }
+  @media (max-width: 767px) {
+    .keys > span:not(.rule-hint) { display: none; }
+    .keys .rule-hint { margin-left: 0; }
   }
 </style>

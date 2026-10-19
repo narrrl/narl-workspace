@@ -1,6 +1,6 @@
 import { api, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay, type ScrollAmount } from './util'
+import { formatDay, parseDay, parseDue, type ScrollAmount } from './util'
 
 export type { ScrollAmount }
 
@@ -127,6 +127,7 @@ export const commands: CommandSpec[] = [
         return
       }
       if (workspace.editing) workspace.editing = false
+      else if (workspace.returnTo === 'board') return void workspace.guard(() => workspace.returnToBoard())
       else {
         workspace.open = null
         workspace.pane = 'list'
@@ -224,11 +225,9 @@ export const commands: CommandSpec[] = [
     aliases: ['c'],
     args: '<title>',
     group: 'board',
-    help: 'add a card to the list under the cursor',
+    help: "add a card — on the board to the list under the cursor, elsewhere to this space's inbox",
     run: async (arg) => {
       if (!arg.trim()) return workspace.say('usage: :card <title>', 'error')
-      if (workspace.view !== 'board') await workspace.guard(() => workspace.openBoard())
-      if (workspace.view !== 'board') return
       await workspace.guard(() => workspace.createCard(arg.trim()))
     },
     bang: {
@@ -241,25 +240,23 @@ export const commands: CommandSpec[] = [
           return workspace.say('no document to link — open one first', 'error')
         }
         const title = arg.trim() || node.name.trim() || node.slug
-        if (workspace.view !== 'board') await workspace.guard(() => workspace.openBoard())
-        if (workspace.view !== 'board') return
         await workspace.guard(() => workspace.createCard(title, node.id))
       },
     },
   },
   {
     name: 'due',
-    args: '<yyyy-mm-dd|->',
+    args: '<when|->',
     group: 'board',
-    help: 'set the due date of the selected card, - clears it',
+    help: 'due date of the card: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
     run: async (arg) => {
       if (workspace.view !== 'board') return workspace.say('no board open — :board', 'error')
       const target = arg.trim()
       if (target === '-' || target === '') {
         return workspace.guard(() => workspace.patchCard({ due_at: null }))
       }
-      const at = parseDay(target)
-      if (at === null) return workspace.say('usage: :due 2026-09-30', 'error')
+      const at = parseDue(target)
+      if (at === null) return workspace.say(`not a date: ${target} — try fri, +3d or 2026-09-30`, 'error')
       await workspace.guard(() => workspace.patchCard({ due_at: at }))
       workspace.say(`due ${formatDay(at)}`)
     },
@@ -267,7 +264,7 @@ export const commands: CommandSpec[] = [
   {
     name: 'done',
     group: 'board',
-    help: 'tick the selected card off, or un-tick it',
+    help: 'move the selected card into the done list, or back out to the inbox',
     run: () => {
       if (workspace.view !== 'board') return workspace.say('no board open — :board', 'error')
       return workspace.guard(() => workspace.toggleDone())
@@ -474,8 +471,12 @@ export const commands: CommandSpec[] = [
       await workspace.guard(() => workspace.renameNode(node.id, arg))
     },
     bang: {
-      help: 'rename the space you are in',
+      help: 'rename the space you are in — on the board, the list under the cursor',
       run: async (arg) => {
+        if (workspace.view === 'board') {
+          if (!arg.trim()) return workspace.say('usage: :name! <list name>', 'error')
+          return workspace.guard(() => workspace.renameList(arg.trim()))
+        }
         const space = workspace.space
         if (!space) return workspace.say('no space open', 'error')
         if (!arg.trim()) return workspace.say('usage: :name! <text>', 'error')

@@ -237,12 +237,19 @@
         void workspace.guard(() => workspace.openCard())
         return true
       case 'o':
+      case 'c':
         cmdline = ':card '
         return true
       case 'R':
-        cmdline = ':name '
+        // On an empty list there is no card to rename, so it is the list.
+        cmdline = workspace.card ? ':name ' : ':name! '
         return true
-      case 't':
+      case 'D':
+        cmdline = ':due '
+        return true
+      case 'z':
+        workspace.showOldDone = !workspace.showOldDone
+        return true
       case ' ':
         void workspace.guard(() => workspace.toggleDone())
         return true
@@ -431,6 +438,11 @@
       case 'o':
         event.preventDefault()
         void runCommand('new')
+        break
+      case 'c':
+        // Capture: a thought goes on this space's inbox without leaving here.
+        event.preventDefault()
+        cmdline = ':card '
         break
       case 'O':
         // The name has to come from somewhere, and the command line is where

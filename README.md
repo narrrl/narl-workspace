@@ -84,7 +84,7 @@ selected, and `:import` uploads a folder into the one being browsed
 the cursor — a document, a folder, or a card on a board — and `:name!` renames
 the space itself. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
-`:due <yyyy-mm-dd|->`, `:done` and `:list <name>` (`:list!` deletes one).
+`:due <when|->`, `:done` and `:list <name>` (`:list!` deletes one).
 
 On a touch device modal editing is turned off and the same actions are buttons.
 
@@ -94,9 +94,17 @@ On a touch device modal editing is turned off and the same actions are buttons.
 of the space being browsed, and swaps it back. Every space has one except the
 diary — a journal has no backlog — and `:set board` / `:set noboard` changes
 that for the space you are in (the `+board` button above the list does the
-same). A new board starts with `backlog`, `doing` and `done`; `:list <name>`
-adds columns, and `o` or the `+ card` button puts a card on the one under the
-cursor.
+same). A new board starts with `backlog`, `doing` and `done`, and the columns mean
+something by where they stand rather than by their names: the first is the
+inbox new cards land in, the last is done. A card is finished exactly when it
+sits in the last column — moving it there stamps it, moving it out reopens it —
+so a tick and a column can never disagree. `:list <name>` adds a column in front
+of the last one, `:name!` on the board renames the column under the cursor, and
+done cards older than a week fold away until `z` shows them.
+
+`c` captures from anywhere: `:card <title>` outside the board puts the card in
+this space's inbox (or the first space that has a board) and leaves you where
+you were. On the board, `o` or `c` puts a card on the column under the cursor.
 
 | key | action |
 | --- | --- |
@@ -104,14 +112,19 @@ cursor.
 | `j` / `k` | down / up the cards of that list |
 | `J` / `K` | move the card down / up its list |
 | `H` / `L` | move the card to the list on the left / right |
-| `Enter` | open the document the card links to |
-| `t`, `Space` | tick the card off, or un-tick it |
-| `o` | a new card on this list |
-| `x` | delete the card |
+| `Enter` | the card's notes: its document, made on first use; `q` comes back |
+| `Space` | into the done column, or back out to the inbox |
+| `o`, `c` | a new card on this list |
+| `D` | due date — `fri`, `tm`, `+3d`, `+2w`, `10-31`, `2026-10-31` |
+| `R` | rename the card, or the column when it has none |
+| `z` | show done cards older than a week |
+| `x`, `dd` | delete the card |
 | `q`, `Esc` | back to the tree |
 
 A card can point at a document: `:card!` while reading one makes a card for it,
-and `Enter` on that card opens it again. The link is deliberately loose —
+and `Enter` on that card opens it again. `Enter` on a card without one makes a
+document named after the card in the space's root and opens it to write in, and
+closing that document returns to the board on the same card. The link is deliberately loose —
 deleting the document leaves the card standing, because the work is still open
 once its notes are gone.
 

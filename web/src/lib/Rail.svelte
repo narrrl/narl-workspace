@@ -28,11 +28,21 @@
     const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help'), desk: true }
 
     if (workspace.view === 'board') {
+      // The card verbs are doors too, so a phone — which has no H, L or
+      // Space — can still move work along.
+      const card = !!workspace.card
       return [
         [
           { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
           { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
           { icon: 'list', label: 'Back to the tree', keys: ['b', 'q'], run: () => runCommand('board'), on: true },
+        ],
+        [
+          { icon: 'left', label: 'Send the card left', keys: ['H'], run: () => workspace.guard(() => workspace.sendCard(-1)), dim: !card },
+          { icon: 'check', label: 'Done, or back to the inbox', keys: ['Space'], run: () => workspace.guard(() => workspace.toggleDone()), dim: !card },
+          { icon: 'right', label: 'Send the card right', keys: ['L'], run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
+          { icon: 'calendar', label: 'Due date', keys: ['D'], run: () => hooks.openCommandLine(':due '), dim: !card },
+          { icon: 'doc', label: "The card's notes", keys: ['Enter'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
         ],
         [cmd, help],
       ]
