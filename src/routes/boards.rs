@@ -6,6 +6,12 @@
 //! node directly. That keeps the deployment one binary and one SQLite file, and
 //! the Proton mirror keeps covering everything without a second service.
 //!
+//! The columns carry meaning by position, not by name: the first list is the
+//! inbox new cards land in, the last list is "done", and a card is finished
+//! exactly when it sits there. Moving a card into the last list stamps
+//! `done_at`, moving it out clears it, so a tick and a column can never
+//! disagree about whether something is finished.
+//!
 //! Cards may point at a document. The link is deliberately weak — deleting the
 //! document sets `node_id` to NULL rather than deleting the card, because the
 //! work is still open once its notes are gone.
@@ -116,6 +122,35 @@ fn reordered(ids: &[i64], card: i64, to: usize) -> Vec<i64> {
     let mut rest: Vec<i64> = ids.iter().copied().filter(|id| *id != card).collect();
     rest.insert(to.min(rest.len()), card);
     rest
+}
+
+/// `done_at` after a card moves from list `from` to list `to` on a board whose
+/// last list is `last`. Shuffling inside one list changes nothing; arriving in
+/// the last list finishes the card (keeping an earlier stamp), leaving it
+/// reopens it.
+fn done_after_move(from: i64, to: i64, last: i64, done_at: Option<i64>, now: i64) -> Option<i64> {
+    if from == to {
+        done_at
+    } else if to == last {
+        done_at.or(Some(now))
+    } else {
+        None
+    }
+}
+
+/// The id and position of the last list of a space's board — its "done".
+async fn last_list(
+    db: impl sqlx::SqliteExecutor<'_>,
+    space_id: i64,
+) -> AppResult<Option<(i64, i64)>> {
+    Ok(sqlx::query(
+        "SELECT id, position FROM board_lists WHERE space_id = ?1
+         ORDER BY position DESC, id DESC LIMIT 1",
+    )
+    .bind(space_id)
+    .fetch_optional(db)
+    .await?
+    .map(|row| (row.get("id"), row.get("position"))))
 }
 
 fn row_to_card(row: &sqlx::sqlite::SqliteRow) -> Card {
@@ -263,13 +298,27 @@ pub async fn create_list(
         return Err(AppError::BadRequest("a list needs a name".into()));
     }
 
-    let position: i64 = sqlx::query(
-        "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM board_lists WHERE space_id = ?1",
-    )
-    .bind(space_id)
-    .fetch_one(&state.db)
-    .await?
-    .get("next");
+    // A new column goes in front of the last one, because the last one is
+    // "done" and has to stay last for that to keep meaning anything. A board
+    // down to a single list just grows a second one after it.
+    let count: i64 = sqlx::query("SELECT COUNT(*) AS n FROM board_lists WHERE space_id = ?1")
+        .bind(space_id)
+        .fetch_one(&state.db)
+        .await?
+        .get("n");
+
+    let mut tx = state.db.begin().await?;
+    let position = match last_list(&mut *tx, space_id).await? {
+        Some((last, position)) if count >= 2 => {
+            sqlx::query("UPDATE board_lists SET position = position + 1 WHERE id = ?1")
+                .bind(last)
+                .execute(&mut *tx)
+                .await?;
+            position
+        }
+        Some((_, position)) => position + 1,
+        None => 0,
+    };
 
     sqlx::query(
         "INSERT INTO board_lists (space_id, name, position, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -278,8 +327,9 @@ pub async fn create_list(
     .bind(name)
     .bind(position)
     .bind(crate::now())
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     state.backup.signal();
     load(&state, space_id, space_name).await.map(Json)
@@ -462,9 +512,14 @@ pub async fn move_card(
 
     let mut tx = state.db.begin().await?;
 
-    sqlx::query("UPDATE cards SET list_id = ?1, updated_at = ?2 WHERE id = ?3")
+    let now = crate::now();
+    let last = last_list(&mut *tx, to).await?.map_or(input.list_id, |(id, _)| id);
+    let done_at = done_after_move(current.list_id, input.list_id, last, current.done_at, now);
+
+    sqlx::query("UPDATE cards SET list_id = ?1, done_at = ?2, updated_at = ?3 WHERE id = ?4")
         .bind(input.list_id)
-        .bind(crate::now())
+        .bind(done_at)
+        .bind(now)
         .bind(card_id)
         .execute(&mut *tx)
         .await?;
@@ -525,7 +580,19 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::reordered;
+    use super::{done_after_move, reordered};
+
+    #[test]
+    fn arriving_in_the_last_list_finishes_a_card_and_leaving_reopens_it() {
+        let (inbox, doing, done) = (1, 2, 3);
+        assert_eq!(done_after_move(doing, done, done, None, 100), Some(100));
+        // Finished earlier and shuffled back in: the first stamp is the true one.
+        assert_eq!(done_after_move(inbox, done, done, Some(50), 100), Some(50));
+        assert_eq!(done_after_move(done, doing, done, Some(50), 100), None);
+        // Reordering inside a list is not a change of state.
+        assert_eq!(done_after_move(done, done, done, Some(50), 100), Some(50));
+        assert_eq!(done_after_move(inbox, doing, done, None, 100), None);
+    }
 
     #[test]
     fn a_card_lands_where_it_was_asked_to() {
