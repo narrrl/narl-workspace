@@ -131,10 +131,14 @@ fn retry_due(attempts: i64, last_attempt_at: Option<i64>, now: i64) -> bool {
 /// Send everything the outbox is holding. Failures are recorded on the row and
 /// retried later; one bad message does not block the ones behind it.
 pub async fn send_pending(db: &SqlitePool, mailer: &Mailer) -> Result<usize> {
+    // A mail the relay refused for good stays in the table for mail-status to
+    // show, and out of this query: counted towards the limit, enough of them
+    // would crowd out every mail queued after them, for ever.
     let rows = sqlx::query(
         "SELECT id, subject, body, attempts, last_attempt_at FROM notifications
-         WHERE sent_at IS NULL ORDER BY created_at LIMIT 50",
+         WHERE sent_at IS NULL AND attempts < ?1 ORDER BY created_at LIMIT 50",
     )
+    .bind(MAX_ATTEMPTS)
     .fetch_all(db)
     .await?;
 
@@ -184,6 +188,31 @@ pub async fn send_pending(db: &SqlitePool, mailer: &Mailer) -> Result<usize> {
     Ok(sent)
 }
 
+/// How long a mail that is done with — sent, or given up on — is kept.
+const KEEP_DAYS: i64 = 90;
+
+/// Forget mails that are done with and can never be asked about again. A key
+/// that names a day, a week or an hour is never asked again once that has
+/// passed; a card's key stays as long as its card does, because an overdue
+/// card is asked about every day it stays overdue.
+pub async fn prune(db: &SqlitePool, now: i64) -> Result<u64> {
+    let removed = sqlx::query(
+        "DELETE FROM notifications
+         WHERE created_at < ?1
+           AND (sent_at IS NOT NULL OR attempts >= ?2)
+           AND (kind <> 'card_due' OR NOT EXISTS (
+               SELECT 1 FROM cards c
+               WHERE c.id = CAST(substr(dedupe_key, 10, instr(substr(dedupe_key, 10), ':') - 1) AS INTEGER)
+           ))",
+    )
+    .bind(now - KEEP_DAYS * 86_400)
+    .bind(MAX_ATTEMPTS)
+    .execute(db)
+    .await?
+    .rows_affected();
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{retry_due, MAX_ATTEMPTS};
@@ -230,5 +259,80 @@ mod tests {
             .await
             .expect("counting works");
         assert_eq!(queued, 1);
+    }
+
+    async fn outbox() -> sqlx::SqlitePool {
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn mails_given_up_on_do_not_hold_up_the_rest() {
+        let db = outbox().await;
+        for n in 0..60 {
+            super::enqueue(&db, "reminder", &format!("dead:{n}"), "s", "b").await.unwrap();
+        }
+        sqlx::query("UPDATE notifications SET attempts = ?1, last_attempt_at = 0")
+            .bind(MAX_ATTEMPTS)
+            .execute(&db)
+            .await
+            .unwrap();
+        super::enqueue(&db, "reminder", "reminder:2026-10-20", "s", "b").await.unwrap();
+
+        let next: Vec<String> = sqlx::query_scalar(
+            "SELECT dedupe_key FROM notifications WHERE sent_at IS NULL AND attempts < ?1
+             ORDER BY created_at LIMIT 50",
+        )
+        .bind(MAX_ATTEMPTS)
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        assert_eq!(next, ["reminder:2026-10-20"]);
+    }
+
+    #[tokio::test]
+    async fn old_mails_go_but_a_live_cards_key_stays() {
+        let db = outbox().await;
+        let space: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, has_board, created_at, updated_at)
+             VALUES (NULL, 'space', 'job', 'job', 1, 0, 0) RETURNING id",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let list: i64 = sqlx::query_scalar(
+            "INSERT INTO board_lists (space_id, name, position, created_at) VALUES (?1, 'l', 0, 0) RETURNING id",
+        )
+        .bind(space)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let card: i64 = sqlx::query_scalar(
+            "INSERT INTO cards (list_id, title, position, created_at, updated_at)
+             VALUES (?1, 'c', 0, 0, 0) RETURNING id",
+        )
+        .bind(list)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        for key in [
+            "reminder:2026-01-01".to_string(),
+            format!("card_due:{card}:2026-01-01:overdue"),
+            "card_due:999999:2026-01-01:overdue".to_string(),
+        ] {
+            super::enqueue(&db, "x", &key, "s", "b").await.unwrap();
+        }
+        sqlx::query("UPDATE notifications SET sent_at = 1, created_at = 1, kind = CASE WHEN dedupe_key LIKE 'card_due:%' THEN 'card_due' ELSE 'reminder' END")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(super::prune(&db, crate::now()).await.unwrap(), 2);
+        let left: Vec<String> = sqlx::query_scalar("SELECT dedupe_key FROM notifications")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        assert_eq!(left, [format!("card_due:{card}:2026-01-01:overdue")]);
     }
 }

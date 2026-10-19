@@ -369,7 +369,13 @@ an outbox table under a key that names the occurrence — `reminder:2026-09-18`,
 `card_due:41:2026-09-20:overdue` — and a tick a minute drains it. A restart
 cannot resend yesterday's reminder, because the row is already there; a relay
 that refuses cannot lose one, because the row is still there and is retried with
-a widening gap, up to an hour apart.
+a widening gap, up to an hour apart. After ten refusals a mail is left for
+`mail-status` to show and no longer stands in front of the ones behind it.
+
+A card mail is checked against its card before it goes: one finished, deleted
+or re-dated since it was queued, or on a board that has been switched off, is
+dropped unsent. Mails that are done with are forgotten after 90 days. The
+reminder needs a diary to be about, and says nothing when there is none.
 
 The login mail says *a new browser*, not *a new person*: the device is
 remembered as a SHA-256 of its `User-Agent`, which is honest about what it can

@@ -54,7 +54,9 @@ impl Notifier {
             // already in it are the ones that matter most.
             tracing::error!(error = %format!("{e:#}"), "the notification sweep failed");
         }
+        self.drop_stale_cards().await?;
         mail::send_pending(&self.db, mailer).await?;
+        mail::prune(&self.db, crate::now()).await?;
         Ok(())
     }
 
@@ -93,7 +95,11 @@ impl Notifier {
     /// "You have not written today." Asked once the reminder time has passed,
     /// and only if the diary space gained no document that local day.
     async fn sweep_reminder(&self, today: NaiveDate) -> Result<()> {
-        if diary_written(&self.db, self.config.mail.timezone, today).await? {
+        let has_diary = sqlx::query("SELECT 1 FROM nodes WHERE role = 'diary'")
+            .fetch_optional(&self.db)
+            .await?
+            .is_some();
+        if !has_diary || diary_written(&self.db, self.config.mail.timezone, today).await? {
             return Ok(());
         }
 
@@ -118,6 +124,7 @@ impl Notifier {
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
              WHERE c.done_at IS NULL AND c.due_at IS NOT NULL AND c.due_at < ?
+               AND s.has_board = 1
              ORDER BY c.due_at",
         )
         .bind(end_of_today)
@@ -188,7 +195,7 @@ impl Notifier {
              FROM cards c
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
-             WHERE c.done_at >= ? AND c.done_at < ?
+             WHERE c.done_at >= ? AND c.done_at < ? AND s.has_board = 1
              ORDER BY s.position, c.done_at",
         )
         .bind(start)
@@ -202,6 +209,7 @@ impl Notifier {
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
              WHERE c.done_at IS NULL AND c.due_at IS NOT NULL AND c.due_at < ?
+               AND s.has_board = 1
              ORDER BY c.due_at",
         )
         .bind(end)
@@ -330,6 +338,41 @@ impl Notifier {
         }
     }
 
+    /// A card mail waiting to go out is checked against its card first: one
+    /// that has since been finished, deleted, re-dated or taken off a board
+    /// that was switched off is no longer news, and is dropped unsent.
+    async fn drop_stale_cards(&self) -> Result<()> {
+        let tz = self.config.mail.timezone;
+        let waiting = sqlx::query(
+            "SELECT n.id, n.dedupe_key, c.due_at, c.done_at, s.has_board
+             FROM notifications n
+             LEFT JOIN cards c
+               ON c.id = CAST(substr(n.dedupe_key, 10, instr(substr(n.dedupe_key, 10), ':') - 1) AS INTEGER)
+             LEFT JOIN board_lists l ON l.id = c.list_id
+             LEFT JOIN nodes s ON s.id = l.space_id
+             WHERE n.kind = 'card_due' AND n.sent_at IS NULL",
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        for row in waiting {
+            let key: String = row.get("dedupe_key");
+            let card = CardNow {
+                due_at: row.get("due_at"),
+                done_at: row.get("done_at"),
+                has_board: row.get("has_board"),
+            };
+            if !still_due(tz, &key, &card) {
+                sqlx::query("DELETE FROM notifications WHERE id = ?1")
+                    .bind(row.get::<i64, _>("id"))
+                    .execute(&self.db)
+                    .await?;
+                tracing::info!(key, "dropped a card mail that is no longer due");
+            }
+        }
+        Ok(())
+    }
+
     async fn enqueue(&self, kind: &str, key: &str, subject: &str, body: &str) -> Result<()> {
         if mail::enqueue(&self.db, kind, key, subject, body).await? {
             tracing::info!(kind, key, "queued a notification");
@@ -353,6 +396,22 @@ impl Notifier {
             )
             .await
     }
+}
+
+/// A card as it stands now, every field `None` when it has been deleted.
+struct CardNow {
+    due_at: Option<i64>,
+    done_at: Option<i64>,
+    has_board: Option<bool>,
+}
+
+/// Whether a card mail queued under `key` — `card_due:<id>:<day>:<stage>` —
+/// still says something true about its card.
+fn still_due(tz: Tz, key: &str, card: &CardNow) -> bool {
+    let queued_for = key.split(':').nth(2);
+    card.done_at.is_none()
+        && card.has_board == Some(true)
+        && card.due_at.map(|due| local_day(tz, due).to_string()).as_deref() == queued_for
 }
 
 /// Run the notifier for as long as the server lives.
@@ -484,6 +543,24 @@ mod tests {
     use crate::config::TimeOfDay;
     use chrono::NaiveDate;
     use chrono_tz::Europe::Berlin;
+
+    #[test]
+    fn a_card_mail_is_only_sent_while_it_is_true() {
+        let tz = chrono_tz::UTC;
+        let due = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 20, 12, 0, 0).unwrap().timestamp();
+        let key = "card_due:7:2026-10-20:due";
+        let open = super::CardNow { due_at: Some(due), done_at: None, has_board: Some(true) };
+        assert!(super::still_due(tz, key, &open));
+
+        let finished = super::CardNow { done_at: Some(due), ..open };
+        assert!(!super::still_due(tz, key, &finished));
+        let moved = super::CardNow { due_at: Some(due + 86_400), done_at: None, has_board: Some(true) };
+        assert!(!super::still_due(tz, key, &moved));
+        let board_off = super::CardNow { due_at: Some(due), done_at: None, has_board: Some(false) };
+        assert!(!super::still_due(tz, key, &board_off));
+        let deleted = super::CardNow { due_at: None, done_at: None, has_board: None };
+        assert!(!super::still_due(tz, key, &deleted));
+    }
 
     fn day(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).expect("a real date")
