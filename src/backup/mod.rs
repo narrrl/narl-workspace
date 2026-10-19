@@ -16,6 +16,7 @@
 pub mod proton;
 pub mod session;
 pub mod sync;
+pub mod view;
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -149,8 +150,8 @@ impl Backup {
             return Ok(None);
         };
 
-        let (root, uploads) = self.device_folders(&client).await?;
-        let summary = sync::run(&self.db, &self.config, &client, &root, &uploads).await?;
+        let folders = self.device_folders(&client).await?;
+        let summary = sync::run(&self.db, &self.config, &client, &folders).await?;
         tracing::info!(
             uploaded = summary.uploaded,
             skipped = summary.skipped,
@@ -161,9 +162,9 @@ impl Backup {
         Ok(Some(summary))
     }
 
-    /// The two folders the mirror writes into: `data/` on the device, and
-    /// `data/uploads/` inside it. Both are registered on first use and then
-    /// remembered.
+    /// The folders the mirror writes into: `data/` on the device and
+    /// `data/uploads/` inside it, and `files/` beside it for the readable
+    /// view. Each is registered on first use and then remembered.
     ///
     /// Nothing is written to the device's own root, because Proton refuses it —
     /// a device root holds folders, and a file there is answered with 422
@@ -178,7 +179,7 @@ impl Backup {
     /// fetch; only a uid that has genuinely gone — the folder deleted in the
     /// Drive UI — costs a lookup, and then it is re-created rather than
     /// searched for.
-    async fn device_folders(&self, client: &ProtonDriveClient) -> Result<(NodeUid, NodeUid)> {
+    async fn device_folders(&self, client: &ProtonDriveClient) -> Result<sync::Folders> {
         let name = self.config.backup.device_name.clone();
         let cached_name = self.state_get("device_name").await?;
         let mut fresh = cached_name.as_deref() != Some(name.as_str());
@@ -222,8 +223,23 @@ impl Backup {
             }
         };
 
+        let files = match self.cached_node(client, "device_files", fresh).await? {
+            Some(uid) => uid,
+            None => {
+                let uid = client
+                    .create_folder_path(&root, "files")
+                    .await
+                    .context("could not create the files folder on the device")?;
+                self.state_set("device_files", &uid.to_string()).await?;
+                // What the view remembers lived in a folder that is gone.
+                sqlx::query("DELETE FROM backup_view").execute(&self.db).await?;
+                sqlx::query("DELETE FROM backup_view_dirs").execute(&self.db).await?;
+                uid
+            }
+        };
+
         self.set(move |s| s.device = Some(name.clone()));
-        Ok((data, uploads))
+        Ok(sync::Folders { data, uploads, files })
     }
 
     /// A remembered node, if it is still remembered and still there.

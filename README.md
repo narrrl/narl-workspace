@@ -237,6 +237,7 @@ narl-workspace/          the device — Proton allows only folders in a device r
     diary.db         a VACUUM INTO snapshot — consistent, no write-ahead log
                      (the file keeps the name it was created with)
     uploads/<uuid>   every uploaded file, under the name the database knows
+  files/             every file node again, as <space>/<folder>/<name>
 ```
 
 `diary.db` becomes a new revision each time, so Proton Drive keeps the older
@@ -254,6 +255,15 @@ back into an empty data directory — no tool in between, which is the point.
 From inside the workspace, `:backup` says when the last one finished and `:backup!`
 runs one now. A failed backup is loud: it is reported by `:backup`, and the next
 tick retries it.
+
+`files/` is for reading, not restoring: the same bytes as `data/uploads/`, laid
+out the way the tree shows them, so a PDF can be opened from Proton Drive's own
+apps by its name. It follows the workspace — a rename or a move there is a
+rename or a move on Drive, not a second upload, and a deleted file goes to
+Drive's trash whatever `WORKSPACE_BACKUP_PRUNE` says, since `data/` still has
+it. Two files that share a name in a folder are told apart by the later one's
+id, `slides (42).pdf`. It costs the storage of every file twice; anything put
+into `files/` by hand may be trashed, because the workspace owns that folder.
 
 Deleting an entry does not delete it from the mirror unless `WORKSPACE_BACKUP_PRUNE`
 is on. A backup that forgets on command is one accident away from being no

@@ -8,11 +8,12 @@
 //!     RESTORE.txt        what this is and how to put it back
 //!     diary.db           a consistent snapshot, one revision per change
 //!     uploads/<uuid>     every uploaded file, under the name the database knows
+//!   files/               the file nodes by folder and name (see `view`)
 //! ```
 //!
 //! so restoring is copying two things into an empty data directory, with no
-//! tool in between. The readable-anywhere view of the workspace is what `:export!`
-//! is for; this is the copy that can be *restored*.
+//! tool in between. `files/` and `:export!` are the readable-anywhere views of
+//! the workspace; `data/` is the copy that can be *restored*.
 
 use std::path::{Path, PathBuf};
 
@@ -52,16 +53,28 @@ consistent and carries no write-ahead log: it can be opened directly.
 
 Each file above keeps its history — Proton Drive holds the previous revisions
 of diary.db, so an accident that was mirrored can still be undone.
+
+The files/ folder next to data/ holds the same uploaded files again, laid out
+by space, folder and name the way the workspace shows them, so they can be
+opened from Proton Drive directly. It is a view kept in step with the
+workspace, not part of the backup: a restore never needs it.
 ";
+
+/// Where on the device the mirror writes.
+pub struct Folders {
+    pub data: NodeUid,
+    pub uploads: NodeUid,
+    pub files: NodeUid,
+}
 
 /// Mirror everything that has changed. Returns what it did.
 pub async fn run(
     db: &SqlitePool,
     config: &Config,
     client: &ProtonDriveClient,
-    data_folder: &NodeUid,
-    uploads_folder: &NodeUid,
+    folders: &Folders,
 ) -> Result<Summary> {
+    let (data_folder, uploads_folder) = (&folders.data, &folders.uploads);
     let mut mirror = Mirror {
         db,
         client,
@@ -80,6 +93,9 @@ pub async fn run(
     if config.backup.prune {
         mirror.prune().await?;
     }
+
+    // Last, so the restorable copy is up before the convenience is.
+    super::view::run(db, config, client, &folders.files, &mut mirror.summary).await?;
 
     Ok(mirror.summary)
 }
