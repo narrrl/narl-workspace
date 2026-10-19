@@ -31,7 +31,7 @@ narl-workspace — a terminal-themed personal workspace
 ";
 
 pub async fn proton_login(config: &Config) -> Result<()> {
-    let store = backup::session::SessionStore::new(config.proton_session_path());
+    let store = backup::session::SessionStore::open(config)?;
 
     // Said before anything is asked for, not after: Proton requires a
     // third-party client to be honest about what it is at the point where
@@ -68,7 +68,7 @@ pub async fn proton_login(config: &Config) -> Result<()> {
 }
 
 pub fn proton_logout(config: &Config) -> Result<()> {
-    let store = backup::session::SessionStore::new(config.proton_session_path());
+    let store = backup::session::SessionStore::open(config)?;
     store.clear()?;
     println!("Forgot the Proton session. Backups are off until the next login.");
     println!(
@@ -78,7 +78,7 @@ pub fn proton_logout(config: &Config) -> Result<()> {
 }
 
 pub async fn proton_status(db: &SqlitePool, config: &Config) -> Result<()> {
-    let store = backup::session::SessionStore::new(config.proton_session_path());
+    let store = backup::session::SessionStore::open(config)?;
     let Some(stored) = store.load()? else {
         println!("Proton Drive backups are not configured.");
         println!("Run `narl-workspace proton-login` to enable them.");

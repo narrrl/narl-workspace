@@ -104,7 +104,7 @@ async fn main() -> Result<()> {
     let bind = config.bind;
     let max_upload = config.max_upload_bytes;
     let config = Arc::new(config);
-    let backup = backup::Backup::new(db.clone(), Arc::clone(&config));
+    let backup = backup::Backup::new(db.clone(), Arc::clone(&config))?;
     backup::spawn(Arc::clone(&backup));
 
     let notify = notify::Notifier::new(db.clone(), Arc::clone(&config))?;

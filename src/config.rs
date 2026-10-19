@@ -145,6 +145,10 @@ pub struct BackupConfig {
     /// Whether a file deleted here is trashed there. Off by default: a backup
     /// that forgets on command is one accident away from being no backup.
     pub prune: bool,
+    /// A file holding the key `proton-session.json` is sealed under, kept off
+    /// the data volume (a Docker secret, say) so a copy of the volume alone
+    /// does not carry a usable session. `None` leaves the file as plain JSON.
+    pub session_key_file: Option<PathBuf>,
 }
 
 /// Look a setting up in the environment.
@@ -331,6 +335,7 @@ impl BackupConfig {
             interval,
             debounce,
             prune,
+            session_key_file: var("SESSION_KEY_FILE").map(PathBuf::from),
         })
     }
 }

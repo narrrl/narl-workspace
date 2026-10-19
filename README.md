@@ -269,6 +269,22 @@ without it on the next start; no new login is needed. Built with
 the OS keyring instead and the file is only a fallback; the container has no
 session bus, so there it is always the file.
 
+In a container, `WORKSPACE_SESSION_KEY_FILE` does what the keyring would: the
+file is sealed with AES-256-GCM under a key read from somewhere other than the
+volume, so a copy of the volume alone is no longer a session. A Docker secret is
+the place for it:
+
+```sh
+mkdir -p secrets
+openssl rand -base64 32 > secrets/session.key
+sudo chown 10001 secrets/session.key && sudo chmod 400 secrets/session.key
+```
+
+then the `secrets:` lines from `compose.override.yml.example`, and
+`WORKSPACE_SESSION_KEY_FILE=/run/secrets/session_key` in `.env`. A plain session
+already on the volume is sealed the next time it is read. Lose the key and the
+session goes with it; `proton-login` makes a new one.
+
 Afterwards the server resumes on its own and nothing prompts again. Refresh
 tokens are single-use, so every rotation is written back immediately — which is
 also why two servers must not share one session file.

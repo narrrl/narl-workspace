@@ -17,6 +17,10 @@ services:
       - "traefik.http.routers.workspace.entrypoints=websecure"
       - "traefik.http.routers.workspace.tls.certresolver=https_resolver"
       - "traefik.http.services.workspace.loadbalancer.server.port=4242"
+    # The key the Proton session is sealed under, mounted from the host at
+    # /run/secrets/session_key. Needs WORKSPACE_SESSION_KEY_FILE in .env.
+    secrets:
+      - session_key
 
   # Mail, locally. Mailpit accepts everything on 1025 and shows it on 8025, so
   # the reminders can be read before a real relay is ever involved:
@@ -32,6 +36,12 @@ services:
       - internal_net
     ports:
       - "127.0.0.1:8025:8025"
+
+secrets:
+  # Outside compose is a plain bind mount, so the file must be readable by
+  # the container's user: `chown 10001 secrets/session.key`.
+  session_key:
+    file: ./secrets/session.key
 
 networks:
   narl:

@@ -23,12 +23,22 @@
 //! [`super::proton`], which persists on every rotation.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use aes_gcm::{
+    aead::{Aead, KeyInit, Payload},
+    Aes256Gcm, Nonce,
+};
+use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use rand::RngCore;
 use proton_drive_rs::KeySalt;
 use proton_sdk::account::KeyPassphrases;
 use proton_sdk::session::{PasswordMode, ProtonApiSession, ResumeParameters};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
+
+use crate::config::Config;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StoredSession {
@@ -127,14 +137,39 @@ mod passphrases {
 /// protecting, and no weaker than the thing it sits beside. Build with
 /// `--features keyring` on a host that has a session bus to use the keyring
 /// instead, with the file as the fallback when it cannot be reached.
+///
+/// What a keyring adds is that a copy of the volume does not carry the
+/// session. `WORKSPACE_SESSION_KEY_FILE` gives a container the same: the file
+/// is sealed with AES-256-GCM under a key that lives somewhere else, a Docker
+/// secret being the obvious place. A plain file found while a key is set is
+/// sealed the first time it is read.
 #[derive(Clone)]
 pub struct SessionStore {
     path: PathBuf,
+    key: Option<Arc<Zeroizing<[u8; 32]>>>,
 }
+
+/// Starts a sealed session file. Nothing that is JSON can start with it.
+const MAGIC: &[u8; 8] = b"NARLSES1";
+const NONCE: usize = 12;
 
 impl SessionStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            key: None,
+        }
+    }
+
+    /// The store the configuration describes: the usual path, sealed when a
+    /// key file is set. A key file that is missing or malformed is an error
+    /// rather than a quiet fall back to plain JSON.
+    pub fn open(config: &Config) -> Result<Self> {
+        let mut store = Self::new(config.proton_session_path());
+        if let Some(file) = &config.backup.session_key_file {
+            store.key = Some(Arc::new(read_key(file)?));
+        }
+        Ok(store)
     }
 
     pub fn path(&self) -> &Path {
@@ -147,27 +182,50 @@ impl SessionStore {
             return Ok(Some(stored));
         }
 
-        let json = match std::fs::read_to_string(&self.path) {
-            Ok(json) => json,
+        let bytes = match std::fs::read(&self.path) {
+            Ok(bytes) => Zeroizing::new(bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => {
                 return Err(e).with_context(|| format!("could not read {}", self.path.display()))
             }
         };
-        let stored = serde_json::from_str(&json)
+
+        let sealed = bytes.starts_with(MAGIC);
+        let json = match (sealed, &self.key) {
+            (true, Some(key)) => open(key, &bytes).with_context(|| {
+                format!(
+                    "{} does not open with WORKSPACE_SESSION_KEY_FILE — was the key replaced?",
+                    self.path.display()
+                )
+            })?,
+            (true, None) => bail!(
+                "{} is sealed — set WORKSPACE_SESSION_KEY_FILE to the key it was sealed with",
+                self.path.display()
+            ),
+            (false, _) => bytes,
+        };
+        let stored = serde_json::from_slice(&json)
             .with_context(|| format!("{} is not a session this build understands", self.path.display()))?;
+
+        if !sealed && self.key.is_some() {
+            self.save(&stored)?;
+            tracing::info!("the stored Proton session is now sealed under WORKSPACE_SESSION_KEY_FILE");
+        }
         Ok(Some(stored))
     }
 
     pub fn save(&self, stored: &StoredSession) -> Result<()> {
-        let json = serde_json::to_string(stored)?;
+        let json = Zeroizing::new(serde_json::to_vec(stored)?);
 
         #[cfg(feature = "keyring")]
-        if keyring_save(&json).is_ok() {
+        if keyring_save(std::str::from_utf8(&json)?).is_ok() {
             return Ok(());
         }
 
-        write_private(&self.path, json.as_bytes())
+        match &self.key {
+            Some(key) => write_private(&self.path, &seal(key, &json)),
+            None => write_private(&self.path, &json),
+        }
     }
 
     pub fn clear(&self) -> Result<()> {
@@ -180,6 +238,49 @@ impl SessionStore {
             Err(e) => Err(e).with_context(|| format!("could not remove {}", self.path.display())),
         }
     }
+}
+
+/// 32 random bytes, base64 — what `openssl rand -base64 32` writes.
+fn read_key(file: &Path) -> Result<Zeroizing<[u8; 32]>> {
+    let text = Zeroizing::new(
+        std::fs::read_to_string(file)
+            .with_context(|| format!("could not read the session key {}", file.display()))?,
+    );
+    let bytes = Zeroizing::new(STANDARD.decode(text.trim()).unwrap_or_default());
+    let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+        anyhow!(
+            "{} must hold 32 random bytes in base64 — `openssl rand -base64 32` makes one",
+            file.display()
+        )
+    })?;
+    Ok(Zeroizing::new(key))
+}
+
+/// `MAGIC ‖ nonce ‖ ciphertext`, with the magic bound in as associated data.
+fn seal(key: &[u8; 32], json: &[u8]) -> Vec<u8> {
+    let mut nonce = [0u8; NONCE];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let ciphertext = Aes256Gcm::new(key.into())
+        .encrypt(Nonce::from_slice(&nonce), Payload { msg: json, aad: MAGIC })
+        .expect("AES-GCM seals any input this size");
+
+    let mut out = Vec::with_capacity(MAGIC.len() + NONCE + ciphertext.len());
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ciphertext);
+    out
+}
+
+fn open(key: &[u8; 32], sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    let rest = &sealed[MAGIC.len()..];
+    if rest.len() < NONCE {
+        bail!("the sealed session is cut short");
+    }
+    let (nonce, ciphertext) = rest.split_at(NONCE);
+    Aes256Gcm::new(key.into())
+        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad: MAGIC })
+        .map(Zeroizing::new)
+        .map_err(|_| anyhow!("the key does not open it, or it was altered"))
 }
 
 /// Write `bytes` to `path` as `0600`, and atomically: a crash mid-write must
@@ -298,5 +399,66 @@ mod tests {
         assert!(loaded.key_passphrases.is_empty());
         assert_eq!(loaded.mailbox_password.as_deref(), Some("hunter2hunter2"));
         assert_eq!(loaded.key_salts.len(), 1);
+    }
+
+    fn keyed(path: &Path, key: [u8; 32]) -> SessionStore {
+        SessionStore {
+            path: path.to_owned(),
+            key: Some(Arc::new(Zeroizing::new(key))),
+        }
+    }
+
+    #[test]
+    fn a_keyed_store_seals_the_file_and_only_its_key_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proton-session.json");
+        let passphrases = KeyPassphrases::from_iter([("key-1", b"secret".to_vec())]);
+
+        keyed(&path, [7; 32]).save(&stored(passphrases.clone())).unwrap();
+        let raw = std::fs::read(&path).unwrap();
+        assert!(raw.starts_with(MAGIC));
+        assert!(!raw.windows(7).any(|w| w == b"refresh"), "tokens left in the clear");
+
+        let loaded = keyed(&path, [7; 32]).load().unwrap().unwrap();
+        assert!(loaded.key_passphrases == passphrases);
+
+        let wrong = keyed(&path, [8; 32]).load().err().unwrap();
+        assert!(format!("{wrong:#}").contains("does not open"), "{wrong:#}");
+        let none = SessionStore::new(&path).load().err().unwrap();
+        assert!(none.to_string().contains("WORKSPACE_SESSION_KEY_FILE"), "{none}");
+
+        let mut flipped = raw.clone();
+        *flipped.last_mut().unwrap() ^= 1;
+        std::fs::write(&path, &flipped).unwrap();
+        assert!(keyed(&path, [7; 32]).load().is_err());
+    }
+
+    #[test]
+    fn a_plain_file_is_sealed_the_first_time_a_key_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proton-session.json");
+        SessionStore::new(&path).save(&stored(KeyPassphrases::new())).unwrap();
+        assert!(std::fs::read(&path).unwrap().starts_with(b"{"));
+
+        let loaded = keyed(&path, [7; 32]).load().unwrap().unwrap();
+        assert_eq!(loaded.refresh_token, "refresh");
+        assert!(std::fs::read(&path).unwrap().starts_with(MAGIC));
+        assert!(keyed(&path, [7; 32]).load().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_key_file_must_hold_32_bytes_of_base64() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.key");
+
+        std::fs::write(&file, format!("{}\n", STANDARD.encode([3u8; 32]))).unwrap();
+        assert_eq!(*read_key(&file).unwrap(), [3u8; 32]);
+
+        for bad in ["", "not base64 at all", &STANDARD.encode([3u8; 16])] {
+            std::fs::write(&file, bad).unwrap();
+            let error = read_key(&file).err().unwrap();
+            assert!(error.to_string().contains("openssl rand -base64 32"), "{error}");
+        }
+        assert!(read_key(&dir.path().join("missing")).is_err());
     }
 }

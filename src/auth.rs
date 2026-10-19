@@ -118,6 +118,7 @@ mod tests {
                 interval: None,
                 debounce: std::time::Duration::from_secs(0),
                 prune: false,
+                session_key_file: None,
             },
             mail: MailConfig {
                 url: None,

@@ -65,10 +65,10 @@ pub struct Backup {
 }
 
 impl Backup {
-    pub fn new(db: SqlitePool, config: Arc<Config>) -> Arc<Self> {
-        let store = SessionStore::new(config.proton_session_path());
+    pub fn new(db: SqlitePool, config: Arc<Config>) -> Result<Arc<Self>> {
+        let store = SessionStore::open(&config)?;
         let configured = matches!(store.load(), Ok(Some(_)));
-        Arc::new(Self {
+        Ok(Arc::new(Self {
             db,
             config,
             store,
@@ -81,7 +81,7 @@ impl Backup {
                 ..Status::default()
             }),
             running: tokio::sync::Mutex::new(()),
-        })
+        }))
     }
 
     pub fn status(&self) -> Status {
@@ -333,7 +333,7 @@ pub fn spawn(backup: Arc<Backup>) {
 
 /// One-shot mirror for `narl-workspace backup-now`, without starting a server.
 pub async fn run_once(db: SqlitePool, config: Arc<Config>) -> Result<Summary> {
-    let backup = Backup::new(db, config);
+    let backup = Backup::new(db, config)?;
     backup
         .run_now()
         .await?
