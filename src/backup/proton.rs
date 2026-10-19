@@ -2,7 +2,9 @@
 
 use anyhow::{anyhow, Context, Result};
 use proton_drive_rs::{Device, DeviceType, ProtonDriveClient};
+use proton_sdk::account::AccountClient;
 use proton_sdk::config::ProtonClientConfiguration;
+use proton_sdk::error::ProtonError;
 use proton_sdk::session::ProtonApiSession;
 
 use super::session::{SessionStore, StoredSession};
@@ -60,22 +62,24 @@ pub async fn login(
             .context("Proton rejected the second-factor code")?;
     }
 
-    // Salts are fetched here and only here: this access token still carries the
-    // `locked` scope, and no refreshed one ever will.
+    // The passphrases are derived here and only here: this access token still
+    // carries the `locked` scope the key salts need, and no refreshed one ever
+    // will. Unlocking checks them against the account's keys before anything
+    // is stored, so a wrong mailbox password fails now and not at the first
+    // backup.
     let client = ProtonDriveClient::new(&session, password.as_bytes().to_vec());
-    let key_salts = client
-        .account()
-        .key_salts()
+    let account = client.account();
+    let key_passphrases = account
+        .key_passphrases()
         .await
-        .context("could not read the account key salts")?;
+        .context("could not derive the account key passphrases")?;
+    account.unlock().await.map_err(|e| match e {
+        ProtonError::KeysLocked => anyhow!("that password does not unlock the account's keys"),
+        e => anyhow::Error::from(e).context("could not unlock the account's keys"),
+    })?;
 
     let tokens = session.current_tokens().await;
-    store.save(&StoredSession::from_session(
-        &session,
-        tokens,
-        password,
-        key_salts,
-    ))?;
+    store.save(&StoredSession::from_session(&session, tokens, key_passphrases))?;
     Ok(())
 }
 
@@ -83,17 +87,15 @@ pub async fn login(
 /// been stored yet — that is the ordinary "backups are not set up" state, not
 /// an error.
 pub async fn resume(store: &SessionStore) -> Result<Option<ProtonDriveClient>> {
-    let Some(stored) = store.load()? else {
+    let Some(mut stored) = store.load()? else {
         return Ok(None);
     };
 
     let session = ProtonApiSession::resume(client_config(), stored.resume_parameters())
         .context("the stored Proton session could not be resumed")?;
 
-    if stored.key_salts.is_empty() {
-        return Err(anyhow!(
-            "the stored Proton session has no key salts — run `narl-workspace proton-login` again"
-        ));
+    if stored.key_passphrases.is_empty() {
+        stored = upgrade(store, &session, stored).await?;
     }
 
     // Every 401 refresh mints a new refresh token and invalidates the old one,
@@ -111,16 +113,48 @@ pub async fn resume(store: &SessionStore) -> Result<Option<ProtonDriveClient>> {
         }
     });
 
-    let client = ProtonDriveClient::with_key_salts(
-        &session,
-        stored.mailbox_password.clone().into_bytes(),
-        stored.key_salts.clone(),
-    )
-    // A workspace is mostly small files; one atomic request beats the
-    // draft/block/commit dance for anything that fits in a single block.
-    .with_small_file_upload(true);
+    let client = ProtonDriveClient::with_key_passphrases(&session, stored.key_passphrases)
+        // A workspace is mostly small files; one atomic request beats the
+        // draft/block/commit dance for anything that fits in a single block.
+        .with_small_file_upload(true);
 
     Ok(Some(client))
+}
+
+/// Rewrite a session stored before the passphrases were, which kept the
+/// mailbox password and the key salts instead. The salts are already known, so
+/// the passphrases derive locally, with no request and no new login, and the
+/// password is gone from the store once the new session is written.
+async fn upgrade(
+    store: &SessionStore,
+    session: &ProtonApiSession,
+    stored: StoredSession,
+) -> Result<StoredSession> {
+    let (Some(password), false) = (&stored.mailbox_password, stored.key_salts.is_empty()) else {
+        return Err(anyhow!(
+            "the stored Proton session has no key passphrases — run `narl-workspace proton-login` again"
+        ));
+    };
+
+    let account = AccountClient::with_key_salts(
+        session,
+        password.clone().into_bytes(),
+        stored.key_salts.clone(),
+    );
+    let key_passphrases = account
+        .key_passphrases()
+        .await
+        .context("could not derive key passphrases from the stored session")?;
+
+    let upgraded = StoredSession {
+        key_passphrases,
+        mailbox_password: None,
+        key_salts: Vec::new(),
+        ..stored
+    };
+    store.save(&upgraded)?;
+    tracing::info!("the stored Proton session now keeps key passphrases instead of the password");
+    Ok(upgraded)
 }
 
 /// The device this server owns, registered on first use.
@@ -152,7 +186,53 @@ pub async fn ensure_device(client: &ProtonDriveClient, name: &str) -> Result<Dev
 
 #[cfg(test)]
 mod tests {
-    use super::app_version;
+    use super::*;
+
+    /// No request leaves for this: resuming only builds the HTTP client, and
+    /// with the salts already stored the passphrases derive locally.
+    #[tokio::test]
+    async fn an_old_session_trades_its_password_for_passphrases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proton-session.json");
+        std::fs::write(
+            &path,
+            r#"{"session_id":"s","username":"u","user_id":"i","access_token":"a",
+               "refresh_token":"r","scopes":[],"password_mode":1,
+               "mailbox_password":"hunter2hunter2",
+               "key_salts":[{"ID":"key-1","KeySalt":"c2FsdHNhbHRzYWx0c2FsdA=="}]}"#,
+        )
+        .unwrap();
+        let store = SessionStore::new(&path);
+        let stored = store.load().unwrap().unwrap();
+        let session = ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
+
+        let upgraded = upgrade(&store, &session, stored).await.unwrap();
+        assert_eq!(upgraded.key_passphrases.len(), 1);
+        assert!(upgraded.key_passphrases.get("key-1").is_some());
+
+        let json = std::fs::read_to_string(&path).unwrap();
+        assert!(!json.contains("hunter2"), "{json}");
+        let reloaded = store.load().unwrap().unwrap();
+        assert!(reloaded.key_passphrases == upgraded.key_passphrases);
+    }
+
+    #[tokio::test]
+    async fn a_session_with_nothing_to_unlock_with_asks_for_a_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proton-session.json");
+        std::fs::write(
+            &path,
+            r#"{"session_id":"s","username":"u","user_id":"i","access_token":"a",
+               "refresh_token":"r","scopes":[],"password_mode":1}"#,
+        )
+        .unwrap();
+        let store = SessionStore::new(&path);
+        let stored = store.load().unwrap().unwrap();
+        let session = ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
+
+        let error = upgrade(&store, &session, stored).await.err().unwrap();
+        assert!(error.to_string().contains("proton-login"), "{error}");
+    }
 
     #[test]
     fn identifies_itself_the_way_proton_requires() {

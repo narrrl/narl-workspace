@@ -1,16 +1,22 @@
 //! The stored Proton session: everything needed to come back up unattended.
 //!
 //! A login is worth persisting whole, because none of it can be re-derived
-//! without a human: the tokens (the session itself), the mailbox password
-//! (which rebuilds the key chain on every start — the SDK needs it in memory to
-//! decrypt anything), and the account's key salts.
+//! without a human: the tokens (the session itself) and the key passphrases
+//! (which rebuild the key chain on every start — the SDK needs them in memory
+//! to decrypt anything).
 //!
-//! The salts matter more than they look. `core/v4/keys/salts` requires the
-//! `locked` scope, and only the access token minted by a *password* login
-//! carries it; once that token has been rotated through `auth/v4/refresh` — as
-//! it is on every restart after the first — the endpoint answers 403 and the
-//! key chain can no longer be unlocked. So the salts are captured at login and
-//! handed back on resume, exactly as the desktop client does it.
+//! The passphrases are what the password is for: each is
+//! `bcrypt(mailbox password, key salt)` and unlocks one account key. Keeping
+//! them instead of the password means the store never holds the password
+//! itself, which on a single-password account is the login password. They
+//! read the account all the same, so they are no less secret — but they cannot
+//! log in, change the password or turn 2FA off.
+//!
+//! They are derived at login and only then. Deriving needs the key salts, and
+//! `core/v4/keys/salts` requires the `locked` scope, which only the access
+//! token minted by a *password* login carries; once that token has been rotated
+//! through `auth/v4/refresh` — as it is on every restart after the first — the
+//! endpoint answers 403.
 //!
 //! Refresh tokens are single-use: a rotation that is not written back leaves a
 //! dead token on disk and the next resume fails. Hence the refresh hook in
@@ -20,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use proton_drive_rs::KeySalt;
+use proton_sdk::account::KeyPassphrases;
 use proton_sdk::session::{PasswordMode, ProtonApiSession, ResumeParameters};
 use serde::{Deserialize, Serialize};
 
@@ -33,12 +40,16 @@ pub struct StoredSession {
     pub scopes: Vec<String>,
     /// `1` = single password, `2` = dual (Proton's wire values).
     pub password_mode: u8,
-    /// Mailbox (data) password. `ProtonDriveClient` derives the key chain from
-    /// it on every construction, so a backup that runs unattended has to hold
-    /// it — there is no token-only mode.
-    pub mailbox_password: String,
-    /// Captured at login, because a refreshed token may no longer fetch them.
-    #[serde(default)]
+    /// Key id → the passphrase that unlocks it, derived at login. Empty only
+    /// in a session written before they were, which still has the two fields
+    /// below.
+    #[serde(default, with = "passphrases")]
+    pub key_passphrases: KeyPassphrases,
+    /// What a session stored before the passphrases kept instead of them.
+    /// Read once, to derive the passphrases, and never written again.
+    #[serde(default, skip_serializing)]
+    pub mailbox_password: Option<String>,
+    #[serde(default, skip_serializing)]
     pub key_salts: Vec<KeySalt>,
 }
 
@@ -46,8 +57,7 @@ impl StoredSession {
     pub fn from_session(
         session: &ProtonApiSession,
         tokens: proton_sdk::http::Tokens,
-        mailbox_password: &str,
-        key_salts: Vec<KeySalt>,
+        key_passphrases: KeyPassphrases,
     ) -> Self {
         Self {
             session_id: session.session_id().as_str().to_owned(),
@@ -60,8 +70,9 @@ impl StoredSession {
                 PasswordMode::Single => 1,
                 PasswordMode::Dual => 2,
             },
-            mailbox_password: mailbox_password.to_owned(),
-            key_salts,
+            key_passphrases,
+            mailbox_password: None,
+            key_salts: Vec::new(),
         }
     }
 
@@ -79,6 +90,31 @@ impl StoredSession {
                 _ => PasswordMode::Dual,
             },
         }
+    }
+}
+
+/// Passphrases are bytes; the session file is JSON. Each one is kept as
+/// base64 under its key id.
+mod passphrases {
+    use std::collections::BTreeMap;
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use proton_sdk::account::KeyPassphrases;
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+    use zeroize::Zeroizing;
+
+    pub fn serialize<S: Serializer>(value: &KeyPassphrases, out: S) -> Result<S::Ok, S::Error> {
+        out.collect_map(value.iter().map(|(id, passphrase)| (id, STANDARD.encode(passphrase))))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<KeyPassphrases, D::Error> {
+        let encoded = BTreeMap::<String, Zeroizing<String>>::deserialize(input)?;
+        let mut passphrases = KeyPassphrases::new();
+        for (id, passphrase) in encoded {
+            let bytes = STANDARD.decode(passphrase.as_bytes()).map_err(D::Error::custom)?;
+            passphrases.insert(id, bytes);
+        }
+        Ok(passphrases)
     }
 }
 
@@ -200,5 +236,67 @@ fn keyring_clear() -> Result<()> {
     match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).map(|e| e.delete_credential()) {
         Ok(Ok(())) | Ok(Err(keyring::Error::NoEntry)) | Err(_) => Ok(()),
         Ok(Err(e)) => Err(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored(key_passphrases: KeyPassphrases) -> StoredSession {
+        StoredSession {
+            session_id: "session".into(),
+            username: "someone".into(),
+            user_id: "user".into(),
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            scopes: vec!["full".into()],
+            password_mode: 1,
+            key_passphrases,
+            mailbox_password: None,
+            key_salts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn passphrases_survive_the_file_and_the_password_never_reaches_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(dir.path().join("proton-session.json"));
+        let passphrases =
+            KeyPassphrases::from_iter([("key-1", b"one\0\xff".to_vec()), ("key-2", b"two".to_vec())]);
+
+        // Even a session that still holds the old fields in memory writes
+        // neither of them.
+        let mut session = stored(passphrases.clone());
+        session.mailbox_password = Some("hunter2hunter2".into());
+        store.save(&session).unwrap();
+
+        let json = std::fs::read_to_string(store.path()).unwrap();
+        assert!(!json.contains("hunter2"), "{json}");
+        assert!(!json.contains("mailbox_password"), "{json}");
+        assert!(!json.contains("key_salts"), "{json}");
+
+        let loaded = store.load().unwrap().unwrap();
+        assert!(loaded.key_passphrases == passphrases);
+        assert!(loaded.mailbox_password.is_none());
+    }
+
+    #[test]
+    fn a_session_from_before_the_passphrases_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proton-session.json");
+        std::fs::write(
+            &path,
+            r#"{"session_id":"s","username":"u","user_id":"i","access_token":"a",
+               "refresh_token":"r","scopes":[],"password_mode":1,
+               "mailbox_password":"hunter2hunter2",
+               "key_salts":[{"ID":"key-1","KeySalt":"c2FsdHNhbHRzYWx0c2FsdA=="}]}"#,
+        )
+        .unwrap();
+
+        let loaded = SessionStore::new(path).load().unwrap().unwrap();
+        assert!(loaded.key_passphrases.is_empty());
+        assert_eq!(loaded.mailbox_password.as_deref(), Some("hunter2hunter2"));
+        assert_eq!(loaded.key_salts.len(), 1);
     }
 }

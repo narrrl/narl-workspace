@@ -257,10 +257,14 @@ narl-workspace proton-login                       # or, in Docker:
 docker compose exec -it workspace narl-workspace proton-login
 ```
 
-That stores a session — tokens, the mailbox password needed to rebuild the key
-chain, and the account key salts — as a `0600` file next to the database. It
-sits on the same volume as the workspace it protects, and it is enough to read the
-account, so the volume is the thing to keep private. Built with
+That checks the password against the account's keys and stores a session —
+the tokens, and the key passphrases derived from the password at login — as a
+`0600` file next to the database. The password itself is never stored: the
+passphrases unlock the keys but cannot log in, change the password or turn 2FA
+off. They are still enough to read the account, and the file sits on the same
+volume as the workspace it protects, so the volume is the thing to keep private.
+A session stored by an older build, which kept the password, is rewritten
+without it on the next start; no new login is needed. Built with
 `--features keyring` on a host that has a Secret Service, the session goes to
 the OS keyring instead and the file is only a fallback; the container has no
 session bus, so there it is always the file.
