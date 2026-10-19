@@ -11,6 +11,7 @@ import {
   type MediaFile,
   type NodeSummary,
   type SpaceOverview,
+  type VaultStatus,
 } from './api'
 import { formatBytes } from './util'
 
@@ -120,6 +121,10 @@ class Workspace {
    * keyboard without a modal the rest of the page cannot see past.
    */
   prompt = $state<{ text: string; resolve: (yes: boolean) => void } | null>(null)
+  /** A password asked for in the same place, typed into a masked field. */
+  secret = $state<{ text: string; resolve: (value: string | null) => void } | null>(null)
+  /** The vault, as last heard from the server; null until asked. */
+  vault = $state<VaultStatus | null>(null)
   media = $state<MediaFile[]>([])
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
@@ -196,6 +201,53 @@ class Workspace {
   get dueCounts(): { late: number; today: number } {
     const [overdue, today] = this.agendaGroups
     return { late: overdue.cards.length, today: today.cards.length }
+  }
+
+  /** A password, or null when it was waved away with Escape. */
+  askSecret(text: string): Promise<string | null> {
+    this.secret?.resolve(null)
+    return new Promise((resolve) => {
+      this.secret = {
+        text,
+        resolve: (value) => {
+          this.secret = null
+          resolve(value)
+        },
+      }
+    })
+  }
+
+  async loadVault() {
+    this.vault = await api.vaultStatus()
+  }
+
+  /**
+   * Whatever needs the vault asks for the password itself rather than failing
+   * with "locked": opening it is the obvious next step anyway. False when
+   * there is no vault, or the question was declined.
+   */
+  async ensureUnlocked(): Promise<boolean> {
+    await this.loadVault()
+    if (!this.vault?.configured) {
+      this.say('there is no vault yet — :vault sets one up', 'error')
+      return false
+    }
+    if (this.vault.unlocked) return true
+    const password = await this.askSecret('vault password')
+    if (password === null) return false
+    this.vault = await api.unlockVault(password)
+    this.say('vault unlocked')
+    return true
+  }
+
+  /** Seal what is under the cursor, or take it back out, and show the result. */
+  async seal(id: number, encrypt: boolean) {
+    const { files, unchanged } = await api.seal(id, encrypt)
+    const verb = encrypt ? 'encrypted' : 'decrypted'
+    const already = unchanged > 0 ? `, ${unchanged} already were` : ''
+    this.say(`${verb} ${files} file${files === 1 ? '' : 's'}${already}`)
+    await this.refresh()
+    if (this.open?.kind === 'file') this.open = await api.getNode(this.open.id)
   }
 
   ask(text: string): Promise<boolean> {
@@ -324,6 +376,7 @@ class Workspace {
       this.user = user
       await this.loadSpaces(Workspace.addressedPath())
       await this.loadAgenda()
+      await this.loadVault()
       await this.openAgendaIfDue()
     } catch {
       this.user = null
@@ -337,12 +390,14 @@ class Workspace {
     this.user = user
     await this.loadSpaces(Workspace.addressedPath())
     await this.loadAgenda()
+    await this.loadVault()
     await this.openAgendaIfDue()
   }
 
   async logout() {
     await api.logout()
     this.user = null
+    this.vault = null
     this.spaces = []
     this.nodes = []
     this.open = null
@@ -1097,14 +1152,14 @@ class Workspace {
    * Upload files into the folder being browsed, as nodes of their own. The
    * status line counts up while they go, because a large one takes a while.
    */
-  async putFiles(files: File[]) {
+  async putFiles(files: File[], encrypt = false) {
     const parent = this.parentId
     if (parent === null) return
     const total = files.reduce((sum, file) => sum + file.size, 0)
     const what = files.length === 1 ? files[0].name : `${files.length} files`
-    this.say(`uploading ${what} (${formatBytes(total)}) …`)
+    this.say(`uploading ${what} (${formatBytes(total)})${encrypt ? ' into the vault' : ''} …`)
 
-    const created = await api.putFiles(parent, files, (fraction) =>
+    const created = await api.putFiles(parent, files, encrypt, (fraction) =>
       this.say(`uploading ${what} — ${Math.floor(fraction * 100)}%`),
     )
     this.query = ''
@@ -1141,6 +1196,10 @@ class Workspace {
       if (error instanceof ApiError && error.status === 401) {
         this.user = null
         this.say('session expired — log in again', 'error')
+      } else if (error instanceof ApiError && error.status === 423) {
+        // It locked itself while nobody was looking.
+        if (this.vault) this.vault = { ...this.vault, unlocked: false, locks_in: null }
+        this.say(error.message, 'error')
       } else {
         this.say(error instanceof Error ? error.message : String(error), 'error')
       }

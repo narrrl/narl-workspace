@@ -59,6 +59,7 @@
     documents: 'documents',
     editing: 'writing',
     sharing: 'sharing & export',
+    vault: 'vault',
     view: 'session',
   }
 

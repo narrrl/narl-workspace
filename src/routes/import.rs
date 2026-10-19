@@ -252,7 +252,7 @@ async fn collect(
             // The archive itself is only passing through: it lands under a
             // dotted name no media row can carry, and goes once it is unpacked.
             let id = format!(".import-{}", Uuid::new_v4());
-            let size = media::store_field(state, &mut field, &id, &mut budget).await?;
+            let size = media::store_field(state, &mut field, &id, &mut budget, None).await?;
             if size == 0 {
                 skipped.push(name);
                 continue;
@@ -309,7 +309,7 @@ async fn collect(
 
         let mime = media::mime_of(&path, field.content_type());
         let id = Uuid::new_v4().to_string();
-        let size = media::store_field(state, &mut field, &id, &mut budget).await?;
+        let size = media::store_field(state, &mut field, &id, &mut budget, None).await?;
         if size == 0 {
             skipped.push(path);
             continue;

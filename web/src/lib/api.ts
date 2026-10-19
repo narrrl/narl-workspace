@@ -10,6 +10,8 @@ export interface FileInfo {
   mime: string
   size: number
   url: string
+  /** Sealed in the vault: it opens only while the vault is unlocked. */
+  encrypted: boolean
 }
 
 export interface NodeSummary {
@@ -125,8 +127,17 @@ export interface MediaFile {
   size: number
   created_at: number
   url: string
+  encrypted: boolean
   /** Every document that embeds this file — a file may be used by several. */
   node_ids: number[]
+}
+
+/** The vault, as `/api/vault` reports it. */
+export interface VaultStatus {
+  configured: boolean
+  unlocked: boolean
+  /** Seconds until it locks itself if nothing uses it. */
+  locks_in: number | null
 }
 
 /** The Proton Drive mirror, as `/api/backup` reports it. */
@@ -285,12 +296,12 @@ export const api = {
    * Upload files into a space or folder as file nodes. XHR rather than fetch,
    * because a gigabyte going up needs to say how far along it is.
    */
-  putFiles: (parentId: number, files: File[], progress?: (fraction: number) => void) =>
+  putFiles: (parentId: number, files: File[], encrypt: boolean, progress?: (fraction: number) => void) =>
     new Promise<WorkspaceNode[]>((resolve, reject) => {
       const form = new FormData()
       for (const file of files) form.append('file', file)
       const xhr = new XMLHttpRequest()
-      xhr.open('POST', `/api/nodes/${parentId}/files`)
+      xhr.open('POST', `/api/nodes/${parentId}/files${encrypt ? '?encrypt=true' : ''}`)
       xhr.responseType = 'json'
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) progress?.(event.loaded / event.total)
@@ -310,6 +321,25 @@ export const api = {
   },
 
   deleteMedia: (id: string) => request<{ ok: true }>(`/media/${id}`, { method: 'DELETE' }),
+
+  vaultStatus: () => request<VaultStatus>('/vault'),
+
+  setupVault: (password: string) =>
+    request<VaultStatus>('/vault', { method: 'POST', body: body({ password }) }),
+
+  changeVaultPassword: (current: string, password: string) =>
+    request<VaultStatus>('/vault', { method: 'PUT', body: body({ current, password }) }),
+
+  unlockVault: (password: string) =>
+    request<VaultStatus>('/vault/unlock', { method: 'POST', body: body({ password }) }),
+
+  lockVault: () => request<VaultStatus>('/vault/lock', { method: 'POST' }),
+
+  /** Seal a file, or every file under a folder, into the vault — or take it back out. */
+  seal: (id: number, encrypt: boolean) =>
+    request<{ files: number; unchanged: number }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
+      method: 'POST',
+    }),
 
   backupStatus: () => request<BackupStatus>('/backup'),
 

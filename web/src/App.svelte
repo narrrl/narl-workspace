@@ -12,6 +12,7 @@
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
   import Prompt from './lib/Prompt.svelte'
+  import SecretPrompt from './lib/SecretPrompt.svelte'
   import Rail from './lib/Rail.svelte'
   import Shared from './lib/Shared.svelte'
   import Sidebar from './lib/Sidebar.svelte'
@@ -31,6 +32,8 @@
   let cmdGlobal = $state(false)
   let fileInput = $state<HTMLInputElement>()
   let treeInput = $state<HTMLInputElement>()
+  /** Whether the files being picked go into the vault — `:upload!`. */
+  let sealUpload = false
   let folderInput = $state<HTMLInputElement>()
   let importInput = $state<HTMLInputElement>()
   let shell = $state<HTMLDivElement>()
@@ -45,7 +48,10 @@
 
   $effect(() => {
     hooks.pickFiles = () => fileInput?.click()
-    hooks.pickTreeFiles = () => treeInput?.click()
+    hooks.pickTreeFiles = (encrypt) => {
+      sealUpload = encrypt
+      treeInput?.click()
+    }
     hooks.pickFolder = () => folderInput?.click()
     hooks.pickArchive = () => importInput?.click()
     hooks.focusList = () => shell?.focus()
@@ -92,7 +98,10 @@
   $effect(() => {
     if (!workspace.user) return
     const refresh = () => {
-      if (document.visibilityState === 'visible') void workspace.loadAgenda().then(() => workspace.openAgendaIfDue())
+      if (document.visibilityState !== 'visible') return
+      void workspace.loadAgenda().then(() => workspace.openAgendaIfDue())
+      // The vault locks itself when left alone; the bar should say so.
+      void workspace.loadVault()
     }
     const timer = setInterval(refresh, 5 * 60 * 1000)
     document.addEventListener('visibilitychange', refresh)
@@ -100,6 +109,15 @@
       clearInterval(timer)
       document.removeEventListener('visibilitychange', refresh)
     }
+  })
+
+  // The vault closes itself after a quiet spell; look again just after it
+  // would have, so the bar does not go on saying it is open.
+  $effect(() => {
+    const vault = workspace.vault
+    if (!vault?.unlocked || vault.locks_in === null) return
+    const timer = setTimeout(() => void workspace.loadVault(), (vault.locks_in + 2) * 1000)
+    return () => clearTimeout(timer)
   })
 
   // Guard against losing a half-written entry to a stray refresh.
@@ -126,7 +144,7 @@
     const files = Array.from(input.files ?? [])
     input.value = ''
     if (files.length === 0) return
-    await workspace.guard(() => workspace.putFiles(files))
+    await workspace.guard(() => workspace.putFiles(files, sealUpload))
   }
 
   /*
@@ -687,6 +705,7 @@
     {/if}
 
     <Prompt />
+    <SecretPrompt />
 
     {#if workspace.overlay !== 'none'}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->

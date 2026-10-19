@@ -2,13 +2,13 @@ use std::{collections::BTreeSet, sync::LazyLock};
 
 use axum::{
     body::Body,
-    extract::{multipart::Field, Multipart, Path, State},
+    extract::{multipart::Field, Multipart, Path, Query, State},
     http::header,
     response::{IntoResponse, Response},
     Json,
 };
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
@@ -19,6 +19,7 @@ use crate::{
     error::{AppError, AppResult},
     routes::nodes,
     state::AppState,
+    vault,
 };
 
 /// Media referenced from a document body always looks like `/api/media/<uuid>`,
@@ -69,6 +70,8 @@ pub struct Media {
     pub size: i64,
     pub created_at: i64,
     pub url: String,
+    /// Sealed in the vault: its bytes on disk are ciphertext.
+    pub encrypted: bool,
     /// Every document that embeds this file, which may be none or several.
     pub node_ids: Vec<i64>,
 }
@@ -91,6 +94,7 @@ fn row_to_media(row: &sqlx::sqlite::SqliteRow) -> Media {
         mime: row.get("mime"),
         size: row.get("size"),
         created_at: row.get("created_at"),
+        encrypted: row.try_get("encrypted").unwrap_or(false),
         node_ids,
     }
 }
@@ -118,17 +122,29 @@ pub(crate) fn mime_of(filename: &str, declared: Option<&str>) -> String {
 /// field has arrived whole, so a dropped connection never leaves a truncated
 /// file under a name the database might come to know. Returns the size; an
 /// empty field writes nothing and returns 0.
+///
+/// With `seal`, the bytes are encrypted as they pass, so the plaintext never
+/// touches the disk at all; the size returned is still the plaintext's.
 pub(crate) async fn store_field(
     state: &AppState,
     field: &mut Field<'_>,
     id: &str,
     budget: &mut u64,
+    seal: Option<&vault::Key>,
 ) -> AppResult<u64> {
     let path = state.config.uploads_dir().join(id);
     let partial = path.with_extension("part");
 
     let result = async {
         let mut file = tokio::fs::File::create(&partial).await?;
+        let mut sealer = match seal {
+            Some(key) => {
+                let (sealer, header) = vault::Sealer::new(key, id)?;
+                file.write_all(&header).await?;
+                Some(sealer)
+            }
+            None => None,
+        };
         let mut size = 0u64;
         while let Some(chunk) = field
             .chunk()
@@ -139,7 +155,13 @@ pub(crate) async fn store_field(
             if size > *budget {
                 return Err(too_large(state));
             }
-            file.write_all(&chunk).await?;
+            match sealer.as_mut() {
+                Some(sealer) => file.write_all(&sealer.push(&chunk)?).await?,
+                None => file.write_all(&chunk).await?,
+            }
+        }
+        if let Some(sealer) = sealer {
+            file.write_all(&sealer.finish()?).await?;
         }
         file.flush().await?;
         Ok(size)
@@ -186,7 +208,7 @@ pub async fn upload(
         let mime = mime_of(&filename, field.content_type());
 
         let id = Uuid::new_v4().to_string();
-        let size = store_field(&state, &mut field, &id, &mut budget).await?;
+        let size = store_field(&state, &mut field, &id, &mut budget, None).await?;
         if size == 0 {
             continue;
         }
@@ -214,15 +236,29 @@ pub async fn upload(
     Ok(Json(uploaded))
 }
 
+#[derive(Deserialize)]
+pub struct UploadQuery {
+    /// Seal the files into the vault as they arrive.
+    #[serde(default)]
+    pub encrypt: bool,
+}
+
 /// `POST /api/nodes/{id}/files` — every file in the body becomes a file node
 /// in that space or folder, under the name it was uploaded with.
+/// `?encrypt=true` seals them on the way in, which needs the vault open.
 pub async fn upload_into(
     _: Session,
     State(state): State<AppState>,
     Path(parent): Path<i64>,
+    Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Vec<nodes::Node>>> {
     nodes::container(&state.db, parent).await?;
+    let key = if query.encrypt {
+        Some(state.vault.key().ok_or(AppError::Locked)?)
+    } else {
+        None
+    };
 
     let mut created = Vec::new();
     let mut budget = state.config.max_upload_bytes as u64;
@@ -242,12 +278,12 @@ pub async fn upload_into(
         let mime = mime_of(&filename, field.content_type());
 
         let id = Uuid::new_v4().to_string();
-        let size = store_field(&state, &mut field, &id, &mut budget).await?;
+        let size = store_field(&state, &mut field, &id, &mut budget, key.as_deref()).await?;
         if size == 0 {
             continue;
         }
 
-        match insert_file(&state.db, parent, &id, &filename, &mime, size).await {
+        match insert_file(&state.db, parent, &id, &filename, &mime, size, key.is_some()).await {
             Ok(node) => created.push(node),
             Err(e) => {
                 let _ = tokio::fs::remove_file(state.config.uploads_dir().join(&id)).await;
@@ -277,19 +313,22 @@ async fn insert_file(
     filename: &str,
     mime: &str,
     size: u64,
+    encrypted: bool,
 ) -> AppResult<i64> {
     let slug = nodes::unique_slug(db, Some(parent), &nodes::slugify(filename), None).await?;
     let now = crate::now();
     let mut tx = db.begin().await?;
 
     sqlx::query(
-        "INSERT INTO media (id, filename, mime, size, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO media (id, filename, mime, size, created_at, encrypted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(media_id)
     .bind(filename)
     .bind(mime)
     .bind(size as i64)
     .bind(now)
+    .bind(encrypted)
     .execute(&mut *tx)
     .await?;
 
@@ -319,7 +358,7 @@ async fn insert_file(
 
 pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<Media>>> {
     let rows = sqlx::query(
-        "SELECT m.id, m.filename, m.mime, m.size, m.created_at,
+        "SELECT m.id, m.filename, m.mime, m.size, m.created_at, m.encrypted,
                 (SELECT group_concat(nm.node_id)
                  FROM node_media nm WHERE nm.media_id = m.id) AS node_ids
          FROM media m ORDER BY m.created_at DESC LIMIT 500",
@@ -334,7 +373,7 @@ pub async fn serve(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Response> {
-    stream_media(&state, &id).await
+    stream_media(&state, &id, true).await
 }
 
 pub async fn remove(
@@ -347,9 +386,11 @@ pub async fn remove(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// Shared by the private and the public-share media handlers.
-pub async fn stream_media(state: &AppState, id: &str) -> AppResult<Response> {
-    let row = sqlx::query("SELECT mime, filename, size FROM media WHERE id = ?1")
+/// Shared by the private and the public-share media handlers. A sealed file
+/// is only ever served to the owner, and only while the vault is open — a
+/// share link is a door for strangers, and the vault is not behind it.
+pub async fn stream_media(state: &AppState, id: &str, private: bool) -> AppResult<Response> {
+    let row = sqlx::query("SELECT mime, filename, size, encrypted FROM media WHERE id = ?1")
         .bind(id)
         .fetch_optional(&state.db)
         .await?
@@ -357,14 +398,25 @@ pub async fn stream_media(state: &AppState, id: &str) -> AppResult<Response> {
 
     let filename: String = row.get("filename");
     let size: i64 = row.get("size");
+    let encrypted: bool = row.get("encrypted");
     // Re-checked on the way out, not just on the way in, so rows written before
     // the allowlist existed cannot be served as something executable either.
     let mime = sanitize_mime(&row.get::<String, _>("mime"));
     let disposition = if is_inline(&mime) { "inline" } else { "attachment" };
 
+    let key = match (encrypted, private) {
+        (false, _) => None,
+        (true, false) => return Err(AppError::NotFound),
+        (true, true) => Some(state.vault.key().ok_or(AppError::Locked)?),
+    };
+
     let file = tokio::fs::File::open(state.config.uploads_dir().join(id))
         .await
         .map_err(|_| AppError::NotFound)?;
+    let body = match key {
+        None => Body::from_stream(ReaderStream::new(file)),
+        Some(key) => Body::from_stream(open_stream(file, &key, id).await?),
+    };
 
     Ok((
         [
@@ -386,9 +438,36 @@ pub async fn stream_media(state: &AppState, id: &str) -> AppResult<Response> {
                 "sandbox; default-src 'none'".to_string(),
             ),
         ],
-        Body::from_stream(ReaderStream::new(file)),
+        body,
     )
         .into_response())
+}
+
+/// A sealed file as a stream of its plaintext, a record at a time. The
+/// header is checked before the first byte goes out, so a file that will not
+/// open is an error response rather than a download that breaks off.
+async fn open_stream(
+    mut file: tokio::fs::File,
+    key: &vault::Key,
+    id: &str,
+) -> AppResult<impl futures_util::Stream<Item = std::io::Result<axum::body::Bytes>>> {
+    use tokio::io::AsyncReadExt;
+
+    let len = file.metadata().await?.len();
+    let mut header = [0u8; vault::HEADER];
+    file.read_exact(&mut header).await?;
+    let opener = vault::Opener::new(key, id, &header, len)?;
+
+    Ok(futures_util::stream::try_unfold((file, opener), |(mut file, mut opener)| async move {
+        let len = opener.next_len();
+        if len == 0 {
+            return Ok(None);
+        }
+        let mut record = vec![0u8; len];
+        file.read_exact(&mut record).await?;
+        let plain = opener.open(&record).map_err(std::io::Error::other)?;
+        Ok(Some((axum::body::Bytes::from(plain), (file, opener))))
+    }))
 }
 
 pub async fn delete_media(state: &AppState, id: &str) -> AppResult<()> {

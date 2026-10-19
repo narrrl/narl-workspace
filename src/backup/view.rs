@@ -174,8 +174,12 @@ pub async fn run(
     root: &NodeUid,
     summary: &mut Summary,
 ) -> Result<()> {
+    // A sealed file has no place in a view meant to be opened by name from
+    // anywhere: it is left out, so it leaves the view when it is sealed.
     let tree: Vec<TreeNode> = sqlx::query(
-        "SELECT n.id, n.parent_id, n.kind, n.name, n.slug, n.media_id, COALESCE(m.mime, '') AS mime
+        "SELECT n.id, n.parent_id, n.kind, n.name, n.slug,
+                CASE WHEN m.encrypted = 0 THEN n.media_id END AS media_id,
+                COALESCE(m.mime, '') AS mime
          FROM nodes n LEFT JOIN media m ON m.id = n.media_id",
     )
     .fetch_all(db)
@@ -217,6 +221,14 @@ pub async fn run(
         }
     }
 
+    let sealed: HashSet<i64> = sqlx::query_scalar(
+        "SELECT n.id FROM nodes n JOIN media m ON m.id = n.media_id WHERE m.encrypted <> 0",
+    )
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .collect();
+
     let mut view = View { db, config, client, root, dirs, summary };
 
     // What is gone, or is no longer the same bytes, goes first: it frees the
@@ -229,7 +241,16 @@ pub async fn run(
         .collect();
     for id in stale {
         if let Some(gone) = tracked.remove(&id) {
-            view.trash(&gone.uid).await;
+            // What was sealed since leaves no copy in Drive's trash either.
+            if sealed.contains(&id) {
+                if let Err(e) = super::sync::purge(client, &gone.uid).await {
+                    tracing::warn!(file = %gone.path, error = %format!("{e:#}"), "could not purge a sealed file from files/");
+                    continue;
+                }
+                view.summary.pruned += 1;
+            } else {
+                view.trash(&gone.uid).await;
+            }
             forget(db, id).await?;
         }
     }

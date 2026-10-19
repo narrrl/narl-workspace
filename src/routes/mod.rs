@@ -4,9 +4,11 @@ pub mod nodes;
 pub mod export;
 pub mod import;
 pub mod media;
+pub mod seal;
 pub mod session;
 pub mod share;
 pub mod ssh_keys;
+pub mod vault;
 
 use axum::{
     routing::{delete, get, post, put},
@@ -39,6 +41,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/nodes/{id}/move", post(nodes::move_node))
         .route("/nodes/{id}/import", post(import::import))
         .route("/nodes/{id}/files", post(media::upload_into))
+        .route("/nodes/{id}/encrypt", post(seal::encrypt))
+        .route("/nodes/{id}/decrypt", post(seal::decrypt))
+        .route("/vault", get(vault::status).post(vault::setup).put(vault::change_password))
+        .route("/vault/unlock", post(vault::unlock))
+        .route("/vault/lock", post(vault::lock))
         .route("/nodes/{id}/share", post(share::enable))
         .route("/nodes/{id}/share", delete(share::disable))
         .route("/media", post(media::upload).get(media::list))

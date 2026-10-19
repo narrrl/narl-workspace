@@ -112,6 +112,7 @@ mod tests {
             session_days,
             max_upload_bytes: 1,
             secure_cookie: false,
+            vault_idle: std::time::Duration::from_secs(60),
             backup: BackupConfig {
                 device_name: "narl-diary".into(),
                 interval: None,

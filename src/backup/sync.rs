@@ -54,6 +54,11 @@ consistent and carries no write-ahead log: it can be opened directly.
 Each file above keeps its history — Proton Drive holds the previous revisions
 of diary.db, so an accident that was mirrored can still be undone.
 
+Files sealed in the workspace's vault are in uploads/ as ciphertext. A
+restore brings them back exactly as they were; opening them takes the vault
+password, which is in nobody's keeping but its owner's — not in diary.db, not
+here.
+
 The files/ folder next to data/ holds the same uploaded files again, laid out
 by space, folder and name the way the workspace shows them, so they can be
 opened from Proton Drive directly. It is a view kept in step with the
@@ -90,6 +95,7 @@ pub async fn run(
     mirror.database(config, data_folder).await?;
     mirror.media(config, uploads_folder).await?;
 
+    mirror.retire().await?;
     if config.backup.prune {
         mirror.prune().await?;
     }
@@ -149,27 +155,63 @@ impl Mirror<'_> {
                 .map(|row| (row.get("id"), row.get("size")))
                 .collect();
 
-        for (id, size) in media {
+        for (id, _) in media {
             let key = format!("uploads/{id}");
-            if let Some(tracked) = self.tracked(&key).await? {
-                if tracked.size == size {
-                    self.summary.skipped += 1;
-                    continue;
-                }
-            }
-
             let path = config.uploads_dir().join(&id);
-            if !path.exists() {
+            // The size on disk, not the one in the row: a sealed file is larger
+            // than what was uploaded, and comparing against that would re-hash
+            // it on every run.
+            let Ok(metadata) = tokio::fs::metadata(&path).await else {
                 // A row whose file has gone missing is a local inconsistency,
                 // not a reason to abandon the rest of the backup.
                 tracing::warn!(media = %id, "media row has no file on disk; skipping");
                 continue;
+            };
+            if let Some(tracked) = self.tracked(&key).await? {
+                if tracked.size == metadata.len() as i64 {
+                    self.summary.skipped += 1;
+                    continue;
+                }
             }
 
             self.file(uploads_folder, &key, &id, "application/octet-stream", &path)
                 .await?;
         }
 
+        Ok(())
+    }
+
+    /// Take the plaintext of files that have since been sealed off Drive for
+    /// good: into the trash and straight out of it, whatever
+    /// `WORKSPACE_BACKUP_PRUNE` says. A sealed file whose old bytes stay on
+    /// Drive was never sealed for anyone who can read the mirror.
+    async fn retire(&mut self) -> Result<()> {
+        let retired: Vec<(String, Option<String>)> = sqlx::query(
+            "SELECT r.path, f.node_uid FROM backup_retired r
+             LEFT JOIN backup_files f ON f.path = r.path",
+        )
+        .fetch_all(self.db)
+        .await?
+        .into_iter()
+        .map(|row| (row.get("path"), row.get("node_uid")))
+        .collect();
+
+        for (path, uid) in retired {
+            if let Some(uid) = uid.as_deref().and_then(parse_uid) {
+                purge(self.client, &uid)
+                    .await
+                    .with_context(|| format!("could not remove {path} from Proton Drive"))?;
+                self.summary.pruned += 1;
+            }
+            sqlx::query("DELETE FROM backup_files WHERE path = ?")
+                .bind(&path)
+                .execute(self.db)
+                .await?;
+            sqlx::query("DELETE FROM backup_retired WHERE path = ?")
+                .bind(&path)
+                .execute(self.db)
+                .await?;
+        }
         Ok(())
     }
 
@@ -361,6 +403,21 @@ struct Tracked {
     uid: NodeUid,
     hash: String,
     size: i64,
+}
+
+/// Trash a node and then delete it from the trash, so nothing of it is left
+/// to restore. A node already gone counts as done.
+pub(crate) async fn purge(client: &ProtonDriveClient, uid: &NodeUid) -> Result<()> {
+    if client.get_node(uid).await?.is_none() {
+        return Ok(());
+    }
+    for (_, result) in client.trash_nodes(std::slice::from_ref(uid)).await? {
+        result?;
+    }
+    for (_, result) in client.delete_nodes(std::slice::from_ref(uid)).await? {
+        result?;
+    }
+    Ok(())
 }
 
 /// `<volume>~<link>`, the form [`NodeUid`] prints. Anything else is a row this

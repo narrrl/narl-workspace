@@ -8,7 +8,7 @@ export type { ScrollAmount }
 export const hooks = {
   pickFiles: () => {},
   /** Files for the folder being browsed, rather than for the document. */
-  pickTreeFiles: () => {},
+  pickTreeFiles: (_encrypt: boolean) => {},
   pickFolder: () => {},
   pickArchive: () => {},
   focusEditor: () => {},
@@ -24,7 +24,7 @@ export const hooks = {
 }
 
 /** Help groups the command list under these headings, in this order. */
-export const groups = ['tree', 'board', 'documents', 'editing', 'sharing', 'view'] as const
+export const groups = ['tree', 'board', 'documents', 'editing', 'sharing', 'vault', 'view'] as const
 export type Group = (typeof groups)[number]
 
 export interface CommandSpec {
@@ -61,6 +61,29 @@ const findFolder = (target: string) => {
       isContainer(node) && (node.slug === wanted || node.name.toLowerCase() === wanted),
   )
 }
+
+/** `:encrypt` and `:decrypt`: a file, or everything under a folder. */
+const sealTarget = (encrypt: boolean) =>
+  workspace.guard(async () => {
+    const node = workspace.target
+    if (!node || node.kind === 'document') {
+      return workspace.say('only files go into the vault — put the cursor on a file or a folder', 'error')
+    }
+    if (node.file && node.file.encrypted === encrypt) {
+      return workspace.say(encrypt ? 'already in the vault' : 'not in the vault')
+    }
+    if (isContainer(node)) {
+      const verb = encrypt ? 'seal every file in' : 'take every file in'
+      const tail = encrypt ? 'into the vault' : 'out of the vault'
+      if (!(await workspace.ask(`${verb} ${node.kind} "${node.name || node.slug}" ${tail}?`))) return
+    } else if (!encrypt) {
+      const name = node.name || node.slug
+      if (!(await workspace.ask(`store "${name}" unencrypted again, and in the readable files/ view on proton drive?`))) return
+    }
+    if (!(await workspace.ensureUnlocked())) return
+    workspace.say(encrypt ? 'encrypting …' : 'decrypting …')
+    await workspace.seal(node.id, encrypt)
+  })
 
 /** `3 minutes ago`, or `never`. Backups are read at a glance, not to the second. */
 const ago = (at: number | null) => {
@@ -622,7 +645,14 @@ export const commands: CommandSpec[] = [
     aliases: ['up'],
     group: 'editing',
     help: 'while writing, attach files at the cursor — otherwise put files into this folder',
-    run: () => (workspace.editing ? hooks.pickFiles() : hooks.pickTreeFiles()),
+    run: () => (workspace.editing ? hooks.pickFiles() : hooks.pickTreeFiles(false)),
+    bang: {
+      help: 'put files into this folder sealed in the vault — encrypted before they touch the disk',
+      run: () =>
+        workspace.guard(async () => {
+          if (await workspace.ensureUnlocked()) hooks.pickTreeFiles(true)
+        }),
+    },
   },
   {
     name: 'media',
@@ -752,6 +782,80 @@ export const commands: CommandSpec[] = [
         }
         workspace.say('usage: :sshkey [add <name> <key> | rm <name>]', 'error')
       }),
+  },
+  {
+    name: 'vault',
+    group: 'vault',
+    help: 'whether the vault is open — or, the first time, set its password',
+    run: () =>
+      workspace.guard(async () => {
+        await workspace.loadVault()
+        const vault = workspace.vault
+        if (vault?.configured) {
+          const left = vault.locks_in ? ` · locks in ${Math.ceil(vault.locks_in / 60)}m unless used` : ''
+          return workspace.say(vault.unlocked ? `vault open${left} — :lock closes it` : 'vault locked — :unlock opens it')
+        }
+        const password = await workspace.askSecret('new vault password, 10+ characters — it cannot be recovered')
+        if (password === null) return
+        const again = await workspace.askSecret('the same again')
+        if (again === null) return
+        if (again !== password) return workspace.say('the two passwords differ — nothing was set', 'error')
+        workspace.vault = await api.setupVault(password)
+        workspace.say('vault ready and open — :encrypt seals what is under the cursor, :upload! seals new files')
+      }),
+  },
+  {
+    name: 'unlock',
+    group: 'vault',
+    help: 'open the vault with its password, so sealed files can be read',
+    run: () =>
+      workspace.guard(async () => {
+        await workspace.loadVault()
+        if (workspace.vault?.unlocked) return workspace.say('the vault is already open')
+        await workspace.ensureUnlocked()
+      }),
+  },
+  {
+    name: 'lock',
+    group: 'vault',
+    help: 'close the vault now — it also closes itself when left alone, and on logout',
+    run: () =>
+      workspace.guard(async () => {
+        workspace.vault = await api.lockVault()
+        if (workspace.open?.file?.encrypted) workspace.open = await api.getNode(workspace.open.id)
+        workspace.say('vault locked')
+      }),
+  },
+  {
+    name: 'passwd',
+    group: 'vault',
+    help: "change the vault's password — no file is rewritten",
+    run: () =>
+      workspace.guard(async () => {
+        const current = await workspace.askSecret('current vault password')
+        if (current === null) return
+        const password = await workspace.askSecret('new vault password, 10+ characters')
+        if (password === null) return
+        const again = await workspace.askSecret('the same again')
+        if (again === null) return
+        if (again !== password) return workspace.say('the two passwords differ — nothing was changed', 'error')
+        workspace.vault = await api.changeVaultPassword(current, password)
+        workspace.say('vault password changed')
+      }),
+  },
+  {
+    name: 'encrypt',
+    aliases: ['seal'],
+    group: 'vault',
+    help: 'seal the file under the cursor in the vault — on a folder, every file inside it',
+    run: () => sealTarget(true),
+  },
+  {
+    name: 'decrypt',
+    aliases: ['unseal'],
+    group: 'vault',
+    help: 'take the file under the cursor back out of the vault — on a folder, every file inside it',
+    run: () => sealTarget(false),
   },
   {
     name: 'help',

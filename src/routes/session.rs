@@ -58,6 +58,8 @@ pub async fn login(
 }
 
 pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
+    // Leaving is the moment the vault should not outlive.
+    state.vault.lock();
     (
         StatusCode::OK,
         [(header::SET_COOKIE, auth::clear_cookie(&state.config))],

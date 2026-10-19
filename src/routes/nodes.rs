@@ -35,6 +35,8 @@ pub struct FileInfo {
     pub mime: String,
     pub size: i64,
     pub url: String,
+    /// Sealed in the vault: it opens only while the vault does.
+    pub encrypted: bool,
 }
 
 #[derive(Serialize)]
@@ -158,7 +160,8 @@ const SUMMARY_COLUMNS: &str = "n.id, n.parent_id, n.kind, n.name, n.slug, n.posi
      n.created_at, n.updated_at, n.share_token, n.media_id,
      (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count,
      (SELECT m.mime FROM media m WHERE m.id = n.media_id) AS file_mime,
-     (SELECT m.size FROM media m WHERE m.id = n.media_id) AS file_size";
+     (SELECT m.size FROM media m WHERE m.id = n.media_id) AS file_size,
+     (SELECT m.encrypted FROM media m WHERE m.id = n.media_id) AS file_encrypted";
 
 /// A short, plain-ish preview of the body for the list pane. `head` is only the
 /// leading `HEAD_CHARS` of the document, so truncation is inferred from its
@@ -286,6 +289,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
             media_id,
             mime: row.get::<Option<String>, _>("file_mime").unwrap_or_default(),
             size: row.get::<Option<i64>, _>("file_size").unwrap_or_default(),
+            encrypted: row.get::<Option<bool>, _>("file_encrypted").unwrap_or_default(),
         });
     NodeSummary {
         id: row.get("id"),

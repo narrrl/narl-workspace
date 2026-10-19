@@ -29,6 +29,7 @@
   <span class="msg" class:alarm={workspace.flash?.kind === 'error'}>{workspace.flash?.text ?? ''}</span>
 
   {#if workspace.fullscreen}<span class="flag">full</span>{/if}
+  {#if workspace.vault?.unlocked}<span class="flag vault" title="the vault is open — :lock closes it">vault open</span>{/if}
   {#if lines !== null}<span class="readout">{lines}<span class="unit">L</span></span>{/if}
   <span class="hint">
     {isTouchDevice ? 'tap : for commands' : '? help · : command · / search'}

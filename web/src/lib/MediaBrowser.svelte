@@ -29,7 +29,9 @@
     {#each workspace.media as file (file.id)}
       <li>
         <div class="thumb">
-          {#if file.mime.startsWith('image/')}
+          {#if file.encrypted}
+            <span class="label">sealed</span>
+          {:else if file.mime.startsWith('image/')}
             <img src={file.url} alt={file.filename} loading="lazy" />
           {:else}
             <span class="label">{file.mime.split('/')[0]}</span>

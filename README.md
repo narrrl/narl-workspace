@@ -13,6 +13,8 @@ one binary. It was called `narl-diary` until it grew everything but the diary.
 - Files of any kind — PDFs, archives, recordings — live in the tree beside the
   notes about them, streamed to disk however large.
 - Share any document behind an unguessable link — revocable at any time.
+- A vault: files sealed with AES-256-GCM under a password that is never stored,
+  readable only while it is unlocked.
 - Backs itself up to Proton Drive, end-to-end encrypted, as a registered device.
 - Mails you — a reminder when the diary is empty, due cards, a weekly digest.
 - Real vim keybindings on the desktop (CodeMirror 6 + vim mode), plain taps on
@@ -173,6 +175,48 @@ limit at least that large too.
 
 The SFTP mount does not show files yet; a folder that holds only files lists
 as empty there.
+
+## The vault
+
+Some files deserve more than the login: scans of documents, contracts, health
+records. The vault encrypts them at rest under a password of their own, so
+they stay unreadable to someone who has the data directory or the Proton
+account the mirror writes to, and to a logged-in browser while the vault is
+shut — to anyone, in short, who does not know the vault password.
+
+`:vault` sets the password the first time (ten characters at least) and says
+whether the vault is open afterwards. `:upload!` puts files into the folder
+being browsed sealed — encrypted as they stream in, so the plaintext never
+touches the disk. `:encrypt` seals the file under the cursor, or every file in
+the folder under it; `:decrypt` takes them back out. `:unlock` and `:lock` open
+and close it, `:passwd` changes the password. A sealed file carries a lock in
+the list, and the bar says `vault open` while it is.
+
+The vault closes itself after `WORKSPACE_VAULT_IDLE_MIN` minutes of nobody
+using it (15 by default), on logout, and whenever the server restarts. While
+it is closed a sealed file shows as sealed and nothing more; a share link never
+serves one, open or not; and `:export!` refuses until it is open, because an
+archive meant to be read without this application has to hold the files
+opened.
+
+How it works: Argon2id turns the password into a key that seals a random
+master key, and only that sealed copy is stored. Each file gets a random key of
+its own, sealed under the master key in the file's header together with its
+id, and its bytes are AES-256-GCM in 64 KiB records, the last one marked as
+last — so a file that is swapped, cut short or tampered with refuses to open.
+Changing the password re-seals the master key and rewrites no file.
+
+**There is no recovery.** Forget the vault password and every sealed file is
+gone — from the server and from every backup — which is exactly what makes it
+worth having. The password is not in `.env`, not in `diary.db`, and not in the
+mirror.
+
+Sealing a file that already exists writes it anew under a new id, rewrites the
+links of documents that embed it, and deletes the plaintext from the disk. The
+mirror then deletes the old copy from Proton Drive outright — trash and all —
+whatever `WORKSPACE_BACKUP_PRUNE` says, and takes the file out of the readable
+`files/` view. The sealed copy goes up to `data/uploads/` like any other.
+Proton cannot read either; only the vault password can read the sealed one.
 
 ## Importing a folder
 

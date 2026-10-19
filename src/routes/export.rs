@@ -13,7 +13,11 @@ use sqlx::Row;
 use tokio_util::io::ReaderStream;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
-use crate::{auth::Session, error::AppResult, state::AppState};
+use crate::{
+    auth::Session,
+    error::{AppError, AppResult},
+    state::AppState,
+};
 
 /// One node, flattened out of the database ahead of the blocking zip work.
 struct ExportNode {
@@ -159,12 +163,27 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
     })
     .collect();
 
-    let media: Vec<(String, String)> = sqlx::query("SELECT id, filename FROM media")
+    let rows = sqlx::query("SELECT id, filename, encrypted FROM media")
         .fetch_all(&state.db)
-        .await?
-        .into_iter()
+        .await?;
+    let media: Vec<(String, String)> = rows
+        .iter()
         .map(|row| (row.get("id"), row.get("filename")))
         .collect();
+    let sealed: std::collections::HashSet<String> = rows
+        .iter()
+        .filter(|row| row.get::<bool, _>("encrypted"))
+        .map(|row| row.get("id"))
+        .collect();
+
+    // The archive is meant to be read without this application, so sealed
+    // files go in opened — which needs the vault open. Leaving them out
+    // instead would make an export that silently is not complete.
+    let key = if sealed.is_empty() {
+        None
+    } else {
+        Some(state.vault.key().ok_or(AppError::Locked)?)
+    };
 
     let uploads = state.config.uploads_dir();
 
@@ -243,11 +262,19 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             .chain(in_tree.iter().map(|(id, path)| (id, path.clone())));
         for (id, entry) in entries {
             // A row whose file has gone missing must not fail the whole backup.
-            let Ok(mut source) = std::fs::File::open(uploads.join(id)) else {
-                continue;
+            let path = uploads.join(id);
+            let source: Box<dyn std::io::Read> = match (&key, sealed.contains(id)) {
+                (Some(key), true) => match crate::vault::Reader::open(key, id, &path) {
+                    Ok(reader) => Box::new(reader),
+                    Err(_) => continue,
+                },
+                _ => match std::fs::File::open(&path) {
+                    Ok(file) => Box::new(file),
+                    Err(_) => continue,
+                },
             };
             zip.start_file(entry, blob)?;
-            std::io::copy(&mut source, &mut zip)?;
+            std::io::copy(&mut { source }, &mut zip)?;
         }
 
         let mut file = zip.finish()?;

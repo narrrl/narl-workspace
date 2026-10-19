@@ -16,6 +16,8 @@ pub struct Config {
     pub session_days: i64,
     pub max_upload_bytes: usize,
     pub secure_cookie: bool,
+    /// How long the vault stays open with nothing using it.
+    pub vault_idle: std::time::Duration,
     pub backup: BackupConfig,
     pub mail: MailConfig,
     pub sftp: SftpConfig,
@@ -198,6 +200,15 @@ impl Config {
             * 1024
             * 1024;
 
+        let vault_idle = std::time::Duration::from_secs(
+            var("VAULT_IDLE_MIN")
+                .map(|v| v.parse::<u64>())
+                .transpose()
+                .context("WORKSPACE_VAULT_IDLE_MIN must be a number")?
+                .unwrap_or(15)
+                * 60,
+        );
+
         let secure_cookie = var("SECURE_COOKIE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
@@ -211,6 +222,7 @@ impl Config {
             session_days,
             max_upload_bytes,
             secure_cookie,
+            vault_idle,
             backup: BackupConfig::from_env()?,
             mail: MailConfig::from_env()?,
             sftp: SftpConfig::from_env()?,

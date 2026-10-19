@@ -1,5 +1,6 @@
 <script lang="ts">
   import { isContainer, type NodeSummary } from './api'
+  import Icon from './Icon.svelte'
   import { workspace } from './store.svelte'
   import { formatBytes, formatDay, formatTime, formatWeekday } from './util'
 
@@ -92,6 +93,7 @@
           <span class="title">{label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}</span>
           {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
+          {#if node.file?.encrypted}<span class="sealed" title="in the vault"><Icon name="lock" size={12} /></span>{/if}
           <span class="aside">{aside(node)}</span>
         </button>
       </li>
@@ -215,6 +217,8 @@
     border: 1.5px solid currentColor;
     border-radius: 999px;
   }
+  .sealed { flex: none; display: grid; color: var(--muted); }
+  .row.active .sealed { color: var(--ink); }
   .empty { padding: 12px 10px; font-size: 12px; }
 
   /* Roomier tap targets where there is no keyboard. */

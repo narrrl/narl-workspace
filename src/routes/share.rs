@@ -160,7 +160,7 @@ pub async fn serve_media(
     if !key_matches(stored.as_deref(), &key) {
         return Err(AppError::NotFound);
     }
-    media::stream_media(&state, &id).await
+    media::stream_media(&state, &id, false).await
 }
 
 #[cfg(test)]

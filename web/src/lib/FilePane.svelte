@@ -6,6 +6,8 @@
 
   const node = $derived(workspace.open!)
   const file = $derived(node.file!)
+  /* A sealed file cannot be fetched while the vault is shut. */
+  const locked = $derived(file.encrypted && !workspace.vault?.unlocked)
   const kind = $derived(file.mime.split('/')[0])
   /* What the browser can show by itself; everything else is a download. */
   const viewable = $derived(file.mime !== 'application/octet-stream')
@@ -18,7 +20,7 @@
   let text = $state<string | null>(null)
   $effect(() => {
     text = null
-    if (file.mime !== 'text/plain') return
+    if (file.mime !== 'text/plain' || locked) return
     const url = file.url
     void head(url, TEXT_PREVIEW).then((body) => {
       if (body !== null && url === file.url) text = body
@@ -77,13 +79,24 @@
         <dd>{file.mime}</dd>
         <dt>uploaded</dt>
         <dd title={formatStamp(node.created_at)}>{relative(node.created_at)}</dd>
+        {#if file.encrypted}
+          <dt>vault</dt>
+          <dd class="light">{locked ? 'sealed, locked' : 'sealed, open'}</dd>
+        {/if}
       </dl>
 
       <div class="actions">
-        {#if viewable}
-          <a class="button" href={file.url} target="_blank" rel="noopener">open</a>
+        {#if locked}
+          <button onclick={() => runCommand('unlock')}>unlock</button>
+        {:else}
+          {#if viewable}
+            <a class="button" href={file.url} target="_blank" rel="noopener">open</a>
+          {/if}
+          <a class="button" href={file.url} download={node.name}>download</a>
         {/if}
-        <a class="button" href={file.url} download={node.name}>download</a>
+        <button onclick={() => runCommand(file.encrypted ? 'decrypt' : 'encrypt')}>
+          {file.encrypted ? 'decrypt' : 'encrypt'}
+        </button>
         <button class="danger" onclick={() => runCommand('d')}>delete</button>
         <button class="close" onclick={() => runCommand('q')}>close</button>
       </div>
@@ -92,8 +105,13 @@
 
   <div class="body" bind:this={reader}>
     <h1 class="name">{node.name}</h1>
-    {#key file.url}
-      {#if kind === 'image'}
+    {#key `${file.url}:${locked}`}
+      {#if locked}
+        <p class="sealed">
+          <Icon name="lock" size={16} />
+          sealed in the vault — <button onclick={() => runCommand('unlock')}>unlock</button> to open it.
+        </p>
+      {:else if kind === 'image'}
         <img src={file.url} alt={node.name} />
       {:else if kind === 'video'}
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -196,6 +214,9 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+
+  .light { color: var(--light); }
+  .sealed { display: flex; align-items: center; gap: 8px; color: var(--subtle); }
 
   .back { display: none; }
 

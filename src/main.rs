@@ -10,6 +10,7 @@ mod sftp;
 mod state;
 mod static_files;
 mod throttle;
+mod vault;
 
 use std::sync::Arc;
 
@@ -110,9 +111,11 @@ async fn main() -> Result<()> {
     notify::spawn(Arc::clone(&notify));
 
     let state = AppState {
+        vault: vault::Vault::new(db.clone(), config.vault_idle),
         db,
         config: Arc::clone(&config),
         login_throttle: Arc::default(),
+        vault_throttle: Arc::default(),
         backup,
         notify,
     };

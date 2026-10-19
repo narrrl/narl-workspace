@@ -2743,12 +2743,15 @@ dependencies = [
 name = "narl-workspace"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm 0.10.3",
  "anyhow",
+ "argon2 0.5.3",
  "axum",
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "dotenvy",
+ "futures-util",
  "hex",
  "hmac 0.12.1",
  "keyring",
@@ -2776,6 +2779,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
  "zip",
 ]
 
