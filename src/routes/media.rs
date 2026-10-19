@@ -9,7 +9,7 @@ use axum::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Connection, Row, SqliteConnection, SqlitePool};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -74,6 +74,9 @@ pub struct Media {
     pub encrypted: bool,
     /// Every document that embeds this file, which may be none or several.
     pub node_ids: Vec<i64>,
+    /// The file node it is, when it sits in the tree: deleted from there, not
+    /// from the media list.
+    pub file_node: Option<i64>,
 }
 
 fn row_to_media(row: &sqlx::sqlite::SqliteRow) -> Media {
@@ -96,6 +99,7 @@ fn row_to_media(row: &sqlx::sqlite::SqliteRow) -> Media {
         created_at: row.get("created_at"),
         encrypted: row.try_get("encrypted").unwrap_or(false),
         node_ids,
+        file_node: row.try_get("file_node").ok().flatten(),
     }
 }
 
@@ -164,6 +168,9 @@ pub(crate) async fn store_field(
             file.write_all(&sealer.finish()?).await?;
         }
         file.flush().await?;
+        // On disk before the rename, and so before any row names it: after a
+        // power cut the database must not know a file whose bytes never landed.
+        file.sync_all().await?;
         Ok(size)
     }
     .await;
@@ -253,7 +260,7 @@ pub async fn upload_into(
     Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Vec<nodes::Node>>> {
-    nodes::container(&state.db, parent).await?;
+    nodes::container(&mut *state.db.acquire().await?, parent).await?;
     let key = if query.encrypt {
         Some(state.vault.key().ok_or(AppError::Locked)?)
     } else {
@@ -315,9 +322,13 @@ async fn insert_file(
     size: u64,
     encrypted: bool,
 ) -> AppResult<i64> {
-    let slug = nodes::unique_slug(db, Some(parent), &nodes::slugify(filename), None).await?;
+    let mut tx = crate::db::begin_write(db).await?;
+    // Checked inside the transaction that takes it, so the slug is still
+    // free when the node is written; the folder too, which may have gone
+    // while the upload was streaming in.
+    nodes::container(&mut tx, parent).await?;
+    let slug = nodes::unique_slug(&mut tx, Some(parent), &nodes::slugify(filename), None).await?;
     let now = crate::now();
-    let mut tx = db.begin().await?;
 
     sqlx::query(
         "INSERT INTO media (id, filename, mime, size, created_at, encrypted)
@@ -359,8 +370,10 @@ async fn insert_file(
 pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<Media>>> {
     let rows = sqlx::query(
         "SELECT m.id, m.filename, m.mime, m.size, m.created_at, m.encrypted,
+                (SELECT f.id FROM nodes f WHERE f.media_id = m.id) AS file_node,
                 (SELECT group_concat(nm.node_id)
-                 FROM node_media nm WHERE nm.media_id = m.id) AS node_ids
+                 FROM node_media nm JOIN nodes d ON d.id = nm.node_id
+                 WHERE nm.media_id = m.id AND d.kind <> 'file') AS node_ids
          FROM media m ORDER BY m.created_at DESC LIMIT 500",
     )
     .fetch_all(&state.db)
@@ -486,9 +499,22 @@ pub(crate) fn canonical_id(id: &str) -> Option<String> {
 
 pub async fn delete_media(state: &AppState, id: &str) -> AppResult<()> {
     let id = canonical_id(id).ok_or(AppError::NotFound)?;
+    let mut tx = crate::db::begin_write(&state.db).await?;
+    // A file in the tree is its node's to delete: going round it here would
+    // take the node out of its folder without the tree having been asked.
+    let in_tree = sqlx::query("SELECT 1 FROM nodes WHERE media_id = ?1")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+    if in_tree {
+        return Err(AppError::BadRequest(
+            "that is a file in the tree — delete it from its folder".into(),
+        ));
+    }
     let deleted = sqlx::query("DELETE FROM media WHERE id = ?1")
         .bind(&id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
     // No row, no file of ours: nothing on disk is removed on the word of a
@@ -496,26 +522,38 @@ pub async fn delete_media(state: &AppState, id: &str) -> AppResult<()> {
     if deleted == 0 {
         return Err(AppError::NotFound);
     }
-    let path = state.config.uploads_dir().join(&id);
-    if let Err(e) = tokio::fs::remove_file(&path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    }
+    tx.commit().await?;
+    remove_upload(&state.config.uploads_dir(), &id).await;
     Ok(())
+}
+
+/// The bytes of an upload whose row is already gone. Called after the
+/// commit, never before: a file a crash leaves behind is swept up later as an
+/// orphan, where a row whose file had gone first would be a broken link.
+pub async fn remove_upload(uploads: &std::path::Path, id: &str) {
+    match tokio::fs::remove_file(uploads.join(id)).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!("could not remove upload {id}: {e}; the sweep will retry"),
+    }
 }
 
 /// Attach every media file the body embeds to this document, and detach the
 /// ones it no longer mentions so they stop being reachable through its share
 /// link. Other documents keep whatever they embed; this rewrites one node's rows.
-pub async fn link_to_node(db: &SqlitePool, node_id: i64, body: &str) -> AppResult<()> {
+pub async fn link_to_node(
+    db: &mut SqliteConnection,
+    node_id: i64,
+    body: &str,
+) -> AppResult<()> {
     let referenced: BTreeSet<String> = MEDIA_REF
         .captures_iter(body)
         .map(|c| c[1].to_lowercase())
         .collect();
 
-    // One transaction, so a document is never momentarily attached to nothing —
-    // which would blank its images for anyone reading its share link.
+    // One transaction — a savepoint inside the caller's, when there is one —
+    // so a document is never momentarily attached to nothing, which would
+    // blank its images for anyone reading its share link.
     let mut tx = db.begin().await?;
 
     sqlx::query("DELETE FROM node_media WHERE node_id = ?1")
@@ -544,7 +582,10 @@ pub async fn link_to_node(db: &SqlitePool, node_id: i64, body: &str) -> AppResul
 /// that become unreachable once those nodes are gone. A whole subtree is asked
 /// about at once, because deleting a folder deletes everything under it and a
 /// file shared between two of its documents is still exclusive to the subtree.
-pub async fn exclusive_media(db: &SqlitePool, node_ids: &[i64]) -> AppResult<Vec<String>> {
+pub async fn exclusive_media(
+    db: &mut SqliteConnection,
+    node_ids: &[i64],
+) -> AppResult<Vec<String>> {
     if node_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -566,7 +607,7 @@ pub async fn exclusive_media(db: &SqlitePool, node_ids: &[i64]) -> AppResult<Vec
                WHERE other.media_id = nm.media_id AND other.node_id NOT IN ({list})
            )"
     ))
-    .fetch_all(db)
+    .fetch_all(&mut *db)
     .await?;
 
     Ok(rows.iter().map(|row| row.get("id")).collect())

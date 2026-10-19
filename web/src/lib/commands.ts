@@ -382,7 +382,7 @@ export const commands: CommandSpec[] = [
       await workspace.guard(async () => {
         // The diary is one space among several now, so :today goes there first
         // rather than writing the day into whatever folder was being browsed.
-        const home = workspace.spaces.find((space) => space.slug === 'diary')
+        const home = workspace.spaces.find((space) => space.role === 'diary')
         if (home && workspace.parentId !== home.id) await workspace.enterSpace(home.id)
         else if (workspace.query) await workspace.search('')
 

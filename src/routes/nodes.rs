@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::{
     auth::Session,
@@ -22,6 +22,11 @@ pub const SPACE: &str = "space";
 pub const FOLDER: &str = "folder";
 pub const DOCUMENT: &str = "document";
 pub const FILE: &str = "file";
+
+/// The `role` of the one space that is the diary: a journal, with no board,
+/// whose empty days the reminder mail is about. Found by role rather than by
+/// slug, so it stays the diary under any name.
+pub const DIARY: &str = "diary";
 
 /// Whether a node of this kind can hold other nodes.
 pub fn is_container(kind: &str) -> bool {
@@ -49,6 +54,8 @@ pub struct NodeSummary {
     pub excerpt: String,
     pub position: i64,
     pub has_board: bool,
+    /// Spaces the code has to tell apart: `diary`, or nothing.
+    pub role: Option<String>,
     pub child_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -71,6 +78,7 @@ pub struct Node {
     pub excerpt: String,
     pub position: i64,
     pub has_board: bool,
+    pub role: Option<String>,
     pub child_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -156,7 +164,7 @@ const HEAD_CHARS: usize = 1024;
 const EXCERPT_CHARS: usize = 180;
 
 /// The columns every list query selects, so a row always converts the same way.
-const SUMMARY_COLUMNS: &str = "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board,
+const SUMMARY_COLUMNS: &str = "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board, n.role,
      n.created_at, n.updated_at, n.share_token, n.media_id,
      (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count,
      (SELECT m.mime FROM media m WHERE m.id = n.media_id) AS file_mime,
@@ -254,7 +262,7 @@ pub fn next_slug(taken: &BTreeSet<String>, base: &str) -> AppResult<String> {
 /// The slugs already spoken for under `parent_id`. `exclude` is the node being
 /// renamed, which must not collide with itself.
 pub async fn sibling_slugs(
-    db: &SqlitePool,
+    db: &mut SqliteConnection,
     parent_id: Option<i64>,
     exclude: Option<i64>,
 ) -> AppResult<BTreeSet<String>> {
@@ -264,7 +272,7 @@ pub async fn sibling_slugs(
     )
     .bind(parent_id)
     .bind(exclude)
-    .fetch_all(db)
+    .fetch_all(&mut *db)
     .await?;
 
     Ok(rows.iter().map(|row| row.get("slug")).collect())
@@ -272,7 +280,7 @@ pub async fn sibling_slugs(
 
 /// `base`, or `base-2`, `base-3`… until no sibling holds it.
 pub async fn unique_slug(
-    db: &SqlitePool,
+    db: &mut SqliteConnection,
     parent_id: Option<i64>,
     base: &str,
     exclude: Option<i64>,
@@ -300,6 +308,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         excerpt: excerpt(head),
         position: row.get("position"),
         has_board: row.get::<i64, _>("has_board") != 0,
+        role: row.get("role"),
         child_count: row.get("child_count"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
@@ -390,10 +399,11 @@ pub async fn create_space(
 /// A new space, last in the switcher. Shared by the API and by `mkdir` at the
 /// root of the SFTP mount, which is why it takes a pool and not the state.
 pub async fn insert_space(db: &SqlitePool, name: &str, has_board: bool) -> AppResult<i64> {
-    let slug = unique_slug(db, None, &slugify(name), None).await?;
+    let mut tx = crate::db::begin_write(db).await?;
+    let slug = unique_slug(&mut tx, None, &slugify(name), None).await?;
     let now = crate::now();
     let position: i64 = sqlx::query("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM nodes WHERE parent_id IS NULL")
-        .fetch_one(db)
+        .fetch_one(&mut *tx)
         .await?
         .get("next");
 
@@ -407,10 +417,11 @@ pub async fn insert_space(db: &SqlitePool, name: &str, has_board: bool) -> AppRe
     .bind(position)
     .bind(i64::from(has_board))
     .bind(now)
-    .fetch_one(db)
+    .fetch_one(&mut *tx)
     .await?
     .get("id");
 
+    tx.commit().await?;
     Ok(id)
 }
 
@@ -526,17 +537,12 @@ pub async fn create(
         )));
     }
 
-    container(&state.db, input.parent_id).await?;
+    let mut tx = crate::db::begin_write(&state.db).await?;
+    container(&mut tx, input.parent_id).await?;
 
     let now = crate::now();
     let created_at = input.created_at.unwrap_or(now);
-    let slug = unique_slug(
-        &state.db,
-        Some(input.parent_id),
-        &slugify(&input.name),
-        None,
-    )
-    .await?;
+    let slug = unique_slug(&mut tx, Some(input.parent_id), &slugify(&input.name), None).await?;
 
     let id: i64 = sqlx::query(
         "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
@@ -550,11 +556,12 @@ pub async fn create(
     .bind(&input.body)
     .bind(created_at)
     .bind(now)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?
     .get("id");
 
-    media::link_to_node(&state.db, id, &input.body).await?;
+    media::link_to_node(&mut tx, id, &input.body).await?;
+    tx.commit().await?;
     state.backup.signal();
     load(&state, id).await.map(Json)
 }
@@ -565,9 +572,13 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(input): Json<UpdateInput>,
 ) -> AppResult<Json<Node>> {
+    // One transaction from the first read to the last write: the slug chosen
+    // here is still free when it is written, and a file's name and its
+    // download name never disagree.
+    let mut tx = crate::db::begin_write(&state.db).await?;
     let row = sqlx::query("SELECT parent_id, kind, name, slug FROM nodes WHERE id = ?1")
         .bind(id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -582,7 +593,7 @@ pub async fn update(
     let slug = if name == previous_name {
         row.get::<String, _>("slug")
     } else {
-        unique_slug(&state.db, parent_id, &slugify(name), Some(id)).await?
+        unique_slug(&mut tx, parent_id, &slugify(name), Some(id)).await?
     };
 
     if input.has_board.is_some() && kind != SPACE {
@@ -596,11 +607,11 @@ pub async fn update(
         sqlx::query("UPDATE media SET filename = ?1 WHERE id = (SELECT media_id FROM nodes WHERE id = ?2)")
             .bind(name)
             .bind(id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
 
-    let affected = sqlx::query(
+    sqlx::query(
         "UPDATE nodes
          SET name = ?1, body = ?2, slug = ?3, updated_at = ?4,
              created_at = COALESCE(?5, created_at),
@@ -614,17 +625,13 @@ pub async fn update(
     .bind(input.created_at)
     .bind(input.has_board.map(i64::from))
     .bind(id)
-    .execute(&state.db)
-    .await?
-    .rows_affected();
-
-    if affected == 0 {
-        return Err(AppError::NotFound);
-    }
+    .execute(&mut *tx)
+    .await?;
 
     if kind != FILE {
-        media::link_to_node(&state.db, id, body).await?;
+        media::link_to_node(&mut tx, id, body).await?;
     }
+    tx.commit().await?;
     state.backup.signal();
     load(&state, id).await.map(Json)
 }
@@ -634,34 +641,55 @@ pub async fn remove(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // Everything under a folder goes with it, so the files to clean up are
-    // those exclusive to the whole subtree. Collected before the delete, which
-    // takes the node_media rows with it.
-    let subtree = descendants(&state.db, id).await?;
-    if subtree.is_empty() {
-        return Err(AppError::NotFound);
-    }
-    let orphans = media::exclusive_media(&state.db, &subtree).await?;
-
-    let affected = sqlx::query("DELETE FROM nodes WHERE id = ?1")
-        .bind(id)
-        .execute(&state.db)
-        .await?
-        .rows_affected();
-
-    if affected == 0 {
-        return Err(AppError::NotFound);
-    }
-
-    for media_id in orphans {
-        match media::delete_media(&state, &media_id).await {
-            Ok(()) | Err(AppError::NotFound) => {}
-            Err(e) => return Err(e),
-        }
-    }
-
+    let removed = delete_subtree(&state.db, &state.config.uploads_dir(), id).await?;
     state.backup.signal();
-    Ok(Json(serde_json::json!({ "ok": true, "removed": subtree.len() })))
+    Ok(Json(serde_json::json!({ "ok": true, "removed": removed })))
+}
+
+/// Delete a node, everything beneath it, and the files nothing outside it
+/// embeds. The one way a node is deleted, so a delete through the SFTP mount
+/// cleans up exactly what one through the API does. Returns how many nodes
+/// went.
+pub async fn delete_subtree(
+    db: &SqlitePool,
+    uploads: &std::path::Path,
+    id: i64,
+) -> AppResult<usize> {
+    let mut tx = crate::db::begin_write(db).await?;
+
+    let role: Option<String> = sqlx::query_scalar("SELECT role FROM nodes WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if role.as_deref() == Some(DIARY) {
+        return Err(AppError::BadRequest(
+            "the diary space stays — empty it instead, or rename it".into(),
+        ));
+    }
+
+    // Collected before the delete, which takes the node_media rows with it.
+    // Everything under a folder goes with it, so the files to clean up are
+    // those exclusive to the whole subtree.
+    let subtree = descendants(&mut tx, id).await?;
+    let orphans = media::exclusive_media(&mut tx, &subtree).await?;
+
+    sqlx::query("DELETE FROM nodes WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    for media_id in &orphans {
+        sqlx::query("DELETE FROM media WHERE id = ?1")
+            .bind(media_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+
+    for media_id in &orphans {
+        media::remove_upload(uploads, media_id).await;
+    }
+    Ok(subtree.len())
 }
 
 /// Reparent a node, and optionally place it among its new siblings.
@@ -675,31 +703,33 @@ pub async fn move_node(
         return Err(AppError::BadRequest("a node cannot contain itself".into()));
     }
 
-    container(&state.db, input.parent_id).await?;
+    let mut tx = crate::db::begin_write(&state.db).await?;
+
+    let row = sqlx::query("SELECT kind, name FROM nodes WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let kind: String = row.get("kind");
+    let name: String = row.get("name");
+    // A space is a root: under a folder it would drop out of the switcher
+    // while its board and its cards carried on as if nothing had happened.
+    if kind == SPACE {
+        return Err(AppError::BadRequest("a space cannot be moved into anything".into()));
+    }
+
+    container(&mut tx, input.parent_id).await?;
 
     // Moving a folder into its own subtree would cut that subtree loose from
     // every root, where nothing could reach it again.
-    if descendants(&state.db, id).await?.contains(&input.parent_id) {
+    if descendants(&mut tx, id).await?.contains(&input.parent_id) {
         return Err(AppError::BadRequest(
             "a folder cannot be moved into itself".into(),
         ));
     }
 
-    let name: String = sqlx::query("SELECT name FROM nodes WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?
-        .get("name");
-
     // The slug has to be free where it lands, not where it came from.
-    let slug = unique_slug(
-        &state.db,
-        Some(input.parent_id),
-        &slugify(&name),
-        Some(id),
-    )
-    .await?;
+    let slug = unique_slug(&mut tx, Some(input.parent_id), &slugify(&name), Some(id)).await?;
 
     sqlx::query(
         "UPDATE nodes
@@ -711,18 +741,22 @@ pub async fn move_node(
     .bind(input.position)
     .bind(crate::now())
     .bind(id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     state.backup.signal();
     load(&state, id).await.map(Json)
 }
 
 /// Refuse anything but a space or a folder as the place a node goes into.
-pub async fn container(db: &SqlitePool, id: i64) -> AppResult<()> {
+pub async fn container(
+    db: &mut SqliteConnection,
+    id: i64,
+) -> AppResult<()> {
     let kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
         .bind(id)
-        .fetch_optional(db)
+        .fetch_optional(&mut *db)
         .await?
         .ok_or(AppError::NotFound)?
         .get("kind");
@@ -735,7 +769,10 @@ pub async fn container(db: &SqlitePool, id: i64) -> AppResult<()> {
 }
 
 /// A node and everything beneath it, the node itself first.
-pub async fn descendants(db: &SqlitePool, id: i64) -> AppResult<Vec<i64>> {
+pub async fn descendants(
+    db: &mut SqliteConnection,
+    id: i64,
+) -> AppResult<Vec<i64>> {
     let rows = sqlx::query(
         "WITH RECURSIVE sub (id) AS (
              SELECT id FROM nodes WHERE id = ?1
@@ -745,7 +782,7 @@ pub async fn descendants(db: &SqlitePool, id: i64) -> AppResult<Vec<i64>> {
          SELECT id FROM sub",
     )
     .bind(id)
-    .fetch_all(db)
+    .fetch_all(&mut *db)
     .await?;
 
     Ok(rows.iter().map(|row| row.get("id")).collect())
@@ -799,6 +836,7 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         excerpt: summary.excerpt,
         position: summary.position,
         has_board: summary.has_board,
+        role: summary.role,
         child_count: summary.child_count,
         created_at: summary.created_at,
         updated_at: summary.updated_at,
@@ -814,8 +852,89 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        excerpt, fts_query, next_slug, recent_documents, slugify, EXCERPT_CHARS, HEAD_CHARS,
+        delete_subtree, excerpt, fts_query, next_slug, recent_documents, slugify, EXCERPT_CHARS,
+        HEAD_CHARS,
     };
+    use crate::error::AppError;
+
+    /// A delete takes the subtree and the files only it embedded — from the
+    /// table and from the disk — and leaves what something else still embeds.
+    /// The diary, found by its role whatever it is called, is not deleted.
+    #[tokio::test]
+    async fn a_delete_takes_what_only_it_held() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+
+        let diary: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE role = 'diary'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE nodes SET name = 'journal', slug = 'journal' WHERE id = ?1")
+            .bind(diary)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(matches!(
+            delete_subtree(&db, dir.path(), diary).await,
+            Err(AppError::BadRequest(_))
+        ));
+
+        let node = |parent: i64, kind: &'static str, slug: &'static str| {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?3, 0, 0) RETURNING id",
+                )
+                .bind(parent)
+                .bind(kind)
+                .bind(slug)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+        let folder = node(diary, "folder", "trip").await;
+        let inside = node(folder, "document", "day-1").await;
+        let outside = node(diary, "document", "elsewhere").await;
+
+        let only = "11111111-1111-4111-8111-111111111111";
+        let shared = "22222222-2222-4222-8222-222222222222";
+        for (id, nodes) in [(only, vec![inside]), (shared, vec![inside, outside])] {
+            sqlx::query("INSERT INTO media (id, filename, mime, size, created_at) VALUES (?1, 'x', 'image/png', 1, 0)")
+                .bind(id)
+                .execute(&db)
+                .await
+                .unwrap();
+            std::fs::write(dir.path().join(id), b"x").unwrap();
+            for node in nodes {
+                sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
+                    .bind(node)
+                    .bind(id)
+                    .execute(&db)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(delete_subtree(&db, dir.path(), folder).await.unwrap(), 2);
+        let media: Vec<String> = sqlx::query_scalar("SELECT id FROM media")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        assert_eq!(media, [shared]);
+        assert!(!dir.path().join(only).exists());
+        assert!(dir.path().join(shared).exists());
+        assert!(matches!(
+            delete_subtree(&db, dir.path(), folder).await,
+            Err(AppError::NotFound)
+        ));
+    }
 
     /// The overview reaches into folders, newest edit first, and stops at the
     /// limit — and never lists a folder as if it were a document.

@@ -23,6 +23,8 @@ export interface NodeSummary {
   excerpt: string
   position: number
   has_board: boolean
+  /** Spaces the app has to tell apart: `diary`, or nothing. */
+  role: string | null
   child_count: number
   created_at: number
   updated_at: number
@@ -45,13 +47,13 @@ export interface WorkspaceNode extends NodeSummary {
   path: Crumb[]
 }
 
-/** A public key allowed to mount the workspace over SFTP. */
 /** A space as the overview shows it: itself, and what was last written in it. */
 export interface SpaceOverview {
   space: NodeSummary
   recent: NodeSummary[]
 }
 
+/** A public key allowed to mount the workspace over SFTP. */
 export interface SshKey {
   id: number
   name: string
@@ -130,6 +132,8 @@ export interface MediaFile {
   encrypted: boolean
   /** Every document that embeds this file — a file may be used by several. */
   node_ids: number[]
+  /** The file node it is, when it sits in the tree; deleted from there. */
+  file_node: number | null
 }
 
 /** The vault, as `/api/vault` reports it. */

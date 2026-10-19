@@ -107,8 +107,9 @@ same). A new board starts with `backlog`, `doing` and `done`, and the columns me
 something by where they stand rather than by their names: the first is the
 inbox new cards land in, the last is done. A card is finished exactly when it
 sits in the last column — moving it there stamps it, moving it out reopens it —
-so a tick and a column can never disagree. `:list <name>` adds a column in front
-of the last one, `:name!` on the board renames the column under the cursor, and
+so a tick and a column can never disagree; marking a card done through the API
+moves it there too, and deleting the last column makes the one before it done.
+`:list <name>` adds a column in front of the last one, `:name!` on the board renames the column under the cursor, and
 done cards older than a week fold away until `z` shows them.
 
 `c` captures from anywhere: `:card <title>` outside the board puts the card in
@@ -135,7 +136,8 @@ and `Enter` on that card opens it again. `Enter` on a card without one makes a
 document named after the card in the space's root and opens it to write in, and
 closing that document returns to the board on the same card. The link is deliberately loose —
 deleting the document leaves the card standing, because the work is still open
-once its notes are gone.
+once its notes are gone. Only a document can be a card's notes; a folder or a
+file is refused.
 
 ## The agenda
 
@@ -160,6 +162,17 @@ whole workspace as a zip: the tree as real directories, one markdown file per
 document, every file in the tree where it sits and every other embedded file in
 `media/`, under their real names, and relative links between them, so the
 archive reads in any markdown viewer without this application.
+
+The diary is the diary by role, not by name: rename it and the reminder and
+the agenda still know which space it is, and it cannot be deleted — empty it
+instead. Before a new build migrates the database it keeps a copy of it as
+it was, `diary.db.pre-<version>`, next to it in the data directory.
+
+An upload that nothing embeds any more — pasted, then deleted from the
+document — is kept a week and then removed, along with what a killed upload
+or a crash leaves in `uploads/`. That runs at start and once a day. A file in
+the tree is never one of them: it is deleted from its folder, not from
+`:media`.
 
 ## Files
 

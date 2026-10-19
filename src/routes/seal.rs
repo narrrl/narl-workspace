@@ -60,7 +60,7 @@ struct Target {
 async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     let key = state.vault.key().ok_or(AppError::Locked)?;
 
-    let subtree = nodes::descendants(&state.db, id).await?;
+    let subtree = nodes::descendants(&mut *state.db.acquire().await?, id).await?;
     if subtree.is_empty() {
         return Err(AppError::NotFound);
     }

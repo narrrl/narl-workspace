@@ -21,12 +21,12 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::nodes::SPACE,
+    routes::nodes::{DOCUMENT, SPACE},
     state::AppState,
 };
 
@@ -155,7 +155,7 @@ pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json
     let cards = agenda_cards(&state.db, crate::now() + (AGENDA_DAYS + 1) * 86400).await?;
 
     let has_diary: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE parent_id IS NULL AND slug = 'diary'")
+        sqlx::query_scalar("SELECT id FROM nodes WHERE role = 'diary'")
             .fetch_optional(&state.db)
             .await?;
     let diary_today = match has_diary {
@@ -290,9 +290,12 @@ async fn list_space(db: &SqlitePool, list_id: i64) -> AppResult<i64> {
 /// existed — or one whose board was switched on later — gets its columns the
 /// first time the board is looked at, which is the only moment it matters.
 async fn ensure_lists(db: &SqlitePool, space_id: i64) -> AppResult<()> {
+    // Count and seed under one write lock: two tabs opening a fresh board at
+    // once would otherwise both find it empty and seed it twice.
+    let mut tx = crate::db::begin_write(db).await?;
     let existing: i64 = sqlx::query("SELECT COUNT(*) AS n FROM board_lists WHERE space_id = ?1")
         .bind(space_id)
-        .fetch_one(db)
+        .fetch_one(&mut *tx)
         .await?
         .get("n");
     if existing > 0 {
@@ -308,10 +311,63 @@ async fn ensure_lists(db: &SqlitePool, space_id: i64) -> AppResult<()> {
         .bind(name)
         .bind(position as i64)
         .bind(now)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(())
+}
+
+/// Make every card on a board agree with where it stands: finished in the
+/// last list, open anywhere else. Moving a card keeps this by itself; this is
+/// for the changes that move the lists instead — one added after a lone list,
+/// the last one deleted. A board of one list has no "done" to agree with and
+/// is left as it is.
+async fn settle(db: &mut SqliteConnection, space_id: i64) -> AppResult<()> {
+    let lists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM board_lists WHERE space_id = ?1")
+        .bind(space_id)
+        .fetch_one(&mut *db)
+        .await?;
+    let Some((last, _)) = last_list(&mut *db, space_id).await? else {
+        return Ok(());
+    };
+    if lists < 2 {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE cards SET done_at = NULL
+         WHERE done_at IS NOT NULL AND list_id <> ?2
+           AND list_id IN (SELECT id FROM board_lists WHERE space_id = ?1)",
+    )
+    .bind(space_id)
+    .bind(last)
+    .execute(&mut *db)
+    .await?;
+    sqlx::query("UPDATE cards SET done_at = ?2 WHERE done_at IS NULL AND list_id = ?1")
+        .bind(last)
+        .bind(crate::now())
+        .execute(&mut *db)
+        .await?;
+    Ok(())
+}
+
+/// A card links to a document — its notes — and to nothing else: a folder
+/// cannot be opened to write in, and a file has no text to hold them.
+async fn linkable(db: &SqlitePool, node_id: Option<i64>) -> AppResult<()> {
+    let Some(node_id) = node_id else {
+        return Ok(());
+    };
+    let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM nodes WHERE id = ?1")
+        .bind(node_id)
+        .fetch_optional(db)
+        .await?;
+    match kind.as_deref() {
+        Some(DOCUMENT) => Ok(()),
+        Some(kind) => Err(AppError::BadRequest(format!(
+            "a card links to a document, not a {kind}"
+        ))),
+        None => Err(AppError::NotFound),
+    }
 }
 
 pub async fn board(
@@ -386,13 +442,13 @@ pub async fn create_list(
     // A new column goes in front of the last one, because the last one is
     // "done" and has to stay last for that to keep meaning anything. A board
     // down to a single list just grows a second one after it.
+    let mut tx = crate::db::begin_write(&state.db).await?;
     let count: i64 = sqlx::query("SELECT COUNT(*) AS n FROM board_lists WHERE space_id = ?1")
         .bind(space_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?
         .get("n");
 
-    let mut tx = state.db.begin().await?;
     let position = match last_list(&mut *tx, space_id).await? {
         Some((last, position)) if count >= 2 => {
             sqlx::query("UPDATE board_lists SET position = position + 1 WHERE id = ?1")
@@ -414,6 +470,7 @@ pub async fn create_list(
     .bind(crate::now())
     .execute(&mut *tx)
     .await?;
+    settle(&mut tx, space_id).await?;
     tx.commit().await?;
 
     state.backup.signal();
@@ -452,9 +509,10 @@ pub async fn remove_list(
 ) -> AppResult<Json<Board>> {
     let space_id = list_space(&state.db, list_id).await?;
 
+    let mut tx = crate::db::begin_write(&state.db).await?;
     let remaining: i64 = sqlx::query("SELECT COUNT(*) AS n FROM board_lists WHERE space_id = ?1")
         .bind(space_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?
         .get("n");
     if remaining <= 1 {
@@ -465,8 +523,11 @@ pub async fn remove_list(
 
     sqlx::query("DELETE FROM board_lists WHERE id = ?1")
         .bind(list_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    // Deleting the last list makes the one before it "done".
+    settle(&mut tx, space_id).await?;
+    tx.commit().await?;
 
     state.backup.signal();
     let space_name = board_space(&state.db, space_id).await?;
@@ -479,17 +540,19 @@ pub async fn create_card(
     Path(list_id): Path<i64>,
     Json(input): Json<CardInput>,
 ) -> AppResult<Json<Card>> {
-    list_space(&state.db, list_id).await?;
+    let space_id = list_space(&state.db, list_id).await?;
     let title = input.title.trim();
     if title.is_empty() {
         return Err(AppError::BadRequest("a card needs a title".into()));
     }
+    linkable(&state.db, input.node_id).await?;
 
+    let mut tx = crate::db::begin_write(&state.db).await?;
     let position: i64 = sqlx::query(
         "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM cards WHERE list_id = ?1",
     )
     .bind(list_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?
     .get("next");
 
@@ -506,9 +569,12 @@ pub async fn create_card(
     .bind(input.due_at)
     .bind(position)
     .bind(now)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?
     .get("id");
+    // A card made straight into the done list is finished as it lands.
+    settle(&mut tx, space_id).await?;
+    tx.commit().await?;
 
     state.backup.signal();
     card(&state.db, id).await.map(Json)
@@ -528,30 +594,50 @@ pub async fn update_card(
             return Err(AppError::BadRequest("a card needs a title".into()))
         }
         Some(title) => title.trim().to_string(),
-        None => current.title,
+        None => current.title.clone(),
     };
-    // `done` is a flag on the way in and a timestamp in the table: when it was
-    // finished is worth more than that it was, and the weekly digest needs it.
-    let done_at = match patch.done {
-        Some(true) => current.done_at.or(Some(now)),
-        Some(false) => None,
-        None => current.done_at,
-    };
+    if let Some(node_id) = patch.node_id {
+        linkable(&state.db, node_id).await?;
+    }
+
+    let mut tx = crate::db::begin_write(&state.db).await?;
+
+    // `done` is where the card stands, not a flag beside it: finishing a card
+    // moves it into the last list, reopening one moves it back to the first,
+    // and the stamp follows from the move as it does for any other.
+    if let Some(done) = patch.done.filter(|&done| done != current.done_at.is_some()) {
+        let space_id = list_space(&state.db, current.list_id).await?;
+        let lists: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM board_lists WHERE space_id = ?1 ORDER BY position, id",
+        )
+        .bind(space_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let (Some(&first), Some(&last)) = (lists.first(), lists.last()) else {
+            return Err(AppError::NotFound);
+        };
+        if lists.len() < 2 {
+            return Err(AppError::BadRequest(
+                "a board needs two lists for one to mean done".into(),
+            ));
+        }
+        let to = if done { last } else { first };
+        relocate(&mut tx, &current, to, last, None, now).await?;
+    }
 
     sqlx::query(
-        "UPDATE cards SET title = ?1, body = ?2, node_id = ?3, due_at = ?4, done_at = ?5,
-                          updated_at = ?6
-         WHERE id = ?7",
+        "UPDATE cards SET title = ?1, body = ?2, node_id = ?3, due_at = ?4, updated_at = ?5
+         WHERE id = ?6",
     )
     .bind(&title)
     .bind(patch.body.unwrap_or(current.body))
     .bind(patch.node_id.unwrap_or(current.node_id))
     .bind(patch.due_at.unwrap_or(current.due_at))
-    .bind(done_at)
     .bind(now)
     .bind(card_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     state.backup.signal();
     card(&state.db, card_id).await.map(Json)
@@ -595,57 +681,68 @@ pub async fn move_card(
         ));
     }
 
-    let mut tx = state.db.begin().await?;
-
+    let mut tx = crate::db::begin_write(&state.db).await?;
     let now = crate::now();
     let last = last_list(&mut *tx, to).await?.map_or(input.list_id, |(id, _)| id);
-    let done_at = done_after_move(current.list_id, input.list_id, last, current.done_at, now);
+    relocate(&mut tx, &current, input.list_id, last, input.position, now).await?;
+    tx.commit().await?;
+
+    state.backup.signal();
+    card(&state.db, card_id).await.map(Json)
+}
+
+/// Put a card on `to` at `position` (the end, if none), stamping or clearing
+/// its done time by where it lands, and close the ranks of both lists.
+async fn relocate(
+    db: &mut SqliteConnection,
+    current: &Card,
+    to: i64,
+    last: i64,
+    position: Option<i64>,
+    now: i64,
+) -> AppResult<()> {
+    let card_id = current.id;
+    let done_at = done_after_move(current.list_id, to, last, current.done_at, now);
 
     sqlx::query("UPDATE cards SET list_id = ?1, done_at = ?2, updated_at = ?3 WHERE id = ?4")
-        .bind(input.list_id)
+        .bind(to)
         .bind(done_at)
         .bind(now)
         .bind(card_id)
-        .execute(&mut *tx)
+        .execute(&mut *db)
         .await?;
 
-    let ids: Vec<i64> = sqlx::query("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
-        .bind(input.list_id)
-        .fetch_all(&mut *tx)
-        .await?
-        .iter()
-        .map(|row| row.get("id"))
-        .collect();
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
+        .bind(to)
+        .fetch_all(&mut *db)
+        .await?;
 
-    let target = input.position.unwrap_or(i64::MAX).max(0) as usize;
+    let target = position.unwrap_or(i64::MAX).max(0) as usize;
     for (position, id) in reordered(&ids, card_id, target).iter().enumerate() {
         sqlx::query("UPDATE cards SET position = ?1 WHERE id = ?2")
             .bind(position as i64)
             .bind(id)
-            .execute(&mut *tx)
+            .execute(&mut *db)
             .await?;
     }
 
     // The list it came from keeps a hole where the card was. Harmless for
     // ordering, but it would grow with every move.
-    let left: Vec<i64> = sqlx::query("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
-        .bind(current.list_id)
-        .fetch_all(&mut *tx)
-        .await?
-        .iter()
-        .map(|row| row.get("id"))
-        .collect();
-    for (position, id) in left.iter().enumerate() {
-        sqlx::query("UPDATE cards SET position = ?1 WHERE id = ?2")
-            .bind(position as i64)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+    if current.list_id != to {
+        let left: Vec<i64> =
+            sqlx::query_scalar("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
+                .bind(current.list_id)
+                .fetch_all(&mut *db)
+                .await?;
+        for (position, id) in left.iter().enumerate() {
+            sqlx::query("UPDATE cards SET position = ?1 WHERE id = ?2")
+                .bind(position as i64)
+                .bind(id)
+                .execute(&mut *db)
+                .await?;
+        }
     }
-
-    tx.commit().await?;
-    state.backup.signal();
-    card(&state.db, card_id).await.map(Json)
+    Ok(())
 }
 
 async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
@@ -665,7 +762,7 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::{agenda_cards, done_after_move, reordered};
+    use super::{agenda_cards, card, done_after_move, relocate, reordered, settle};
 
     /// The agenda asks for what is due soon or in hand, and never for what is
     /// finished, parked in the inbox without a date, or due far off.
@@ -731,6 +828,70 @@ mod tests {
             titles,
             vec![("due soon".to_string(), "inbox"), ("in hand".to_string(), "doing")]
         );
+    }
+
+    /// Whatever changes — a card moved, a list added after a lone one, the
+    /// last list deleted — a card is finished exactly when it is in the last.
+    #[tokio::test]
+    async fn done_is_where_a_card_stands() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let space: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, body, has_board, created_at, updated_at)
+             VALUES (NULL, 'space', 'job', 'job', '', 1, 0, 0) RETURNING id",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let list = |position: i64| {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO board_lists (space_id, name, position, created_at)
+                     VALUES (?1, 'l', ?2, 0) RETURNING id",
+                )
+                .bind(space)
+                .bind(position)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+        let (inbox, done) = (list(0).await, list(1).await);
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO cards (list_id, title, position, created_at, updated_at)
+             VALUES (?1, 'c', 0, 0, 0) RETURNING id",
+        )
+        .bind(inbox)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let done_at = |db: sqlx::SqlitePool| async move { card(&db, id).await.unwrap().done_at };
+
+        let current = card(&db, id).await.unwrap();
+        let mut conn = db.acquire().await.unwrap();
+        relocate(&mut conn, &current, done, done, None, 100).await.unwrap();
+        drop(conn);
+        assert_eq!(done_at(db.clone()).await, Some(100));
+
+        // A list added after the last one becomes "done", so the card that
+        // was finished in the old last list is open again.
+        let later = list(2).await;
+        settle(&mut db.acquire().await.unwrap(), space).await.unwrap();
+        assert_eq!(done_at(db.clone()).await, None);
+
+        // Deleting the new last list hands "done" back to the old one.
+        sqlx::query("DELETE FROM board_lists WHERE id = ?1")
+            .bind(later)
+            .execute(&db)
+            .await
+            .unwrap();
+        settle(&mut db.acquire().await.unwrap(), space).await.unwrap();
+        assert!(done_at(db.clone()).await.is_some());
     }
 
     #[test]

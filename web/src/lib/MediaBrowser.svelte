@@ -5,8 +5,11 @@
   import { workspace } from './store.svelte'
   import { formatBytes, formatStamp } from './util'
 
-  const usage = (nodeIds: number[]) =>
-    nodeIds.length === 0 ? 'unattached' : nodeIds.map((id) => `#${id}`).join(' ')
+  const usage = (nodeIds: number[], fileNode: number | null) => {
+    const embeds = nodeIds.map((id) => `#${id}`).join(' ')
+    if (fileNode !== null) return embeds ? `in the tree · ${embeds}` : 'in the tree'
+    return embeds || 'unattached'
+  }
 
   async function remove(id: string, filename: string, nodeIds: number[]) {
     const used = nodeIds.length === 1 ? '1 document' : `${nodeIds.length} documents`
@@ -42,7 +45,7 @@
           <span class="name">{file.filename}</span>
           <span class="muted">
             {formatBytes(file.size)} · {formatStamp(file.created_at)} ·
-            {usage(file.node_ids)}
+            {usage(file.node_ids, file.file_node)}
           </span>
         </div>
 
@@ -56,7 +59,9 @@
             >
           {/if}
           <button onclick={() => workspace.copy(location.origin + file.url)}>copy url</button>
-          <button class="danger" onclick={() => remove(file.id, file.filename, file.node_ids)}>rm</button>
+          {#if file.file_node === null}
+            <button class="danger" onclick={() => remove(file.id, file.filename, file.node_ids)}>rm</button>
+          {/if}
         </div>
       </li>
     {:else}

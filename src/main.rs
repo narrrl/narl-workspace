@@ -2,6 +2,7 @@ mod auth;
 mod backup;
 mod cli;
 mod config;
+mod db;
 mod error;
 mod mail;
 mod notify;
@@ -9,6 +10,7 @@ mod routes;
 mod sftp;
 mod state;
 mod static_files;
+mod sweep;
 mod throttle;
 mod vault;
 
@@ -110,6 +112,8 @@ async fn main() -> Result<()> {
     let notify = notify::Notifier::new(db.clone(), Arc::clone(&config))?;
     notify::spawn(Arc::clone(&notify));
 
+    sweep::spawn(db.clone(), config.uploads_dir());
+
     let state = AppState {
         vault: vault::Vault::new(db.clone(), config.vault_idle),
         db,
@@ -157,12 +161,58 @@ async fn open_db(config: &Config) -> Result<sqlx::SqlitePool> {
         .await
         .context("could not open the workspace database")?;
 
-    sqlx::migrate!("./migrations")
+    let migrator = sqlx::migrate!("./migrations");
+    snapshot_before_migrating(&db, &migrator, config).await?;
+    migrator
         .run(&db)
         .await
         .context("could not apply database migrations")?;
 
     Ok(db)
+}
+
+/// A copy of the database as it was, taken before a migration changes it.
+/// Migrations only go forward, and some of them reshape or drop what was
+/// there; the copy is the way back if one goes wrong on real data. A fresh
+/// database, or one already up to date, gets none.
+async fn snapshot_before_migrating(
+    db: &sqlx::SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+    config: &Config,
+) -> Result<()> {
+    let applied: Option<i64> = match sqlx::query_scalar(
+        "SELECT MAX(version) FROM _sqlx_migrations WHERE success",
+    )
+    .fetch_one(db)
+    .await
+    {
+        Ok(version) => version,
+        // No bookkeeping table: nothing has ever been migrated, so there is
+        // nothing to keep.
+        Err(_) => return Ok(()),
+    };
+    let Some(applied) = applied else {
+        return Ok(());
+    };
+    let latest = migrator.iter().map(|m| m.version).max().unwrap_or(0);
+    if latest <= applied {
+        return Ok(());
+    }
+
+    let path = config.data_dir.join(format!("diary.db.pre-{latest:04}"));
+    if path.exists() {
+        return Ok(());
+    }
+    tracing::info!(
+        "database is at migration {applied}, the binary at {latest}: keeping a copy at {}",
+        path.display()
+    );
+    sqlx::query("VACUUM INTO ?1")
+        .bind(path.to_string_lossy().into_owned())
+        .execute(db)
+        .await
+        .with_context(|| format!("could not snapshot the database to {}", path.display()))?;
+    Ok(())
 }
 
 async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -> Result<()> {

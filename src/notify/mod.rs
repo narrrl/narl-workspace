@@ -389,7 +389,7 @@ pub(crate) async fn diary_written(db: &SqlitePool, tz: Tz, day: NaiveDate) -> sq
     let (start, end) = day_bounds(tz, day);
     let written: i64 = sqlx::query_scalar(
         "WITH RECURSIVE tree (id) AS (
-             SELECT id FROM nodes WHERE parent_id IS NULL AND slug = 'diary'
+             SELECT id FROM nodes WHERE role = 'diary'
              UNION ALL
              SELECT n.id FROM nodes n JOIN tree t ON n.parent_id = t.id
          )

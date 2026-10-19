@@ -448,7 +448,7 @@ class Workspace {
     const remembered = Number(localStorage.getItem('diary:space'))
     const start =
       this.spaces.find((s) => s.id === remembered) ??
-      this.spaces.find((s) => s.slug === 'diary') ??
+      this.spaces.find((s) => s.role === 'diary') ??
       this.spaces[0]
     if (start) await this.enterSpace(start.id)
   }
@@ -722,7 +722,7 @@ class Workspace {
     this.rawBoard = null
     this.view = 'tree'
     this.spaces = await api.listSpaces()
-    const next = this.spaces.find((space) => space.slug === 'diary') ?? this.spaces[0]
+    const next = this.spaces.find((space) => space.role === 'diary') ?? this.spaces[0]
     if (next) await this.enterSpace(next.id)
     else {
       localStorage.removeItem('diary:space')

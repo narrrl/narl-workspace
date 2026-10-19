@@ -19,7 +19,7 @@ use russh_sftp::protocol::{
 };
 use sqlx::{Row, SqlitePool};
 
-use crate::{backup::Backup, routes::media, routes::nodes, state::AppState};
+use crate::{backup::Backup, error::AppError, routes::media, routes::nodes, state::AppState};
 
 type SftpResult<T> = Result<T, StatusCode>;
 
@@ -175,6 +175,8 @@ enum OpenHandle {
 
 pub struct SpaceFs {
     db: SqlitePool,
+    /// Where the bytes of uploads live, so a delete here removes them too.
+    uploads: std::path::PathBuf,
     /// `None` only in tests, where there is nothing to mirror to.
     backup: Option<Arc<Backup>>,
     handles: HashMap<String, OpenHandle>,
@@ -184,12 +186,13 @@ pub struct SpaceFs {
 
 impl SpaceFs {
     pub fn new(state: AppState) -> Self {
-        Self::with_db(state.db, Some(state.backup))
+        Self::with_db(state.db, state.config.uploads_dir(), Some(state.backup))
     }
 
-    fn with_db(db: SqlitePool, backup: Option<Arc<Backup>>) -> Self {
+    fn with_db(db: SqlitePool, uploads: std::path::PathBuf, backup: Option<Arc<Backup>>) -> Self {
         Self {
             db,
+            uploads,
             backup,
             handles: HashMap::new(),
             next_handle: 0,
@@ -330,7 +333,7 @@ impl SpaceFs {
     /// An empty document under `parent`, named after the file it was created
     /// as until a heading says otherwise.
     async fn create_doc(&self, parent: i64, stem: &str) -> SftpResult<i64> {
-        let slug = nodes::unique_slug(&self.db, Some(parent), &nodes::slugify(stem), None)
+        let slug = nodes::unique_slug(&mut *self.conn().await?, Some(parent), &nodes::slugify(stem), None)
             .await
             .map_err(|_| StatusCode::Failure)?;
         let id: i64 = sqlx::query(
@@ -364,7 +367,7 @@ impl SpaceFs {
         .execute(&self.db)
         .await
         .map_err(|_| StatusCode::Failure)?;
-        media::link_to_node(&self.db, id, &body)
+        media::link_to_node(&mut *self.conn().await?, id, &body)
             .await
             .map_err(|_| StatusCode::Failure)?;
         self.changed();
@@ -372,13 +375,19 @@ impl SpaceFs {
     }
 
     async fn delete_node(&self, id: i64) -> SftpResult<()> {
-        sqlx::query("DELETE FROM nodes WHERE id = ?1")
-            .bind(id)
-            .execute(&self.db)
+        nodes::delete_subtree(&self.db, &self.uploads, id)
             .await
-            .map_err(|_| StatusCode::Failure)?;
+            .map_err(|e| match e {
+                AppError::NotFound => StatusCode::NoSuchFile,
+                AppError::BadRequest(_) => StatusCode::PermissionDenied,
+                _ => StatusCode::Failure,
+            })?;
         self.changed();
         Ok(())
+    }
+
+    async fn conn(&self) -> SftpResult<sqlx::pool::PoolConnection<sqlx::Sqlite>> {
+        self.db.acquire().await.map_err(|_| StatusCode::Failure)
     }
 
     async fn listing(&self, path: &str) -> SftpResult<Vec<File>> {
@@ -699,7 +708,7 @@ impl russh_sftp::server::Handler for SpaceFs {
             self.changed();
             return Ok(ok_status(id));
         };
-        let slug = nodes::unique_slug(&self.db, Some(parent), &nodes::slugify(name), None)
+        let slug = nodes::unique_slug(&mut *self.conn().await?, Some(parent), &nodes::slugify(name), None)
             .await
             .map_err(|_| StatusCode::Failure)?;
         sqlx::query(
@@ -768,7 +777,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                         return Err(StatusCode::PermissionDenied)
                     }
                     (_, Some(parent)) => {
-                        let below = nodes::descendants(&self.db, node)
+                        let below = nodes::descendants(&mut *self.conn().await?, node)
                             .await
                             .map_err(|_| StatusCode::Failure)?;
                         if below.contains(&parent) {
@@ -777,7 +786,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                     }
                 }
                 let new_slug =
-                    nodes::unique_slug(&self.db, new_parent, &nodes::slugify(new_leaf), Some(node))
+                    nodes::unique_slug(&mut *self.conn().await?, new_parent, &nodes::slugify(new_leaf), Some(node))
                         .await
                         .map_err(|_| StatusCode::Failure)?;
                 // A move that keeps the name keeps the title too.
@@ -812,7 +821,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                     }
                     (Some(stem), _) => {
                         let new_slug = nodes::unique_slug(
-                            &self.db,
+                            &mut *self.conn().await?,
                             Some(new_parent),
                             &nodes::slugify(stem),
                             Some(doc.id),
@@ -942,7 +951,7 @@ mod tests {
             .await
             .expect("an in-memory database");
         sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
-        SpaceFs::with_db(db, None)
+        SpaceFs::with_db(db, std::env::temp_dir().join("narl-sftp-test-uploads"), None)
     }
 
     const CREATE: OpenFlags = OpenFlags::WRITE.union(OpenFlags::CREATE).union(OpenFlags::TRUNCATE);

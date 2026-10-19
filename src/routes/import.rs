@@ -404,8 +404,23 @@ fn unpack(
 
         let id = Uuid::new_v4().to_string();
         let target = uploads_dir.join(&id);
+        let partial = target.with_extension("part");
         ids.push(id.clone());
-        let size = std::io::copy(&mut capped, &mut std::fs::File::create(&target)?)?;
+        // Written aside and renamed into place whole, like any other upload,
+        // so a name the database may come to know never holds half a file.
+        let mut out = std::fs::File::create(&partial)?;
+        let copied = std::io::copy(&mut capped, &mut out).and_then(|size| {
+            out.sync_all()?;
+            Ok(size)
+        });
+        let size = match copied {
+            Ok(size) => size,
+            Err(e) => {
+                let _ = std::fs::remove_file(&partial);
+                return Err(e.into());
+            }
+        };
+        std::fs::rename(&partial, &target)?;
         unpacked += size;
         if unpacked > limit {
             return Err(unpacked_too_large(limit));
