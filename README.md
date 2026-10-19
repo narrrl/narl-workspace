@@ -168,7 +168,7 @@ Links between the imported files are rewritten as they land: a link to a
 markdown file becomes the document's address, a link to an image becomes its
 media URL, and anything pointing outside the upload — a URL, a file that was not
 uploaded — is left exactly as it was written. Absolute paths, `..` segments and
-anything a zip smuggles in are refused, and the whole upload is bounded by
+anything a zip smuggles in are refused, and both the upload and what a zip unpacks to are bounded by
 `WORKSPACE_MAX_UPLOAD_MB`.
 
 A document has a real address, `/n/<space>/<folder>/<slug>`, which is what those

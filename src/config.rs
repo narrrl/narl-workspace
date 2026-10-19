@@ -194,7 +194,7 @@ impl Config {
             .map(|v| v.parse::<usize>())
             .transpose()
             .context("WORKSPACE_MAX_UPLOAD_MB must be a number")?
-            .unwrap_or(64)
+            .unwrap_or(1024)
             * 1024
             * 1024;
 

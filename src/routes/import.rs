@@ -52,8 +52,14 @@ pub struct ImportReport {
 /// One file of the upload, with the path it had inside the folder.
 struct Upload {
     path: String,
-    data: Vec<u8>,
-    mime: String,
+    content: Content,
+}
+
+enum Content {
+    /// A markdown file, read into memory: it is about to become a document body.
+    Markdown(String),
+    /// Anything else, already streamed to `uploads/<id>`.
+    File { id: String, mime: String, size: u64 },
 }
 
 /// Where a path inside the import ended up, as a URL a document body can use.
@@ -219,15 +225,20 @@ fn rewrite_links(body: &str, dir: &str, landed: &HashMap<String, Landed>) -> (St
 /// Read the multipart body into uploads. A field whose file name ends in `.zip`
 /// is expanded, so dragging in an archive and picking a folder arrive the same
 /// way — the exporter writes one of those archives.
+///
+/// Nothing but markdown is held in memory: every other file is streamed to
+/// `uploads/` as it arrives, and its id goes into `written` at once so a
+/// failure further on can sweep it up.
 async fn collect(
     state: &AppState,
     mut multipart: Multipart,
     skipped: &mut Vec<String>,
+    written: &mut Vec<String>,
 ) -> AppResult<Vec<Upload>> {
     let mut uploads: Vec<Upload> = Vec::new();
-    let mut total = 0usize;
+    let mut budget = state.config.max_upload_bytes as u64;
 
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(format!("malformed upload: {e}")))?
@@ -236,22 +247,36 @@ async fn collect(
             .file_name()
             .map(str::to_string)
             .unwrap_or_else(|| "upload".to_string());
-        let content_type = field.content_type().map(str::to_string);
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| AppError::BadRequest(format!("could not read upload: {e}")))?;
-
-        total += data.len();
-        if total > state.config.max_upload_bytes {
-            return Err(AppError::BadRequest(format!(
-                "the upload is larger than the {} MB limit",
-                state.config.max_upload_bytes / 1024 / 1024
-            )));
-        }
 
         if name.to_ascii_lowercase().ends_with(".zip") {
-            expand_zip(&data, &mut uploads, skipped)?;
+            // The archive itself is only passing through: it lands under a
+            // dotted name no media row can carry, and goes once it is unpacked.
+            let id = format!(".import-{}", Uuid::new_v4());
+            let size = media::store_field(state, &mut field, &id, &mut budget).await?;
+            if size == 0 {
+                skipped.push(name);
+                continue;
+            }
+
+            let uploads_dir = state.config.uploads_dir();
+            let limit = state.config.max_upload_bytes as u64;
+            let archive = uploads_dir.join(&id);
+            let opened = archive.clone();
+            let expanded = tokio::task::spawn_blocking(move || expand_zip(&opened, &uploads_dir, limit))
+                .await
+                .map_err(anyhow::Error::from);
+            let _ = tokio::fs::remove_file(&archive).await;
+
+            let (mut files, mut refused, ids) = match expanded? {
+                Ok(done) => done,
+                Err((e, ids)) => {
+                    written.extend(ids);
+                    return Err(e);
+                }
+            };
+            written.extend(ids);
+            uploads.append(&mut files);
+            skipped.append(&mut refused);
             continue;
         }
 
@@ -259,32 +284,75 @@ async fn collect(
             skipped.push(name);
             continue;
         };
-        if data.is_empty() {
-            skipped.push(path);
+
+        if is_markdown(&path) {
+            let mut text = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("could not read upload: {e}")))?
+            {
+                if chunk.len() as u64 > budget {
+                    return Err(media::too_large(state));
+                }
+                budget -= chunk.len() as u64;
+                text.extend_from_slice(&chunk);
+            }
+            if text.is_empty() {
+                skipped.push(path);
+                continue;
+            }
+            let text = String::from_utf8_lossy(&text).to_string();
+            uploads.push(Upload { path, content: Content::Markdown(text) });
             continue;
         }
 
-        uploads.push(Upload {
-            mime: mime_of(&path, content_type),
-            path,
-            data: data.to_vec(),
-        });
+        let mime = media::mime_of(&path, field.content_type());
+        let id = Uuid::new_v4().to_string();
+        let size = media::store_field(state, &mut field, &id, &mut budget).await?;
+        if size == 0 {
+            skipped.push(path);
+            continue;
+        }
+        written.push(id.clone());
+        uploads.push(Upload { path, content: Content::File { id, mime, size } });
     }
 
     Ok(uploads)
 }
 
-fn mime_of(path: &str, declared: Option<String>) -> String {
-    let raw = declared.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| {
-        mime_guess::from_path(path)
-            .first_or_octet_stream()
-            .to_string()
-    });
-    media::sanitize_mime(&raw)
+/// What [`expand_zip`] made of an archive: the files, the refused paths, and the
+/// ids written to `uploads/` — which on failure come back with the error, so
+/// they can still be swept up.
+type Expanded = (Vec<Upload>, Vec<String>, Vec<String>);
+
+/// Unpack an archive from disk, on the blocking pool. Markdown is read into
+/// memory, everything else is written straight to `uploads/`. What it unpacks
+/// to is held to `limit` as well, because a zip's compressed size says nothing
+/// about how much disk it takes.
+fn expand_zip(
+    archive: &std::path::Path,
+    uploads_dir: &std::path::Path,
+    limit: u64,
+) -> Result<Expanded, (AppError, Vec<String>)> {
+    let mut ids = Vec::new();
+    match unpack(archive, uploads_dir, limit, &mut ids) {
+        Ok((files, skipped)) => Ok((files, skipped, ids)),
+        Err(e) => Err((e, ids)),
+    }
 }
 
-fn expand_zip(data: &[u8], uploads: &mut Vec<Upload>, skipped: &mut Vec<String>) -> AppResult<()> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))
+fn unpack(
+    archive: &std::path::Path,
+    uploads_dir: &std::path::Path,
+    limit: u64,
+    ids: &mut Vec<String>,
+) -> AppResult<(Vec<Upload>, Vec<String>)> {
+    let mut uploads = Vec::new();
+    let mut skipped = Vec::new();
+    let mut unpacked = 0u64;
+
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(archive)?)
         .map_err(|e| AppError::BadRequest(format!("not a readable zip: {e}")))?;
 
     for index in 0..archive.len() {
@@ -308,21 +376,53 @@ fn expand_zip(data: &[u8], uploads: &mut Vec<Upload>, skipped: &mut Vec<String>)
             continue;
         };
 
-        let mut data = Vec::new();
-        std::io::copy(&mut file, &mut data)?;
-        if data.is_empty() {
+        // The entry is read through a cap one byte past what is left, so a
+        // header that lies about the size cannot run past the limit either.
+        let mut capped = std::io::Read::take(&mut file, limit - unpacked + 1);
+
+        if is_markdown(&path) {
+            let mut text = Vec::new();
+            std::io::copy(&mut capped, &mut text)?;
+            unpacked += text.len() as u64;
+            if unpacked > limit {
+                return Err(unpacked_too_large(limit));
+            }
+            if text.is_empty() {
+                skipped.push(path);
+                continue;
+            }
+            let text = String::from_utf8_lossy(&text).to_string();
+            uploads.push(Upload { path, content: Content::Markdown(text) });
+            continue;
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let target = uploads_dir.join(&id);
+        ids.push(id.clone());
+        let size = std::io::copy(&mut capped, &mut std::fs::File::create(&target)?)?;
+        unpacked += size;
+        if unpacked > limit {
+            return Err(unpacked_too_large(limit));
+        }
+        if size == 0 {
             skipped.push(path);
             continue;
         }
 
         uploads.push(Upload {
-            mime: mime_of(&path, None),
+            content: Content::File { id, mime: media::mime_of(&path, None), size },
             path,
-            data,
         });
     }
 
-    Ok(())
+    Ok((uploads, skipped))
+}
+
+fn unpacked_too_large(limit: u64) -> AppError {
+    AppError::BadRequest(format!(
+        "the archive unpacks to more than the {} MB limit",
+        limit / 1024 / 1024
+    ))
 }
 
 /// `POST /api/nodes/{id}/import` — a folder, or a zip of one, becomes a tree
@@ -340,18 +440,17 @@ pub async fn import(
         ));
     }
 
-    let mut skipped = Vec::new();
-    let uploads = collect(&state, multipart, &mut skipped).await?;
-    if uploads.is_empty() {
-        return Err(AppError::BadRequest(
-            "nothing importable in that upload".into(),
-        ));
-    }
-
     // The files land on disk before the transaction so a failed import writes
     // nothing to the database; the orphans are swept up on the way out.
+    let mut skipped = Vec::new();
     let mut written: Vec<String> = Vec::new();
-    let result = build(&state, &target, uploads, skipped, &mut written).await;
+    let result = match collect(&state, multipart, &mut skipped, &mut written).await {
+        Ok(uploads) if uploads.is_empty() => Err(AppError::BadRequest(
+            "nothing importable in that upload".into(),
+        )),
+        Ok(uploads) => build(&state, &target, uploads, skipped).await,
+        Err(e) => Err(e),
+    };
     if result.is_err() {
         for media_id in &written {
             let _ = tokio::fs::remove_file(state.config.uploads_dir().join(media_id)).await;
@@ -368,7 +467,6 @@ async fn build(
     target: &nodes::Node,
     mut uploads: Vec<Upload>,
     skipped: Vec<String>,
-    written: &mut Vec<String>,
 ) -> AppResult<ImportReport> {
     // The path of the target in slugs, which every rewritten link starts with.
     let prefix = target
@@ -380,8 +478,18 @@ async fn build(
 
     // Sorted so a parent directory is always created before its children, and
     // so two runs of the same folder produce the same slugs.
+    // A duplicate's bytes are already on disk; the copy that loses goes too.
     uploads.sort_by(|a, b| a.path.cmp(&b.path));
-    uploads.dedup_by(|a, b| a.path == b.path);
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut unique = Vec::with_capacity(uploads.len());
+    for upload in uploads {
+        if seen.insert(upload.path.clone()) {
+            unique.push(upload);
+        } else if let Content::File { id, .. } = &upload.content {
+            let _ = tokio::fs::remove_file(state.config.uploads_dir().join(id)).await;
+        }
+    }
+    let uploads = unique;
 
     let mut directories: BTreeSet<String> = BTreeSet::new();
     for upload in &uploads {
@@ -447,9 +555,8 @@ async fn build(
         let dir = parent_of(&upload.path);
         let parent = dir_ids[dir];
 
-        if is_markdown(&upload.path) {
-            let raw = String::from_utf8_lossy(&upload.data).to_string();
-            let (name, body) = split_title(&raw, &upload.path);
+        if let Content::Markdown(raw) = &upload.content {
+            let (name, body) = split_title(raw, &upload.path);
             // The slug follows the file name rather than the title, so a link
             // someone wrote to `01-was-ist-eebus.md` keeps reading that way.
             let stem = file_name(&upload.path);
@@ -477,19 +584,15 @@ async fn build(
             let path = format!("{}/{slug}", dir_paths[dir]);
             landed.insert(upload.path.clone(), Landed::Node(format!("/n/{path}")));
             documents.push((id, upload.path.clone(), body));
-        } else {
-            let media_id = Uuid::new_v4().to_string();
-            tokio::fs::write(state.config.uploads_dir().join(&media_id), &upload.data).await?;
-            written.push(media_id.clone());
-
+        } else if let Content::File { id: media_id, mime, size } = &upload.content {
             sqlx::query(
                 "INSERT INTO media (id, filename, mime, size, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
             )
-            .bind(&media_id)
+            .bind(media_id)
             .bind(file_name(&upload.path))
-            .bind(&upload.mime)
-            .bind(upload.data.len() as i64)
+            .bind(mime)
+            .bind(*size as i64)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -565,8 +668,52 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        is_markdown, join_relative, normalize_path, rewrite_links, split_target, split_title, Landed,
+        expand_zip, is_markdown, join_relative, normalize_path, rewrite_links, split_target,
+        split_title, Content, Landed,
     };
+
+    /// A zip with a note and a 4 KiB blob in it, written to `dir/in.zip`.
+    fn archive(dir: &std::path::Path) -> std::path::PathBuf {
+        use std::io::Write;
+        let path = dir.join("in.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).expect("zip file"));
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("notes/a.md", options).expect("entry");
+        zip.write_all(b"# A\n\ntext").expect("write");
+        zip.start_file("notes/blob.bin", options).expect("entry");
+        zip.write_all(&[7u8; 4096]).expect("write");
+        zip.start_file("../escape.txt", options).expect("entry");
+        zip.write_all(b"nope").expect("write");
+        zip.finish().expect("finish");
+        path
+    }
+
+    #[test]
+    fn a_zip_unpacks_markdown_to_memory_and_the_rest_to_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (uploads, skipped, ids) =
+            expand_zip(&archive(dir.path()), dir.path(), 1 << 20).unwrap_or_else(|(e, _)| panic!("{e:?}"));
+
+        assert_eq!(skipped, ["../escape.txt"]);
+        assert_eq!(ids.len(), 1);
+        let blob = uploads.iter().find(|u| u.path == "notes/blob.bin").expect("the blob");
+        let Content::File { id, size, .. } = &blob.content else { panic!("the blob is a file") };
+        assert_eq!(*size, 4096);
+        assert_eq!(std::fs::metadata(dir.path().join(id)).expect("on disk").len(), 4096);
+        assert!(uploads
+            .iter()
+            .any(|u| u.path == "notes/a.md" && matches!(&u.content, Content::Markdown(t) if t.contains("text"))));
+    }
+
+    #[test]
+    fn a_zip_that_unpacks_past_the_limit_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let Err((_, ids)) = expand_zip(&archive(dir.path()), dir.path(), 1024) else {
+            panic!("4 KiB unpacked must not fit in 1 KiB");
+        };
+        // Whatever was written before the limit hit is reported, to be swept up.
+        assert_eq!(ids.len(), 1);
+    }
 
     #[test]
     fn refuses_paths_that_escape_the_import() {

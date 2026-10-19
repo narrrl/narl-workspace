@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, sync::LazyLock};
 
 use axum::{
     body::Body,
-    extract::{Multipart, Path, State},
+    extract::{multipart::Field, Multipart, Path, State},
     http::header,
     response::{IntoResponse, Response},
     Json,
@@ -10,6 +10,7 @@ use axum::{
 use regex::Regex;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
+use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -93,14 +94,86 @@ fn row_to_media(row: &sqlx::sqlite::SqliteRow) -> Media {
     }
 }
 
+/// The type an upload is stored as: what the browser declared, or what the
+/// name suggests when it declared nothing, narrowed by [`sanitize_mime`].
+pub(crate) fn mime_of(filename: &str, declared: Option<&str>) -> String {
+    let raw = declared
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            mime_guess::from_path(filename)
+                .first_or_octet_stream()
+                .to_string()
+        });
+    sanitize_mime(&raw)
+}
+
+/// Stream one multipart field to `uploads/<id>`, a chunk at a time, so a file
+/// as large as the limit never has to fit in memory. `budget` is what is left
+/// of the request's allowance and shrinks by what was written.
+///
+/// The bytes land in `<id>.part` and are renamed into place only once the
+/// field has arrived whole, so a dropped connection never leaves a truncated
+/// file under a name the database might come to know. Returns the size; an
+/// empty field writes nothing and returns 0.
+pub(crate) async fn store_field(
+    state: &AppState,
+    field: &mut Field<'_>,
+    id: &str,
+    budget: &mut u64,
+) -> AppResult<u64> {
+    let path = state.config.uploads_dir().join(id);
+    let partial = path.with_extension("part");
+
+    let result = async {
+        let mut file = tokio::fs::File::create(&partial).await?;
+        let mut size = 0u64;
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|e| AppError::BadRequest(format!("could not read upload: {e}")))?
+        {
+            size += chunk.len() as u64;
+            if size > *budget {
+                return Err(too_large(state));
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        Ok(size)
+    }
+    .await;
+
+    match result {
+        Ok(size) if size > 0 => {
+            tokio::fs::rename(&partial, &path).await?;
+            *budget -= size;
+            Ok(size)
+        }
+        other => {
+            let _ = tokio::fs::remove_file(&partial).await;
+            other
+        }
+    }
+}
+
+pub(crate) fn too_large(state: &AppState) -> AppError {
+    AppError::BadRequest(format!(
+        "the upload is larger than the {} MB limit",
+        state.config.max_upload_bytes / 1024 / 1024
+    ))
+}
+
 pub async fn upload(
     _: Session,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Vec<Media>>> {
     let mut uploaded = Vec::new();
+    let mut budget = state.config.max_upload_bytes as u64;
 
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(format!("malformed upload: {e}")))?
@@ -109,34 +182,13 @@ pub async fn upload(
             .file_name()
             .map(str::to_string)
             .unwrap_or_else(|| "upload".to_string());
-        let mime = field
-            .content_type()
-            .map(str::to_string)
-            .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| {
-                mime_guess::from_path(&filename)
-                    .first_or_octet_stream()
-                    .to_string()
-            });
-        let mime = sanitize_mime(&mime);
-
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| AppError::BadRequest(format!("could not read upload: {e}")))?;
-
-        if data.is_empty() {
-            continue;
-        }
-        if data.len() > state.config.max_upload_bytes {
-            return Err(AppError::BadRequest(format!(
-                "{filename} is larger than the {} MB limit",
-                state.config.max_upload_bytes / 1024 / 1024
-            )));
-        }
+        let mime = mime_of(&filename, field.content_type());
 
         let id = Uuid::new_v4().to_string();
-        tokio::fs::write(state.config.uploads_dir().join(&id), &data).await?;
+        let size = store_field(&state, &mut field, &id, &mut budget).await?;
+        if size == 0 {
+            continue;
+        }
 
         let row = sqlx::query(
             "INSERT INTO media (id, filename, mime, size, created_at)
@@ -146,7 +198,7 @@ pub async fn upload(
         .bind(&id)
         .bind(&filename)
         .bind(&mime)
-        .bind(data.len() as i64)
+        .bind(size as i64)
         .bind(crate::now())
         .fetch_one(&state.db)
         .await?;
