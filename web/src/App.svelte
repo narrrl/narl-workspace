@@ -36,6 +36,8 @@
   let sealUpload = false
   let folderInput = $state<HTMLInputElement>()
   let importInput = $state<HTMLInputElement>()
+  // Whether the next archive picked is poured in at the root, `:import! /`.
+  let importRoot = false
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
   let pending = $state('')
@@ -53,7 +55,10 @@
       treeInput?.click()
     }
     hooks.pickFolder = () => folderInput?.click()
-    hooks.pickArchive = () => importInput?.click()
+    hooks.pickArchive = (root) => {
+      importRoot = root
+      importInput?.click()
+    }
     hooks.focusList = () => shell?.focus()
     hooks.openCommandLine = (initial) => {
       cmdGlobal = false
@@ -156,8 +161,10 @@
     const input = event.target as HTMLInputElement
     const files = Array.from(input.files ?? [])
     input.value = ''
+    const root = importRoot
+    importRoot = false
     if (files.length === 0) return
-    await workspace.guard(() => workspace.importFolder(files))
+    await workspace.guard(() => workspace.importFolder(files, root))
   }
 
   // What the empty pane offers, in the key/value shape of a status readout.

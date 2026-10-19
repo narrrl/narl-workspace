@@ -1130,19 +1130,22 @@ class Workspace {
    * The report is worth a line of its own: an import that quietly skipped half
    * its files would only be noticed much later.
    */
-  async importFolder(files: File[]) {
+  async importFolder(files: File[], root = false) {
     const parent = this.parentId
-    if (parent === null) return
+    if (parent === null && !root) return
     this.say(`importing ${files.length} file${files.length === 1 ? '' : 's'} …`)
 
-    const report = await api.importFolder(parent, files)
+    const report = root ? await api.importRoot(files) : await api.importFolder(parent!, files)
+    if (root) this.spaces = await api.listSpaces()
     await this.refresh()
 
     const parts = [
+      ...(report.spaces > 0 ? [`${report.spaces} space${report.spaces === 1 ? '' : 's'}`] : []),
       `${report.documents} document${report.documents === 1 ? '' : 's'}`,
       `${report.folders} folder${report.folders === 1 ? '' : 's'}`,
       `${report.files} file${report.files === 1 ? '' : 's'}`,
       `${report.links} link${report.links === 1 ? '' : 's'} rewritten`,
+      ...(report.cards > 0 ? [`${report.cards} card${report.cards === 1 ? '' : 's'}`] : []),
     ]
     if (report.skipped.length > 0) parts.push(`${report.skipped.length} skipped`)
     this.say(`imported ${parts.join(', ')}`)

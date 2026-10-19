@@ -16,7 +16,6 @@ use axum::{
 };
 use regex::Regex;
 use serde::Serialize;
-use sqlx::Row;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -25,7 +24,9 @@ use crate::{
     error::{AppError, AppResult},
     routes::{
         media,
-        nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER},
+        boards,
+        manifest::{self, Manifest, NodeMeta},
+        nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
     },
     state::AppState,
 };
@@ -41,10 +42,13 @@ static LINK: LazyLock<Regex> = LazyLock::new(|| {
 /// status line has one line, and the tree is right there to look at.
 #[derive(Serialize)]
 pub struct ImportReport {
+    /// New spaces, made by an import at the root.
+    pub spaces: usize,
     pub folders: usize,
     pub documents: usize,
     pub files: usize,
     pub links: usize,
+    pub cards: usize,
     /// Paths that were refused, so a silently missing file is never a surprise.
     pub skipped: Vec<String>,
 }
@@ -58,6 +62,8 @@ struct Upload {
 enum Content {
     /// A markdown file, read into memory: it is about to become a document body.
     Markdown(String),
+    /// The `.workspace.json` of an export, read into memory to be parsed.
+    Manifest(String),
     /// Anything else, already streamed to `uploads/<id>`.
     File { id: String, mime: String, size: u64 },
 }
@@ -99,6 +105,19 @@ fn parent_of(path: &str) -> &str {
 
 fn file_name(path: &str) -> &str {
     path.rsplit_once('/').map(|(_, name)| name).unwrap_or(path)
+}
+
+/// Read into memory rather than streamed to disk: markdown, and the manifest.
+fn is_text(path: &str) -> bool {
+    is_markdown(path) || file_name(path) == manifest::FILE_NAME
+}
+
+fn text_content(path: &str, text: String) -> Content {
+    if file_name(path) == manifest::FILE_NAME {
+        Content::Manifest(text)
+    } else {
+        Content::Markdown(text)
+    }
 }
 
 fn is_markdown(path: &str) -> bool {
@@ -291,7 +310,7 @@ async fn collect(
             continue;
         };
 
-        if is_markdown(&path) {
+        if is_text(&path) {
             let mut text = Vec::new();
             while let Some(chunk) = field
                 .chunk()
@@ -309,7 +328,7 @@ async fn collect(
                 continue;
             }
             let text = String::from_utf8_lossy(&text).to_string();
-            uploads.push(Upload { path, content: Content::Markdown(text) });
+            uploads.push(Upload { content: text_content(&path, text), path });
             continue;
         }
 
@@ -386,7 +405,7 @@ fn unpack(
         // header that lies about the size cannot run past the limit either.
         let mut capped = std::io::Read::take(&mut file, limit - unpacked + 1);
 
-        if is_markdown(&path) {
+        if is_text(&path) {
             let mut text = Vec::new();
             std::io::copy(&mut capped, &mut text)?;
             unpacked += text.len() as u64;
@@ -398,7 +417,7 @@ fn unpack(
                 continue;
             }
             let text = String::from_utf8_lossy(&text).to_string();
-            uploads.push(Upload { path, content: Content::Markdown(text) });
+            uploads.push(Upload { content: text_content(&path, text), path });
             continue;
         }
 
@@ -446,6 +465,13 @@ fn unpacked_too_large(limit: u64) -> AppError {
     ))
 }
 
+/// Where an import goes: under a space or folder, or at the root, where the
+/// top-level directories of the upload are spaces.
+enum Into {
+    Node(Box<nodes::Node>),
+    Root,
+}
+
 /// `POST /api/nodes/{id}/import` — a folder, or a zip of one, becomes a tree
 /// under the given space or folder.
 pub async fn import(
@@ -460,42 +486,152 @@ pub async fn import(
             "a folder can only be imported into a space or a folder".into(),
         ));
     }
+    run(&state, Into::Node(Box::new(target)), multipart).await.map(Json)
+}
 
+/// `POST /api/import` — an export poured back in whole: each top-level
+/// directory becomes a space, or goes into the space that already has its
+/// name, and the boards, dates and names come back from `.workspace.json`.
+pub async fn import_root(
+    _: Session,
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> AppResult<Json<ImportReport>> {
+    run(&state, Into::Root, multipart).await.map(Json)
+}
+
+async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<ImportReport> {
     // The files land on disk before the transaction so a failed import writes
     // nothing to the database; the orphans are swept up on the way out.
     let mut skipped = Vec::new();
     let mut written: Vec<String> = Vec::new();
-    let result = match collect(&state, multipart, &mut skipped, &mut written).await {
-        Ok(uploads) if uploads.is_empty() => Err(AppError::BadRequest(
-            "nothing importable in that upload".into(),
-        )),
-        Ok(uploads) => build(&state, &target, uploads, skipped).await,
-        Err(e) => Err(e),
-    };
+    let result = async {
+        let mut uploads = collect(state, multipart, &mut skipped, &mut written).await?;
+        let manifest = take_manifest(&mut uploads)?;
+        if let Some(manifest) = &manifest {
+            files_as_they_were(state, manifest, &mut uploads, &mut written).await?;
+        }
+        if uploads.is_empty() {
+            return Err(AppError::BadRequest("nothing importable in that upload".into()));
+        }
+        build(state, &into, uploads, skipped, manifest).await
+    }
+    .await;
     if result.is_err() {
         for media_id in &written {
-            let _ = tokio::fs::remove_file(state.config.uploads_dir().join(media_id)).await;
+            media::remove_upload(&state.config.uploads_dir(), media_id).await;
         }
     }
 
     let report = result?;
     state.backup.signal();
-    Ok(Json(report))
+    Ok(report)
+}
+
+/// A file that happens to end in `.md` was a file, not a document, when it
+/// was exported, and the manifest says so: it goes back to being one.
+async fn files_as_they_were(
+    state: &AppState,
+    manifest: &Manifest,
+    uploads: &mut [Upload],
+    written: &mut Vec<String>,
+) -> AppResult<()> {
+    for upload in uploads.iter_mut() {
+        let was_file = manifest.nodes.get(&upload.path).is_some_and(|m| m.kind == FILE);
+        let Content::Markdown(text) = &upload.content else { continue };
+        if !was_file {
+            continue;
+        }
+        let id = Uuid::new_v4().to_string();
+        let path = state.config.uploads_dir().join(&id);
+        let partial = path.with_extension("part");
+        written.push(id.clone());
+        tokio::fs::write(&partial, text.as_bytes()).await?;
+        tokio::fs::File::open(&partial).await?.sync_all().await?;
+        tokio::fs::rename(&partial, &path).await?;
+        upload.content = Content::File {
+            mime: media::mime_of(&upload.path, None),
+            size: text.len() as u64,
+            id,
+        };
+    }
+    Ok(())
+}
+
+/// `a/b` from a prefix and a segment, where an empty prefix is the root.
+fn join(prefix: &str, segment: &str) -> String {
+    if prefix.is_empty() {
+        segment.to_string()
+    } else {
+        format!("{prefix}/{segment}")
+    }
+}
+
+/// Take the manifest out of the upload, if there is one, and make every
+/// other path relative to where it was found: an export uploaded as a
+/// folder arrives inside a directory of its own.
+fn take_manifest(uploads: &mut Vec<Upload>) -> AppResult<Option<Manifest>> {
+    let Some(at) = uploads
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| matches!(u.content, Content::Manifest(_)))
+        .min_by_key(|(_, u)| u.path.matches('/').count())
+        .map(|(i, _)| i)
+    else {
+        return Ok(None);
+    };
+    let found = uploads.remove(at);
+    let Content::Manifest(text) = found.content else {
+        unreachable!("filtered on the variant above");
+    };
+    let manifest: Manifest = serde_json::from_str(&text).map_err(|e| {
+        AppError::BadRequest(format!("{} is not readable: {e}", manifest::FILE_NAME))
+    })?;
+    if manifest.format > manifest::FORMAT {
+        return Err(AppError::BadRequest(format!(
+            "{} is from a newer version (format {}); update this one first",
+            manifest::FILE_NAME,
+            manifest.format
+        )));
+    }
+
+    let base = parent_of(&found.path);
+    if !base.is_empty() {
+        let prefix = format!("{base}/");
+        for upload in uploads.iter_mut() {
+            if let Some(rest) = upload.path.strip_prefix(&prefix) {
+                upload.path = rest.to_string();
+            }
+        }
+    }
+    // Any other manifest further down is not one to read; it goes in as text.
+    for upload in uploads.iter_mut() {
+        if let Content::Manifest(text) = &mut upload.content {
+            upload.content = Content::Markdown(std::mem::take(text));
+        }
+    }
+    Ok(Some(manifest))
 }
 
 async fn build(
     state: &AppState,
-    target: &nodes::Node,
+    into: &Into,
     mut uploads: Vec<Upload>,
-    skipped: Vec<String>,
+    mut skipped: Vec<String>,
+    manifest: Option<Manifest>,
 ) -> AppResult<ImportReport> {
+    let uploads_dir = state.config.uploads_dir();
+
     // The path of the target in slugs, which every rewritten link starts with.
-    let prefix = target
-        .path
-        .iter()
-        .map(|crumb| crumb.slug.as_str())
-        .collect::<Vec<_>>()
-        .join("/");
+    let prefix = match into {
+        Into::Node(target) => target
+            .path
+            .iter()
+            .map(|crumb| crumb.slug.as_str())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Into::Root => String::new(),
+    };
 
     // Sorted so a parent directory is always created before its children, and
     // so two runs of the same folder produce the same slugs.
@@ -504,64 +640,131 @@ async fn build(
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut unique = Vec::with_capacity(uploads.len());
     for upload in uploads {
-        if seen.insert(upload.path.clone()) {
+        // An export's README describes the archive, not the workspace.
+        let boilerplate = manifest.is_some() && upload.path == "README.txt";
+        // At the root only directories can land: everything is in a space.
+        let loose = matches!(into, Into::Root) && !upload.path.contains('/');
+        if seen.insert(upload.path.clone()) && !boilerplate && !loose {
             unique.push(upload);
-        } else if let Content::File { id, .. } = &upload.content {
-            let _ = tokio::fs::remove_file(state.config.uploads_dir().join(id)).await;
+            continue;
+        }
+        if loose && !boilerplate {
+            skipped.push(upload.path.clone());
+        }
+        if let Content::File { id, .. } = &upload.content {
+            media::remove_upload(&uploads_dir, id).await;
         }
     }
     let uploads = unique;
 
+    // An export keeps the files documents embed in `media/`, beside the spaces;
+    // they come back as what they were, embedded files, not as a folder.
+    let embedded = |path: &str| manifest.is_some() && parent_of(path) == manifest::MEDIA_DIR;
+    let meta = |path: &str| -> Option<&NodeMeta> { manifest.as_ref()?.nodes.get(path) };
+
     let mut directories: BTreeSet<String> = BTreeSet::new();
-    for upload in &uploads {
+    for upload in uploads.iter().filter(|u| !embedded(&u.path)) {
         let mut dir = parent_of(&upload.path);
         while !dir.is_empty() {
             directories.insert(dir.to_string());
             dir = parent_of(dir);
         }
     }
+    // Empty folders exist in an export only as names in the manifest.
+    if let Some(manifest) = &manifest {
+        for (path, node) in &manifest.nodes {
+            let is_dir = nodes::is_container(&node.kind);
+            if is_dir && normalize_path(path).as_deref() == Some(path.as_str()) {
+                let mut dir = path.as_str();
+                while !dir.is_empty() {
+                    directories.insert(dir.to_string());
+                    dir = parent_of(dir);
+                }
+            }
+        }
+    }
 
     let now = crate::now();
-    let mut tx = state.db.begin().await?;
+    let mut tx = crate::db::begin_write(&state.db).await?;
 
     // Slugs already taken under each parent, extended as the tree is built —
     // the nodes being created are not visible to a query until the commit.
     let mut siblings: HashMap<i64, BTreeSet<String>> = HashMap::new();
-    let existing = sqlx::query("SELECT slug FROM nodes WHERE parent_id IS ?1")
-        .bind(target.id)
-        .fetch_all(&mut *tx)
-        .await?;
-    siblings.insert(
-        target.id,
-        existing.iter().map(|row| row.get("slug")).collect(),
-    );
-
-    let mut dir_ids: HashMap<String, i64> = HashMap::from([(String::new(), target.id)]);
-    let mut dir_paths: HashMap<String, String> = HashMap::from([(String::new(), prefix)]);
+    let mut dir_ids: HashMap<String, i64> = HashMap::new();
+    let mut dir_paths: HashMap<String, String> = HashMap::new();
+    if let Into::Node(target) = into {
+        siblings.insert(target.id, nodes::sibling_slugs(&mut tx, Some(target.id), None).await?);
+        dir_ids.insert(String::new(), target.id);
+        dir_paths.insert(String::new(), prefix);
+    }
     let mut landed: HashMap<String, Landed> = HashMap::new();
+    let mut spaces = 0usize;
+    let mut folders = 0usize;
 
     for dir in &directories {
-        let parent = dir_ids[parent_of(dir)];
-        let name = file_name(dir);
-        let taken = siblings.entry(parent).or_default();
-        let slug = next_slug(taken, &slugify(name))?;
-        taken.insert(slug.clone());
+        let dated = meta(dir);
+        let name = dated.map_or(file_name(dir), |m| m.name.as_str());
+        let (created, updated) = dated.map_or((now, now), |m| (m.created_at, m.updated_at));
 
-        let id: i64 = sqlx::query(
-            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-             RETURNING id",
-        )
-        .bind(parent)
-        .bind(FOLDER)
-        .bind(name)
-        .bind(&slug)
-        .bind(now)
-        .fetch_one(&mut *tx)
-        .await?
-        .get("id");
+        let (id, slug) = if parent_of(dir).is_empty() && matches!(into, Into::Root) {
+            // A space: the one already here by that name, or a new one.
+            let slug = slugify(file_name(dir));
+            let existing: Option<i64> =
+                sqlx::query_scalar("SELECT id FROM nodes WHERE parent_id IS NULL AND slug = ?1")
+                    .bind(&slug)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            let id = match existing {
+                Some(id) => id,
+                None => {
+                    let space = manifest.as_ref().and_then(|m| m.spaces.get(dir));
+                    let position: i64 = sqlx::query_scalar(
+                        "SELECT COALESCE(MAX(position), -1) + 1 FROM nodes WHERE parent_id IS NULL",
+                    )
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    spaces += 1;
+                    sqlx::query_scalar(
+                        "INSERT INTO nodes (parent_id, kind, name, slug, position, has_board, created_at, updated_at)
+                         VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                         RETURNING id",
+                    )
+                    .bind(SPACE)
+                    .bind(name)
+                    .bind(&slug)
+                    .bind(position)
+                    .bind(space.is_none_or(|s| s.has_board))
+                    .bind(created)
+                    .bind(updated)
+                    .fetch_one(&mut *tx)
+                    .await?
+                }
+            };
+            siblings.insert(id, nodes::sibling_slugs(&mut tx, Some(id), None).await?);
+            (id, slug)
+        } else {
+            let parent = dir_ids[parent_of(dir)];
+            let taken = siblings.entry(parent).or_default();
+            let slug = next_slug(taken, &slugify(file_name(dir)))?;
+            taken.insert(slug.clone());
+            folders += 1;
+            let id = sqlx::query_scalar(
+                "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 RETURNING id",
+            )
+            .bind(parent)
+            .bind(FOLDER)
+            .bind(name)
+            .bind(&slug)
+            .bind(created)
+            .bind(updated)
+            .fetch_one(&mut *tx)
+            .await?;
+            (id, slug)
+        };
 
-        let path = format!("{}/{slug}", dir_paths[parent_of(dir)]);
+        let path = join(&dir_paths.get(parent_of(dir)).cloned().unwrap_or_default(), &slug);
         dir_ids.insert(dir.clone(), id);
         dir_paths.insert(dir.clone(), path.clone());
         landed.insert(dir.clone(), Landed::Node(format!("/n/{path}")));
@@ -570,14 +773,76 @@ async fn build(
     // Documents first, with their bodies as uploaded: the rewriting below needs
     // to know where every document landed before it can point anything at one.
     let mut documents: Vec<(i64, String, String)> = Vec::new();
+    let mut by_path: HashMap<String, i64> = HashMap::new();
     let mut files = 0usize;
 
     for upload in &uploads {
-        let dir = parent_of(&upload.path);
-        let parent = dir_ids[dir];
+        let dated = meta(&upload.path);
+        let (created, updated) = dated.map_or((now, now), |m| (m.created_at, m.updated_at));
 
-        if let Content::Markdown(raw) = &upload.content {
-            let (name, body) = split_title(raw, &upload.path);
+        if let Content::File { id: media_id, mime, size } = &upload.content {
+            let original = manifest
+                .as_ref()
+                .and_then(|m| m.media.get(&upload.path))
+                .map(String::as_str);
+            let filename = original
+                .or(dated.map(|m| m.name.as_str()))
+                .unwrap_or(file_name(&upload.path));
+            sqlx::query(
+                "INSERT INTO media (id, filename, mime, size, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(media_id)
+            .bind(filename)
+            .bind(mime)
+            .bind(*size as i64)
+            .bind(created)
+            .execute(&mut *tx)
+            .await?;
+            landed.insert(
+                upload.path.clone(),
+                Landed::Media(format!("/api/media/{media_id}")),
+            );
+            if embedded(&upload.path) {
+                continue;
+            }
+
+            // The file sits in the tree under the name it had, and owns its
+            // bytes the way a document owns what it embeds — so deleting the
+            // folder it landed in takes it along.
+            let parent = dir_ids[parent_of(&upload.path)];
+            let taken = siblings.entry(parent).or_default();
+            let slug = next_slug(taken, &slugify(filename))?;
+            taken.insert(slug.clone());
+
+            let node: i64 = sqlx::query_scalar(
+                "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 RETURNING id",
+            )
+            .bind(parent)
+            .bind(FILE)
+            .bind(filename)
+            .bind(&slug)
+            .bind(created)
+            .bind(updated)
+            .bind(media_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
+                .bind(node)
+                .bind(media_id)
+                .execute(&mut *tx)
+                .await?;
+            files += 1;
+        } else if let Content::Markdown(raw) = &upload.content {
+            let dir = parent_of(&upload.path);
+            let parent = dir_ids[dir];
+            let (title, body) = split_title(raw, &upload.path);
+            // The manifest knows the name as it was typed, including none:
+            // a document with no title was exported without a heading.
+            let name = dated.map_or(title, |m| m.name.clone());
             // The slug follows the file name rather than the title, so a link
             // someone wrote to `01-was-ist-eebus.md` keeps reading that way.
             let stem = file_name(&upload.path);
@@ -587,9 +852,9 @@ async fn build(
             let slug = next_slug(taken, &slugify(stem))?;
             taken.insert(slug.clone());
 
-            let id: i64 = sqlx::query(
+            let id: i64 = sqlx::query_scalar(
                 "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  RETURNING id",
             )
             .bind(parent)
@@ -597,61 +862,15 @@ async fn build(
             .bind(&name)
             .bind(&slug)
             .bind(&body)
-            .bind(now)
+            .bind(created)
+            .bind(updated)
             .fetch_one(&mut *tx)
-            .await?
-            .get("id");
-
-            let path = format!("{}/{slug}", dir_paths[dir]);
-            landed.insert(upload.path.clone(), Landed::Node(format!("/n/{path}")));
-            documents.push((id, upload.path.clone(), body));
-        } else if let Content::File { id: media_id, mime, size } = &upload.content {
-            sqlx::query(
-                "INSERT INTO media (id, filename, mime, size, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-            )
-            .bind(media_id)
-            .bind(file_name(&upload.path))
-            .bind(mime)
-            .bind(*size as i64)
-            .bind(now)
-            .execute(&mut *tx)
             .await?;
 
-            // The file sits in the tree under the name it had, and owns its
-            // bytes the way a document owns what it embeds — so deleting the
-            // folder it landed in takes it along.
-            let name = file_name(&upload.path);
-            let taken = siblings.entry(parent).or_default();
-            let slug = next_slug(taken, &slugify(name))?;
-            taken.insert(slug.clone());
-
-            let node: i64 = sqlx::query(
-                "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
-                 RETURNING id",
-            )
-            .bind(parent)
-            .bind(FILE)
-            .bind(name)
-            .bind(&slug)
-            .bind(now)
-            .bind(media_id)
-            .fetch_one(&mut *tx)
-            .await?
-            .get("id");
-
-            sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
-                .bind(node)
-                .bind(media_id)
-                .execute(&mut *tx)
-                .await?;
-
-            landed.insert(
-                upload.path.clone(),
-                Landed::Media(format!("/api/media/{media_id}")),
-            );
-            files += 1;
+            let path = join(&dir_paths[dir], &slug);
+            landed.insert(upload.path.clone(), Landed::Node(format!("/n/{path}")));
+            by_path.insert(upload.path.clone(), id);
+            documents.push((id, upload.path.clone(), body));
         }
     }
 
@@ -670,27 +889,38 @@ async fn build(
                 .execute(&mut *tx)
                 .await?;
         }
+        media::link_to_node(&mut tx, *id, &rewritten).await?;
+    }
 
-        for capture in media::MEDIA_REF.captures_iter(&rewritten) {
-            let media_id = capture[1].to_lowercase();
-            sqlx::query(
-                "INSERT OR IGNORE INTO node_media (node_id, media_id)
-                 SELECT ?1, id FROM media WHERE id = ?2",
-            )
-            .bind(id)
-            .bind(&media_id)
-            .execute(&mut *tx)
-            .await?;
+    // The boards come back only where spaces do.
+    let mut cards = 0usize;
+    if let (Into::Root, Some(manifest)) = (into, &manifest) {
+        for (dir, space) in &manifest.spaces {
+            let Some(&space_id) = dir_ids.get(dir) else { continue };
+            cards += boards::restore(&mut tx, space_id, &space.lists, &by_path).await?;
+            if space.role.as_deref() == Some(nodes::DIARY) {
+                // Only where no space has the role yet: there is one diary.
+                sqlx::query(
+                    "UPDATE nodes SET role = ?1, has_board = 0
+                     WHERE id = ?2 AND NOT EXISTS (SELECT 1 FROM nodes WHERE role = ?1)",
+                )
+                .bind(nodes::DIARY)
+                .bind(space_id)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
 
     tx.commit().await?;
 
     Ok(ImportReport {
-        folders: directories.len(),
+        spaces,
+        folders,
         documents: documents.len(),
         files,
         links,
+        cards,
         skipped,
     })
 }
@@ -701,8 +931,34 @@ mod tests {
 
     use super::{
         expand_zip, is_markdown, join_relative, normalize_path, percent_decode, rewrite_links,
-        split_target, split_title, Content, Landed,
+        split_target, split_title, take_manifest, Content, Landed, Upload,
     };
+
+    fn text(path: &str, content: Content) -> Upload {
+        Upload { path: path.into(), content }
+    }
+
+    #[test]
+    fn an_export_uploaded_as_a_folder_is_read_from_where_its_manifest_is() {
+        let manifest = r#"{"format": 1, "nodes": {"work/a.md": {"kind": "document", "name": "A", "created_at": 1, "updated_at": 2}}}"#;
+        let mut uploads = vec![
+            text("workspace-2026/.workspace.json", Content::Manifest(manifest.into())),
+            text("workspace-2026/work/a.md", Content::Markdown("a".into())),
+            text("workspace-2026/work/deeper/.workspace.json", Content::Manifest("{}".into())),
+        ];
+        let found = take_manifest(&mut uploads).unwrap().unwrap();
+        assert_eq!(found.nodes["work/a.md"].created_at, 1);
+        let paths: Vec<&str> = uploads.iter().map(|u| u.path.as_str()).collect();
+        assert_eq!(paths, ["work/a.md", "work/deeper/.workspace.json"]);
+        // Only the outermost one is read; another is just a file.
+        assert!(matches!(uploads[1].content, Content::Markdown(_)));
+    }
+
+    #[test]
+    fn a_manifest_from_a_newer_version_is_refused() {
+        let mut uploads = vec![text(".workspace.json", Content::Manifest(r#"{"format": 99}"#.into()))];
+        assert!(take_manifest(&mut uploads).is_err());
+    }
 
     /// A zip with a note and a 4 KiB blob in it, written to `dir/in.zip`.
     fn archive(dir: &std::path::Path) -> std::path::PathBuf {

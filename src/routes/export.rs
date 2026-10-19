@@ -1,6 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{Seek, SeekFrom, Write},
+    sync::LazyLock,
 };
 
 use axum::{
@@ -9,6 +10,7 @@ use axum::{
     http::header,
     response::{IntoResponse, Response},
 };
+use regex::Regex;
 use sqlx::Row;
 use tokio_util::io::ReaderStream;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
@@ -16,8 +18,19 @@ use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
+    routes::{
+        manifest::{self, CardMeta, ListMeta, Manifest, NodeMeta, SpaceMeta},
+        media::MEDIA_REF,
+        nodes::{is_container, DOCUMENT, SPACE},
+    },
     state::AppState,
 };
+
+/// A markdown link to an address inside the application, `](/n/work/notes)`,
+/// up to the `)` or `#` that ends it — which is what keeps `/n/work/a` from
+/// matching inside `/n/work/ab`.
+static NODE_LINK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\]\((/n/[^)#\s]+)([)#])").expect("static regex is valid"));
 
 /// One node, flattened out of the database ahead of the blocking zip work.
 struct ExportNode {
@@ -28,6 +41,15 @@ struct ExportNode {
     slug: String,
     body: String,
     media_id: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+    has_board: bool,
+    role: Option<String>,
+}
+
+/// A container's directory in the archive.
+fn container_path(nodes: &HashMap<i64, ExportNode>, node: &ExportNode) -> String {
+    tree_path(nodes, node.parent_id, node.slug.clone())
 }
 
 /// Where a document lands in the archive: the slugs of its ancestors as
@@ -130,10 +152,12 @@ fn file_path(
 const README: &str = "\
 This is a complete copy of a ~/workspace.
 
-  <space>/   one directory per space, holding the same tree of folders,
-             documents and files that the workspace shows; one markdown file
-             per document, and every file under its own name
-  media/     the files documents embed that are not in the tree themselves
+  <space>/          one directory per space, holding the same tree of folders,
+                    documents and files that the workspace shows; one markdown
+                    file per document, and every file under its own name
+  media/            the files documents embed that are not in the tree themselves
+  .workspace.json   what plain files cannot hold: dates, names as they were
+                    typed, the boards. Importing the archive puts it all back.
 
 Embedded media, and links from one document to another, are relative — so the
 documents render and cross-link correctly in any markdown reader as long as the
@@ -144,7 +168,9 @@ tree stays intact. Nothing here needs the workspace application to read it.
 /// can trust, so this is deliberately a plain archive of plain files.
 pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Response> {
     let nodes: HashMap<i64, ExportNode> = sqlx::query(
-        "SELECT id, parent_id, kind, name, slug, body, media_id FROM nodes ORDER BY created_at, id",
+        "SELECT id, parent_id, kind, name, slug, body, media_id, created_at, updated_at,
+                has_board, role
+         FROM nodes ORDER BY created_at, id",
     )
     .fetch_all(&state.db)
     .await?
@@ -158,6 +184,10 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             slug: row.get("slug"),
             body: row.get("body"),
             media_id: row.get("media_id"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            has_board: row.get("has_board"),
+            role: row.get("role"),
         };
         (node.id, node)
     })
@@ -170,11 +200,39 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
         .iter()
         .map(|row| (row.get("id"), row.get("filename")))
         .collect();
-    let sealed: std::collections::HashSet<String> = rows
+    let sealed: HashSet<String> = rows
         .iter()
         .filter(|row| row.get::<bool, _>("encrypted"))
         .map(|row| row.get("id"))
         .collect();
+
+    let lists: Vec<(i64, i64, String)> =
+        sqlx::query("SELECT id, space_id, name FROM board_lists ORDER BY position, id")
+            .fetch_all(&state.db)
+            .await?
+            .iter()
+            .map(|row| (row.get("id"), row.get("space_id"), row.get("name")))
+            .collect();
+    let cards: Vec<(i64, CardMeta, Option<i64>)> = sqlx::query(
+        "SELECT list_id, title, body, due_at, done_at, created_at, updated_at, node_id
+         FROM cards ORDER BY position, id",
+    )
+    .fetch_all(&state.db)
+    .await?
+    .iter()
+    .map(|row| {
+        let card = CardMeta {
+            title: row.get("title"),
+            body: row.get("body"),
+            due_at: row.get("due_at"),
+            done_at: row.get("done_at"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            document: None,
+        };
+        (row.get("list_id"), card, row.get("node_id"))
+    })
+    .collect();
 
     // The archive is meant to be read without this application, so sealed
     // files go in opened — which needs the vault open. Leaving them out
@@ -186,12 +244,15 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
     };
 
     let uploads = state.config.uploads_dir();
+    let scratch = state.config.data_dir.clone();
 
     // Zip writing is synchronous and reads every upload off disk, so it happens
     // on the blocking pool, into a temporary file rather than into memory: a
-    // diary with photographs in it does not fit comfortably in a Vec.
-    let file = tokio::task::spawn_blocking(move || -> anyhow::Result<std::fs::File> {
-        let mut zip = ZipWriter::new(tempfile::tempfile()?);
+    // diary with photographs in it does not fit comfortably in a Vec. The file
+    // is made in the data directory, which is sized for the workspace, rather
+    // than in a /tmp that may be a small tmpfs.
+    let file = tokio::task::spawn_blocking(move || -> AppResult<std::fs::File> {
+        let mut zip = ZipWriter::new(tempfile::tempfile_in(&scratch)?);
         let text = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         // Media is overwhelmingly already-compressed; deflating it again costs
         // a lot of CPU to save nothing.
@@ -200,88 +261,167 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
         zip.start_file("README.txt", text)?;
         zip.write_all(README.as_bytes())?;
 
-        // A file node's bytes go where the node is; the rest go to media/.
-        // Ordered by id, so a clash of names resolves the same way every time.
-        let mut files: Vec<&ExportNode> = nodes.values().filter(|n| n.media_id.is_some()).collect();
-        files.sort_by_key(|n| n.id);
-        let mut taken = std::collections::HashSet::new();
-        let in_tree: HashMap<String, String> = files
-            .into_iter()
-            .filter_map(|n| Some((n.media_id.clone()?, file_path(&nodes, n, &mut taken))))
+        // Every path the archive will hold, claimed in one set: directories
+        // first, then documents, then files — the only ones that can give
+        // way, by taking their id — so no two entries ever share a name.
+        let mut ordered: Vec<&ExportNode> = nodes.values().collect();
+        ordered.sort_by_key(|n| n.id);
+        let mut taken: HashSet<String> = HashSet::from(["README.txt".into(), manifest::FILE_NAME.into()]);
+        let containers: Vec<(&ExportNode, String)> = ordered
+            .iter()
+            .filter(|n| is_container(&n.kind))
+            .map(|n| (*n, container_path(&nodes, n)))
+            .collect();
+        taken.extend(containers.iter().map(|(_, path)| path.clone()));
+        let documents: Vec<(&ExportNode, String)> = ordered
+            .iter()
+            .filter(|n| n.kind == DOCUMENT)
+            .map(|n| (*n, document_path(&nodes, n)))
+            .collect();
+        taken.extend(documents.iter().map(|(_, path)| path.clone()));
+        let in_tree: HashMap<String, (&ExportNode, String)> = ordered
+            .iter()
+            .filter_map(|n| Some((n.media_id.clone()?, (*n, file_path(&nodes, n, &mut taken)))))
             .collect();
 
-        let names: Vec<(String, String)> = media
+        let names: HashMap<String, String> = media
             .iter()
             .filter(|(id, _)| !in_tree.contains_key(id))
             .map(|(id, filename)| (id.clone(), media_filename(id, filename)))
             .collect();
 
-        // Every document by the address the application knows it as, so a link
-        // between two of them can be found and pointed at the file instead.
-        let addresses: HashMap<String, String> = nodes
-            .values()
-            .filter(|n| n.kind == "document")
-            .map(|n| {
-                let path = document_path(&nodes, n);
-                (format!("/n/{}", path.trim_end_matches(".md")), path)
-            })
+        // Every document and folder by the address the application knows it
+        // as, so a link to one can be found and pointed at the file instead.
+        let addresses: HashMap<String, String> = documents
+            .iter()
+            .map(|(_, path)| (format!("/n/{}", path.trim_end_matches(".md")), path.clone()))
+            .chain(containers.iter().map(|(_, path)| (format!("/n/{path}"), path.clone())))
             .collect();
 
-        for node in nodes.values().filter(|n| n.kind == "document") {
-            let path = document_path(&nodes, node);
+        let mut meta = Manifest { format: manifest::FORMAT, ..Manifest::default() };
+        let mut note = |path: &str, node: &ExportNode| {
+            meta.nodes.insert(
+                path.to_string(),
+                NodeMeta {
+                    kind: node.kind.clone(),
+                    name: node.name.clone(),
+                    created_at: node.created_at,
+                    updated_at: node.updated_at,
+                },
+            );
+        };
+
+        for (node, path) in &containers {
+            note(path, node);
+            // An empty folder is still part of the tree.
+            zip.add_directory(format!("{path}/"), text)?;
+        }
+
+        for (node, path) in &documents {
+            note(path, node);
             // A document three directories deep needs three steps back up to
             // reach the media folder next to the spaces.
             let up = "../".repeat(path.matches('/').count());
 
-            let mut body = node.body.clone();
-            for (id, name) in &names {
-                body = body.replace(&format!("/api/media/{id}"), &format!("{up}media/{name}"));
-            }
-            for (id, target) in &in_tree {
-                body = body.replace(&format!("/api/media/{id}"), &relative_link(&path, target));
-            }
-            for (address, target) in &addresses {
-                // Matching the `)` or `#` that ends a markdown link is what
-                // keeps `/n/work/a` from matching inside `/n/work/ab`.
-                body = body.replace(&format!("]({address})"), &format!("]({})", relative_link(&path, target)));
-                body = body.replace(&format!("]({address}#"), &format!("]({}#", relative_link(&path, target)));
-            }
+            // One pass for each kind of link, looking every match up, rather
+            // than one pass per file and per document the workspace holds.
+            let body = MEDIA_REF.replace_all(&node.body, |caps: &regex::Captures| {
+                let id = caps[1].to_lowercase();
+                if let Some(name) = names.get(&id) {
+                    format!("{up}{}/{name}", manifest::MEDIA_DIR)
+                } else if let Some((_, target)) = in_tree.get(&id) {
+                    relative_link(path, target)
+                } else {
+                    caps[0].to_string()
+                }
+            });
+            let body = NODE_LINK.replace_all(&body, |caps: &regex::Captures| match addresses.get(&caps[1]) {
+                Some(target) => format!("]({}{}", relative_link(path, target), &caps[2]),
+                None => caps[0].to_string(),
+            });
             let document = if node.name.trim().is_empty() {
-                body
+                body.into_owned()
             } else {
                 format!("# {}\n\n{body}", node.name.trim())
             };
 
-            zip.start_file(path, text)?;
+            zip.start_file(path.as_str(), text)?;
             zip.write_all(document.as_bytes())?;
         }
 
-        let entries = names
+        for (node, path) in in_tree.values() {
+            note(path, node);
+        }
+
+        let mut entries: Vec<(&String, String)> = names
             .iter()
-            .map(|(id, name)| (id, format!("media/{name}")))
-            .chain(in_tree.iter().map(|(id, path)| (id, path.clone())));
+            .map(|(id, name)| (id, format!("{}/{name}", manifest::MEDIA_DIR)))
+            .chain(in_tree.iter().map(|(id, (_, path))| (id, path.clone())))
+            .collect();
+        entries.sort();
         for (id, entry) in entries {
-            // A row whose file has gone missing must not fail the whole backup.
             let path = uploads.join(id);
             let source: Box<dyn std::io::Read> = match (&key, sealed.contains(id)) {
-                (Some(key), true) => match crate::vault::Reader::open(key, id, &path) {
-                    Ok(reader) => Box::new(reader),
-                    Err(_) => continue,
-                },
+                // A sealed file that will not open is not a file to leave out
+                // quietly: the archive would claim to be complete and not be.
+                (Some(key), true) => Box::new(crate::vault::Reader::open(key, id, &path).map_err(|e| {
+                    AppError::BadRequest(format!("{entry} is sealed and would not open ({e}) — nothing was exported"))
+                })?),
+                // A row whose file has gone missing must not fail the whole
+                // export; there is nothing to put in its place either way.
                 _ => match std::fs::File::open(&path) {
                     Ok(file) => Box::new(file),
-                    Err(_) => continue,
+                    Err(e) => {
+                        tracing::warn!("export: {entry} has no file on disk ({e}), left out");
+                        continue;
+                    }
                 },
             };
+            if let Some(original) = media.iter().find(|(m, _)| m == id).map(|(_, f)| f) {
+                if !in_tree.contains_key(id) {
+                    meta.media.insert(entry.clone(), original.clone());
+                }
+            }
             zip.start_file(entry, blob)?;
             std::io::copy(&mut { source }, &mut zip)?;
         }
+
+        // The boards, with each card's notes named by where they sit in here.
+        let paths: HashMap<i64, &String> = documents.iter().map(|(n, path)| (n.id, path)).collect();
+        for (node, path) in &containers {
+            if node.kind != SPACE || node.parent_id.is_some() {
+                continue;
+            }
+            let lists = lists
+                .iter()
+                .filter(|(_, space, _)| *space == node.id)
+                .map(|(id, _, name)| ListMeta {
+                    name: name.clone(),
+                    cards: cards
+                        .iter()
+                        .filter(|(list, _, _)| list == id)
+                        .map(|(_, card, document)| CardMeta {
+                            document: document.and_then(|d| paths.get(&d).map(|p| (*p).clone())),
+                            ..card.clone()
+                        })
+                        .collect(),
+                })
+                .collect();
+            meta.spaces.insert(
+                path.clone(),
+                SpaceMeta { has_board: node.has_board, role: node.role.clone(), lists },
+            );
+        }
+
+        zip.start_file(manifest::FILE_NAME, text)?;
+        serde_json::to_writer_pretty(&mut zip, &meta).map_err(anyhow::Error::from)?;
 
         let mut file = zip.finish()?;
         file.seek(SeekFrom::Start(0))?;
         Ok(file)
     })
-    .await??;
+    .await
+    .map_err(anyhow::Error::from)??;
 
     let size = file.metadata()?.len();
     let name = format!("workspace-{}.zip", day_string(crate::now()));
@@ -328,6 +468,10 @@ mod tests {
                         slug: (*slug).into(),
                         body: String::new(),
                         media_id: (*kind == "file").then(|| format!("m{id}")),
+                        created_at: 0,
+                        updated_at: 0,
+                        has_board: false,
+                        role: None,
                     },
                 )
             })

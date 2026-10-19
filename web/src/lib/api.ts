@@ -72,10 +72,13 @@ export interface SharedDocument {
 
 /** What an import did, as `POST /api/nodes/{id}/import` reports it. */
 export interface ImportReport {
+  /** New spaces, made by an import at the root. */
+  spaces: number
   folders: number
   documents: number
   files: number
   links: number
+  cards: number
   skipped: string[]
 }
 
@@ -228,6 +231,13 @@ export const api = {
     const form = new FormData()
     for (const file of files) form.append('file', file, file.webkitRelativePath || file.name)
     return request<ImportReport>(`/nodes/${id}/import`, { method: 'POST', body: form })
+  },
+
+  /** An `:export!` poured back in whole: its directories become spaces. */
+  importRoot: (files: File[]) => {
+    const form = new FormData()
+    for (const file of files) form.append('file', file, file.webkitRelativePath || file.name)
+    return request<ImportReport>('/import', { method: 'POST', body: form })
   },
 
   createNode: (input: {

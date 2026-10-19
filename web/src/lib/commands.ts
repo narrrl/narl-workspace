@@ -10,7 +10,8 @@ export const hooks = {
   /** Files for the folder being browsed, rather than for the document. */
   pickTreeFiles: (_encrypt: boolean) => {},
   pickFolder: () => {},
-  pickArchive: () => {},
+  /** `root`: into the workspace itself, where each directory is a space. */
+  pickArchive: (_root: boolean) => {},
   focusEditor: () => {},
   focusList: () => {},
   insertText: (_text: string) => {},
@@ -239,8 +240,8 @@ export const commands: CommandSpec[] = [
     help: 'upload a folder into this one — markdown becomes documents, links follow',
     run: () => hooks.pickFolder(),
     bang: {
-      help: 'import loose files, or a .zip of a folder, instead of a folder',
-      run: () => hooks.pickArchive(),
+      help: 'import loose files, or a .zip of a folder; :import! / pours an :export! back in, spaces and boards and all',
+      run: (arg) => hooks.pickArchive(arg.trim() === '/'),
     },
   },
   {

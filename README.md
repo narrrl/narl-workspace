@@ -158,10 +158,13 @@ it is removed again on the way out, so abandoned starts do not pile up. If a tab
 says so — `:e!` throws it away, the way vim handles a swap file.
 
 `:export` downloads the open document as markdown. `:export!` downloads the
-whole workspace as a zip: the tree as real directories, one markdown file per
-document, every file in the tree where it sits and every other embedded file in
-`media/`, under their real names, and relative links between them, so the
-archive reads in any markdown viewer without this application.
+whole workspace as a zip: the tree as real directories, empty folders too, one
+markdown file per document, every file in the tree where it sits and every
+other embedded file in `media/`, under their real names, and relative links
+between documents, folders and files, so the archive reads in any markdown
+viewer without this application. What plain files have no place for — when
+each entry was written, names as they were typed, which space is the diary,
+every board with its cards — goes into one `.workspace.json` beside them.
 
 The diary is the diary by role, not by name: rename it and the reminder and
 the agenda still know which space it is, and it cannot be deleted — empty it
@@ -237,8 +240,12 @@ Proton cannot read either; only the vault password can read the sealed one.
 had inside, and the tree is rebuilt on the other side: directories become
 folders, `.md` and `.markdown` files become documents (titled by their first
 heading), anything else becomes a file in the tree. `:import!` does the same with
-a zip, which is the shape `:export!` writes, so a workspace can be poured back
-into another one.
+a zip, which is the shape `:export!` writes. `:import! /` pours an `:export!`
+back in at the root: each directory becomes a space again — or goes into the
+space already there by that name — and with `.workspace.json` beside it the
+dates, names, boards and cards come back as they were, embedded files go back
+to being embedded rather than a `media` folder, and a file that happened to end
+in `.md` stays a file.
 
 Links between the imported files are rewritten as they land: a link to a
 markdown file becomes the document's address, a link to an image becomes its
@@ -433,9 +440,10 @@ Everything except the two share routes requires the session cookie.
 | `POST` | `/api/cards/{id}/move` | to another list and place in it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |
+| `POST` | `/api/import` | import an export at the root: directories become spaces |
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
-| `GET` | `/api/export` | every document and file, as a zip |
+| `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |
 | `GET`/`POST` | `/api/media` | list / upload (multipart) |
 | `GET`/`DELETE` | `/api/media/{id}` | serve / delete a file |

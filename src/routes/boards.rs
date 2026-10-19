@@ -20,13 +20,18 @@ use axum::{
     extract::{Path, State},
     Json,
 };
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::nodes::{DOCUMENT, SPACE},
+    routes::{
+        manifest::ListMeta,
+        nodes::{DOCUMENT, SPACE},
+    },
     state::AppState,
 };
 
@@ -349,6 +354,91 @@ async fn settle(db: &mut SqliteConnection, space_id: i64) -> AppResult<()> {
         .execute(&mut *db)
         .await?;
     Ok(())
+}
+
+/// Put the lists and cards of an exported board back on a space. An empty
+/// board takes the lists as they were; one that has lists already keeps them,
+/// gains the ones it lacks in front of its last — the way `:list` adds one —
+/// and takes each card into the list of the same name. Returns the cards.
+pub(crate) async fn restore(
+    db: &mut SqliteConnection,
+    space_id: i64,
+    lists: &[ListMeta],
+    documents: &HashMap<String, i64>,
+) -> AppResult<usize> {
+    if lists.is_empty() {
+        return Ok(0);
+    }
+    let existing: Vec<(i64, String)> =
+        sqlx::query("SELECT id, name FROM board_lists WHERE space_id = ?1 ORDER BY position, id")
+            .bind(space_id)
+            .fetch_all(&mut *db)
+            .await?
+            .iter()
+            .map(|row| (row.get("id"), row.get("name")))
+            .collect();
+
+    let now = crate::now();
+    let mut ids = Vec::with_capacity(lists.len());
+    for (index, list) in lists.iter().enumerate() {
+        if let Some((id, _)) = existing.iter().find(|(_, name)| *name == list.name) {
+            ids.push(*id);
+            continue;
+        }
+        let position = match last_list(&mut *db, space_id).await? {
+            // In front of "done", which has to stay last.
+            Some((last, position)) if !existing.is_empty() => {
+                sqlx::query("UPDATE board_lists SET position = position + 1 WHERE id = ?1")
+                    .bind(last)
+                    .execute(&mut *db)
+                    .await?;
+                position
+            }
+            _ => index as i64,
+        };
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO board_lists (space_id, name, position, created_at)
+             VALUES (?1, ?2, ?3, ?4) RETURNING id",
+        )
+        .bind(space_id)
+        .bind(&list.name)
+        .bind(position)
+        .bind(now)
+        .fetch_one(&mut *db)
+        .await?;
+        ids.push(id);
+    }
+
+    let mut count = 0;
+    for (list, id) in lists.iter().zip(ids) {
+        let mut position: i64 =
+            sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM cards WHERE list_id = ?1")
+                .bind(id)
+                .fetch_one(&mut *db)
+                .await?;
+        for card in &list.cards {
+            sqlx::query(
+                "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, position,
+                                    created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .bind(id)
+            .bind(card.document.as_ref().and_then(|path| documents.get(path)))
+            .bind(&card.title)
+            .bind(&card.body)
+            .bind(card.due_at)
+            .bind(card.done_at)
+            .bind(position)
+            .bind(card.created_at)
+            .bind(card.updated_at)
+            .execute(&mut *db)
+            .await?;
+            position += 1;
+            count += 1;
+        }
+    }
+    settle(db, space_id).await?;
+    Ok(count)
 }
 
 /// A card links to a document — its notes — and to nothing else: a folder
