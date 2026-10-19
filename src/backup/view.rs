@@ -62,7 +62,7 @@ impl Placed {
 /// A name Drive will take: no separators, no control characters, nothing
 /// that means "here" or "up", not too long. What cannot be saved becomes the
 /// slug, which always can.
-fn clean(name: &str, slug: &str) -> String {
+pub(crate) fn clean(name: &str, slug: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c })
@@ -76,7 +76,7 @@ fn clean(name: &str, slug: &str) -> String {
 
 /// `slides.pdf` → `slides (42).pdf`, for the second of two files that share
 /// a name. Ids never change, so the loser keeps the same name every run.
-fn disambiguate(name: &str, id: i64) -> String {
+pub(crate) fn disambiguate(name: &str, id: i64) -> String {
     match name.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() => format!("{stem} ({id}).{ext}"),
         _ => format!("{name} ({id})"),

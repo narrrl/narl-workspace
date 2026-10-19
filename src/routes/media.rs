@@ -313,7 +313,7 @@ pub async fn upload_into(
 
 /// The media row and the file node that owns it, in one transaction so the
 /// tree never shows a file whose bytes it does not know about.
-async fn insert_file(
+pub(crate) async fn insert_file(
     db: &SqlitePool,
     parent: i64,
     media_id: &str,

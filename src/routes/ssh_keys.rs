@@ -82,6 +82,8 @@ pub async fn add(
     })?
     .get("id");
 
+    // The key list is in diary.db like everything else, and goes up with it.
+    state.backup.signal();
     Ok(Json(SshKeySummary {
         id,
         name: name.to_string(),
@@ -105,5 +107,6 @@ pub async fn remove(
     if affected == 0 {
         return Err(AppError::NotFound);
     }
+    state.backup.signal();
     Ok(Json(serde_json::json!({ "ok": true })))
 }

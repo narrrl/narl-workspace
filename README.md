@@ -189,8 +189,18 @@ arrives, never held in memory, so the only ceiling is `WORKSPACE_MAX_UPLOAD_MB`
 (1024 by default) — which is per request, so a proxy in front needs a body
 limit at least that large too.
 
-The SFTP mount does not show files yet; a folder that holds only files lists
-as empty there.
+The SFTP mount shows files beside the documents, under their own names — a
+later file that shares one is told apart by its id, `slides (42).pdf` — and
+anything copied in that is not a `.md` becomes a file in the tree, streamed to
+disk under the same size limit. A sealed file is listed but does not open
+there. Editor droppings — swap files, `~` backups, dotted temp files — stay in
+memory for the session, and a dotted temp file renamed onto a real name is kept
+as that file, which is how `rsync` and most editors save.
+
+If a document is saved in the browser while an SFTP client holds it open, the
+client's save does not overwrite it: it lands beside it as `<name>-conflict.md`,
+and both are kept. Deleting a key in the browser ends what that key mounted,
+not just its next login.
 
 ## The vault
 

@@ -79,6 +79,7 @@ impl russh::server::Server for SftpServer {
         SshSession {
             state: self.state.clone(),
             channel: None,
+            key_id: None,
         }
     }
 }
@@ -89,6 +90,9 @@ struct SshSession {
     /// `channel_open_session` would mean a shell or a second subsystem,
     /// neither of which this server offers.
     channel: Option<Channel<Msg>>,
+    /// The registered key this session logged in with, re-checked by the
+    /// filesystem so that deleting a key ends what it mounted.
+    key_id: Option<i64>,
 }
 
 impl ServerHandler for SshSession {
@@ -113,6 +117,7 @@ impl ServerHandler for SshSession {
                     .bind(id)
                     .execute(&self.state.db)
                     .await?;
+                self.key_id = Some(id);
                 Ok(Auth::Accept)
             }
             None => Ok(Auth::reject()),
@@ -145,7 +150,7 @@ impl ServerHandler for SshSession {
             return Ok(());
         };
         session.channel_success(channel_id)?;
-        let handler = fs::SpaceFs::new(self.state.clone());
+        let handler = fs::SpaceFs::new(self.state.clone(), self.key_id);
         tokio::spawn(russh_sftp::server::run(channel.into_stream(), handler));
         Ok(())
     }
