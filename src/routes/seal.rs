@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::nodes,
+    routes::{media::MEDIA_REF, nodes},
     state::AppState,
     vault,
 };
@@ -33,6 +33,11 @@ pub struct Resealed {
     pub files: usize,
     /// Of what was asked about, how many were already that way.
     pub unchanged: usize,
+    /// How many could not be re-written; the rest still were.
+    pub failed: usize,
+    /// Shared documents that embed a file just sealed: their readers now see
+    /// a gap where it was, because a share link never serves a sealed file.
+    pub shared: usize,
 }
 
 pub async fn encrypt(
@@ -84,21 +89,45 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
         return Err(AppError::BadRequest("there are no files there".into()));
     }
 
+    // A folder is many files, and one that will not re-write — gone from the
+    // disk, cut short — is no reason to leave the rest as they were.
     let mut files = 0;
     let mut unchanged = 0;
-    for target in targets {
+    let mut failed = Vec::new();
+    for target in &targets {
         if target.encrypted == seal {
             unchanged += 1;
             continue;
         }
-        rewrite(state, &key, &target, seal).await?;
-        files += 1;
+        match rewrite(state, &key, target, seal).await {
+            Ok(()) => files += 1,
+            Err(e) => {
+                tracing::warn!(node = target.node_id, "could not re-write a file: {e:?}");
+                failed.push(e);
+            }
+        }
     }
 
     if files > 0 {
         state.backup.signal();
     }
-    Ok(Resealed { files, unchanged })
+    // Asked about one file, the reason it failed is the answer.
+    if files == 0 && unchanged == 0 && failed.len() == 1 {
+        return Err(failed.remove(0));
+    }
+    let shared: i64 = if seal && files > 0 {
+        sqlx::query_scalar(&format!(
+            "SELECT COUNT(DISTINCT d.id) FROM nodes d
+             JOIN node_media nm ON nm.node_id = d.id
+             JOIN nodes f ON f.media_id = nm.media_id
+             WHERE d.kind = 'document' AND d.share_token IS NOT NULL AND f.id IN ({list})"
+        ))
+        .fetch_one(&state.db)
+        .await?
+    } else {
+        0
+    };
+    Ok(Resealed { files, unchanged, failed: failed.len(), shared: shared as usize })
 }
 
 /// Re-write one file sealed or opened under a new id, then point everything
@@ -136,8 +165,8 @@ async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool
     tokio::fs::rename(&partial, uploads.join(&new)).await?;
 
     let committed = async {
-        let mut tx = state.db.begin().await?;
-        sqlx::query(
+        let mut tx = crate::db::begin_write(&state.db).await?;
+        let copied = sqlx::query(
             "INSERT INTO media (id, filename, mime, size, created_at, encrypted)
              SELECT ?1, filename, mime, size, created_at, ?2 FROM media WHERE id = ?3",
         )
@@ -145,21 +174,52 @@ async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool
         .bind(seal)
         .bind(&old)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        // Another re-write of the same file got there first.
+        if copied == 0 {
+            return Err(AppError::NotFound);
+        }
         sqlx::query("UPDATE nodes SET media_id = ?1 WHERE media_id = ?2")
             .bind(&new)
             .bind(&old)
             .execute(&mut *tx)
             .await?;
-        // Every document that embeds the file keeps showing it.
-        sqlx::query(
-            "UPDATE nodes SET body = replace(body, '/api/media/' || ?2, '/api/media/' || ?1)
-             WHERE kind = 'document' AND id IN (SELECT node_id FROM node_media WHERE media_id = ?2)",
+        // Every document and card that embeds the file keeps showing it —
+        // however the link was written: an id typed in capitals is the
+        // same file.
+        let bodies = sqlx::query(
+            "SELECT 'nodes' AS tbl, id, body FROM nodes WHERE instr(lower(body), ?1) > 0
+             UNION ALL
+             SELECT 'cards', id, body FROM cards WHERE instr(lower(body), ?1) > 0",
         )
-        .bind(&new)
         .bind(&old)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
+        for row in bodies {
+            let body: String = row.get("body");
+            let moved = MEDIA_REF.replace_all(&body, |caps: &regex::Captures| {
+                if caps[1].eq_ignore_ascii_case(&old) {
+                    format!("/api/media/{new}")
+                } else {
+                    caps[0].to_string()
+                }
+            });
+            if moved == body {
+                continue;
+            }
+            let table: String = row.get("tbl");
+            let update = if table == "cards" {
+                "UPDATE cards SET body = ?1 WHERE id = ?2"
+            } else {
+                "UPDATE nodes SET body = ?1 WHERE id = ?2"
+            };
+            sqlx::query(update)
+                .bind(moved.as_ref())
+                .bind(row.get::<i64, _>("id"))
+                .execute(&mut *tx)
+                .await?;
+        }
         sqlx::query("UPDATE node_media SET media_id = ?1 WHERE media_id = ?2")
             .bind(&new)
             .bind(&old)

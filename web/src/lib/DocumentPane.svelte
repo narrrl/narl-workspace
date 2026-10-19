@@ -40,6 +40,38 @@
     }
   })
 
+  /*
+   * A sealed file embedded here will not load while the vault is shut: the
+   * server answers 423 and the browser shows a broken image. Errors do not
+   * bubble, so they are caught on the way down, and the broken embed is
+   * swapped for a button that opens the vault and puts it back.
+   */
+  $effect(() => {
+    const root = article
+    if (!root) return
+    const sealed = async (event: Event) => {
+      const element = event.target as HTMLElement
+      const media = element.closest('img, video, audio') as HTMLImageElement | HTMLMediaElement | null
+      if (!media || !(media.getAttribute('src') ?? media.querySelector('source')?.getAttribute('src') ?? '').includes('/api/media/')) return
+      await workspace.loadVault()
+      if (!workspace.vault?.configured || workspace.vault.unlocked || !media.isConnected) return
+      const button = document.createElement('button')
+      button.className = 'sealed-embed'
+      button.textContent = 'sealed — unlock to show'
+      button.onclick = async (click) => {
+        click.preventDefault()
+        click.stopPropagation()
+        if (!(await workspace.ensureUnlocked())) return
+        button.replaceWith(media)
+        if (media instanceof HTMLImageElement) media.src = media.src
+        else media.load()
+      }
+      media.replaceWith(button)
+    }
+    root.addEventListener('error', sealed, true)
+    return () => root.removeEventListener('error', sealed, true)
+  })
+
   /**
    * `/n/<space>/<slug>` links — the ones the importer writes between imported
    * documents — are followed in place rather than reloading the application.
@@ -152,6 +184,19 @@
 </section>
 
 <style>
+  .pane :global(.sealed-embed) {
+    display: block;
+    margin: 0.5rem 0;
+    padding: 1.5rem;
+    width: 100%;
+    border: 1px dashed currentColor;
+    background: none;
+    color: inherit;
+    opacity: 0.7;
+    font: inherit;
+    cursor: pointer;
+  }
+
   .pane {
     display: flex;
     flex-direction: column;

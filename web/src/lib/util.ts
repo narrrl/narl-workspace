@@ -130,3 +130,7 @@ export function scrollPage(el: HTMLElement, amount: ScrollAmount) {
       el.scrollBy({ top: amount * line * 3 })
   }
 }
+
+/** What a share link's reader will miss: a share never serves a sealed file. */
+export const sealedNote = (sealed: number) =>
+  sealed > 0 ? ` — ${sealed} sealed file${sealed === 1 ? '' : 's'} in it stay hidden from readers` : ''

@@ -145,6 +145,8 @@ export interface VaultStatus {
   unlocked: boolean
   /** Seconds until it locks itself if nothing uses it. */
   locks_in: number | null
+  /** How many files are sealed: what an export needs the vault open for. */
+  sealed: number
 }
 
 /** The Proton Drive mirror, as `/api/backup` reports it. */
@@ -261,7 +263,9 @@ export const api = {
 
   /** Publishes the document, or mints a fresh key for one already published. */
   share: (id: number) =>
-    request<{ token: string; key: string; path: string }>(`/nodes/${id}/share`, { method: 'POST' }),
+    request<{ token: string; key: string; path: string; sealed: number }>(`/nodes/${id}/share`, {
+      method: 'POST',
+    }),
 
   unshare: (id: number) => request<{ ok: true }>(`/nodes/${id}/share`, { method: 'DELETE' }),
 
@@ -351,7 +355,7 @@ export const api = {
 
   /** Seal a file, or every file under a folder, into the vault — or take it back out. */
   seal: (id: number, encrypt: boolean) =>
-    request<{ files: number; unchanged: number }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
+    request<{ files: number; unchanged: number; failed: number; shared: number }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
       method: 'POST',
     }),
 

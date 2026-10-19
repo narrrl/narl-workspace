@@ -1,6 +1,6 @@
 import { api, isContainer, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay, parseDue, type ScrollAmount } from './util'
+import { formatDay, parseDay, parseDue, sealedNote, type ScrollAmount } from './util'
 
 export type { ScrollAmount }
 
@@ -596,8 +596,8 @@ export const commands: CommandSpec[] = [
       if (!id) return workspace.say('nothing selected', 'error')
       if (!node?.shared) return workspace.say('not shared — :share first', 'error')
       await workspace.guard(async () => {
-        const url = await workspace.mintShareLink(id)
-        workspace.say(`new link → ${url} (copied) — the previous one is dead`)
+        const { url, sealed } = await workspace.mintShareLink(id)
+        workspace.say(`new link → ${url} (copied) — the previous one is dead${sealedNote(sealed)}`)
       })
     },
   },
@@ -636,6 +636,13 @@ export const commands: CommandSpec[] = [
         // A plain navigation, so the browser streams the archive straight to
         // disk instead of the tab holding all of it in memory first.
         await workspace.flush()
+        // Sealed files go into the archive opened, which needs the vault:
+        // asked here, because a refusal after the navigation would replace
+        // the whole app with an error page.
+        await workspace.loadVault()
+        if ((workspace.vault?.sealed ?? 0) > 0 && !(await workspace.ensureUnlocked())) {
+          return workspace.say('the export holds sealed files — it needs the vault open', 'error')
+        }
         workspace.say('building the archive — the download starts on its own')
         location.href = '/api/export'
       },

@@ -316,6 +316,16 @@ pub fn seal_file(master: &Key, media_id: &str, source: &mut impl Read, target: &
     Ok(size)
 }
 
+/// A vault password on its way to Argon2, wiped from memory once it is done.
+pub type Password = Zeroizing<String>;
+
+fn humantime(d: Duration) -> String {
+    match d.as_secs() {
+        s if s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
 /// The vault's state: whether it exists, and its key while it is open.
 pub struct Vault {
     db: SqlitePool,
@@ -335,6 +345,8 @@ pub struct Status {
     pub unlocked: bool,
     /// Seconds until it locks itself if nothing uses it.
     pub locks_in: Option<u64>,
+    /// How many files are sealed: what an export needs the vault open for.
+    pub sealed: i64,
 }
 
 /// What a password check came to.
@@ -374,8 +386,38 @@ impl Vault {
         *self.slot() = None;
     }
 
+    /// Drop the key once it has gone unused past the idle time. Without this
+    /// a vault nobody looks at would only notice it should be shut on the
+    /// next look, with the key sitting in memory all the while.
+    fn expire(&self) {
+        let mut slot = self.slot();
+        if slot.as_ref().is_some_and(|open| open.touched.elapsed() >= self.idle) {
+            *slot = None;
+            tracing::info!("vault locked after {} idle", humantime(self.idle));
+        }
+    }
+
+    /// Check for an idle vault every few seconds, for as long as the vault
+    /// itself is around.
+    pub fn spawn_idle_lock(self: &Arc<Self>) {
+        let vault = Arc::downgrade(self);
+        let every = (self.idle / 4).clamp(Duration::from_secs(1), Duration::from_secs(30));
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(every);
+            loop {
+                ticker.tick().await;
+                let Some(vault) = vault.upgrade() else { return };
+                vault.expire();
+            }
+        });
+    }
+
     pub async fn status(&self) -> Result<Status> {
         let configured = self.row().await?.is_some();
+        let sealed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media WHERE encrypted")
+            .fetch_one(&self.db)
+            .await?;
+        self.expire();
         let slot = self.slot();
         let remaining = slot
             .as_ref()
@@ -385,6 +427,7 @@ impl Vault {
             configured,
             unlocked: remaining.is_some(),
             locks_in: remaining.map(|left| left.as_secs()),
+            sealed,
         })
     }
 
@@ -396,7 +439,7 @@ impl Vault {
 
     /// Make the vault, and leave it open. Refuses when there already is one:
     /// a second setup would orphan every file sealed under the first.
-    pub async fn setup(&self, password: String) -> Result<bool> {
+    pub async fn setup(&self, password: Password) -> Result<bool> {
         if self.row().await?.is_some() {
             return Ok(false);
         }
@@ -432,7 +475,7 @@ impl Vault {
     }
 
     /// The master key the password stands for, if it is the right one.
-    async fn check(&self, password: String) -> Result<Option<Option<Key>>> {
+    async fn check(&self, password: Password) -> Result<Option<Option<Key>>> {
         let Some(row) = self.row().await? else {
             return Ok(None);
         };
@@ -448,7 +491,7 @@ impl Vault {
         Ok(Some(key))
     }
 
-    pub async fn unlock(&self, password: String) -> Result<Unlock> {
+    pub async fn unlock(&self, password: Password) -> Result<Unlock> {
         Ok(match self.check(password).await? {
             None => Unlock::NotConfigured,
             Some(None) => Unlock::WrongPassword,
@@ -461,7 +504,7 @@ impl Vault {
 
     /// Re-seal the master key under a new password. No file changes: they are
     /// sealed under the master key, which stays what it was.
-    pub async fn change_password(&self, current: String, new: String) -> Result<Unlock> {
+    pub async fn change_password(&self, current: Password, new: Password) -> Result<Unlock> {
         let master = match self.check(current).await? {
             None => return Ok(Unlock::NotConfigured),
             Some(None) => return Ok(Unlock::WrongPassword),
@@ -525,6 +568,23 @@ mod tests {
             at += len;
         }
         Ok(out)
+    }
+
+    /// Idle means the key is gone from memory, not only that the next look
+    /// will refuse it.
+    #[tokio::test]
+    async fn an_idle_vault_lets_go_of_its_key() {
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let vault = super::Vault::new(db, std::time::Duration::from_millis(20));
+        *vault.slot() = Some(super::Unlocked {
+            key: std::sync::Arc::new(key(1)),
+            touched: std::time::Instant::now(),
+        });
+        vault.expire();
+        assert!(vault.slot().is_some(), "still within the idle time");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        vault.expire();
+        assert!(vault.slot().is_none());
     }
 
     #[test]

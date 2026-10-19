@@ -82,11 +82,22 @@ pub async fn enable(
         .execute(&state.db)
         .await?;
 
+    // A share link never serves a sealed file, so a reader of this one sees
+    // a gap wherever the document embeds one. Worth saying while sharing.
+    let sealed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM node_media nm JOIN media m ON m.id = nm.media_id
+         WHERE nm.node_id = ?1 AND m.encrypted",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
     state.backup.signal();
     Ok(Json(json!({
         "token": token,
         "key": key,
         "path": format!("/s/{token}#{key}"),
+        "sealed": sealed,
     })))
 }
 

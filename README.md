@@ -209,7 +209,8 @@ and close it, `:passwd` changes the password. A sealed file carries a lock in
 the list, and the bar says `vault open` while it is.
 
 The vault closes itself after `WORKSPACE_VAULT_IDLE_MIN` minutes of nobody
-using it (15 by default), on logout, and whenever the server restarts. While
+using it (15 by default) — the key is dropped from memory then, not merely
+refused on the next look — on logout, and whenever the server restarts. While
 it is closed a sealed file shows as sealed and nothing more; a share link never
 serves one, open or not; and `:export!` refuses until it is open, because an
 archive meant to be read without this application has to hold the files
@@ -221,6 +222,18 @@ its own, sealed under the master key in the file's header together with its
 id, and its bytes are AES-256-GCM in 64 KiB records, the last one marked as
 last — so a file that is swapped, cut short or tampered with refuses to open.
 Changing the password re-seals the master key and rewrites no file.
+
+A sealed file is served with `Cache-Control: no-store`, so the browser keeps
+no copy of what it showed once the vault shuts. A sealed image in a document
+shows as a button while the vault is shut, which asks for the password and
+puts the image back. `:share` says how many sealed files a document holds,
+since its readers will not see them, and `:encrypt` says how many shared
+documents just lost a picture to the vault. `:encrypt` on a folder seals
+what it can and counts what it could not, rather than stopping at the first.
+
+Only the bytes are sealed. A sealed file's name, and the names and text of
+the documents around it, stay readable in `diary.db` — and in the mirror of
+it — like everything else outside the vault.
 
 **There is no recovery.** Forget the vault password and every sealed file is
 gone — from the server and from every backup — which is exactly what makes it

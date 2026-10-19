@@ -8,18 +8,18 @@ use crate::{
     error::{AppError, AppResult},
     state::AppState,
     throttle::Attempt,
-    vault::{Status, Unlock, MIN_PASSWORD},
+    vault::{Password, Status, Unlock, MIN_PASSWORD},
 };
 
 #[derive(Deserialize)]
 pub struct PasswordInput {
-    pub password: String,
+    pub password: Password,
 }
 
 #[derive(Deserialize)]
 pub struct ChangeInput {
-    pub current: String,
-    pub password: String,
+    pub current: Password,
+    pub password: Password,
 }
 
 fn strong_enough(password: &str) -> AppResult<()> {

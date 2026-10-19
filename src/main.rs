@@ -114,8 +114,10 @@ async fn main() -> Result<()> {
 
     sweep::spawn(db.clone(), config.uploads_dir());
 
+    let vault = vault::Vault::new(db.clone(), config.vault_idle);
+    vault.spawn_idle_lock();
     let state = AppState {
-        vault: vault::Vault::new(db.clone(), config.vault_idle),
+        vault,
         db,
         config: Arc::clone(&config),
         login_throttle: Arc::default(),

@@ -13,7 +13,7 @@ import {
   type SpaceOverview,
   type VaultStatus,
 } from './api'
-import { formatBytes } from './util'
+import { formatBytes, sealedNote } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -242,10 +242,16 @@ class Workspace {
 
   /** Seal what is under the cursor, or take it back out, and show the result. */
   async seal(id: number, encrypt: boolean) {
-    const { files, unchanged } = await api.seal(id, encrypt)
+    const { files, unchanged, failed, shared } = await api.seal(id, encrypt)
     const verb = encrypt ? 'encrypted' : 'decrypted'
     const already = unchanged > 0 ? `, ${unchanged} already were` : ''
-    this.say(`${verb} ${files} file${files === 1 ? '' : 's'}${already}`)
+    const broken = failed > 0 ? `, ${failed} could not be` : ''
+    const readers =
+      shared > 0 ? ` — ${shared} shared document${shared === 1 ? '' : 's'} embed it, and their readers no longer see it` : ''
+    this.say(
+      `${verb} ${files} file${files === 1 ? '' : 's'}${already}${broken}${readers}`,
+      failed > 0 || shared > 0 ? 'error' : undefined,
+    )
     await this.refresh()
     if (this.open?.kind === 'file') this.open = await api.getNode(this.open.id)
   }
@@ -1096,8 +1102,8 @@ class Workspace {
       await api.unshare(id)
       this.say(`#${id} is private again`)
     } else {
-      const url = await this.mintShareLink(id)
-      this.say(`shared → ${url} (copied)`)
+      const { url, sealed } = await this.mintShareLink(id)
+      this.say(`shared → ${url} (copied)${sealedNote(sealed)}`, sealed > 0 ? 'error' : undefined)
     }
     if (this.open?.id === id) this.open = await api.getNode(id)
     await this.refresh()
@@ -1110,10 +1116,10 @@ class Workspace {
    * retires the old one.
    */
   async mintShareLink(id: number) {
-    const { path } = await api.share(id)
+    const { path, sealed } = await api.share(id)
     const url = `${location.origin}${path}`
     await this.copy(url)
-    return url
+    return { url, sealed }
   }
 
   async copy(text: string) {
