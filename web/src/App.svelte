@@ -9,6 +9,7 @@
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
+  import Prompt from './lib/Prompt.svelte'
   import Rail from './lib/Rail.svelte'
   import Shared from './lib/Shared.svelte'
   import Sidebar from './lib/Sidebar.svelte'
@@ -56,6 +57,23 @@
       overlayEl?.focus()
       return () => (workspace.editing ? hooks.focusEditor() : shell?.focus())
     }
+  })
+
+  /*
+   * A pending `[y/N]` takes the next key before anything else sees it — the
+   * editor included, where `y` would otherwise start a yank. Only `y` agrees;
+   * every other key, Escape among them, declines.
+   */
+  $effect(() => {
+    const answer = (event: KeyboardEvent) => {
+      const prompt = workspace.prompt
+      if (!prompt || ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(event.key)) return
+      event.preventDefault()
+      event.stopPropagation()
+      prompt.resolve(event.key === 'y' || event.key === 'Y')
+    }
+    window.addEventListener('keydown', answer, true)
+    return () => window.removeEventListener('keydown', answer, true)
   })
 
   // Guard against losing a half-written entry to a stray refresh.
@@ -178,9 +196,9 @@
 
   /*
    * The board reads the same keys as the list, one dimension wider: h/l walk
-   * the lists, j/k the cards, and the shifted pair takes the card along. Only
-   * `:` and `?` fall through to the keys below, because everything else would
-   * act on a tree that is not on screen.
+   * the lists, j/k the cards, and the shifted pair takes the card along.
+   * Nothing falls through to the tree keys, because they would act on a tree
+   * that is not on screen.
    */
   function boardKey(key: string): boolean {
     switch (key) {
@@ -331,7 +349,12 @@
         workspace.cardCursor = 0
         return
       }
-      if (key === 'g') {
+      if (previous === 'd' && key === 'd') {
+        event.preventDefault()
+        void runCommand('delete')
+        return
+      }
+      if (key === 'g' || key === 'd') {
         pending = key
         return
       }
@@ -339,6 +362,12 @@
         event.preventDefault()
         return
       }
+      if (key === ':' || key === '?') {
+        event.preventDefault()
+        if (key === ':') cmdline = ':'
+        else void runCommand('help')
+      }
+      return
     }
 
     /*
@@ -444,7 +473,7 @@
         break
       case 's':
         event.preventDefault()
-        void runCommand(workspace.selected?.shared ? 'unshare' : 'share')
+        void runCommand(workspace.target?.shared ? 'unshare' : 'share')
         break
       case 'y':
         event.preventDefault()
@@ -542,6 +571,8 @@
     {#if cmdline !== null}
       <CommandLine initial={cmdline} close={() => (cmdline = null)} />
     {/if}
+
+    <Prompt />
 
     {#if workspace.overlay !== 'none'}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->

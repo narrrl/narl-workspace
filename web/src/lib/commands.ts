@@ -234,7 +234,9 @@ export const commands: CommandSpec[] = [
     bang: {
       help: 'add a card linked to the open document — Enter on it opens the document',
       run: async (arg) => {
-        const node = workspace.open ?? workspace.selected
+        // On the board the tree is not on screen, so only the open document
+        // can be meant; elsewhere it is whatever has focus.
+        const node = workspace.view === 'board' ? workspace.open : workspace.target
         if (!node || node.kind !== 'document') {
           return workspace.say('no document to link — open one first', 'error')
         }
@@ -287,7 +289,8 @@ export const commands: CommandSpec[] = [
         if (workspace.view !== 'board') return workspace.say('no board open — :board', 'error')
         const list = workspace.list
         if (!list) return workspace.say('no list selected', 'error')
-        if (!confirm(`delete the list "${list.name}" and its ${list.cards.length} cards?`)) return
+        const cards = list.cards.length
+        if (!(await workspace.ask(`delete the list "${list.name}" and its ${cards} card${cards === 1 ? '' : 's'}?`))) return
         await workspace.guard(() => workspace.deleteList())
       },
     },
@@ -299,7 +302,7 @@ export const commands: CommandSpec[] = [
     group: 'tree',
     help: 'move the selected node into a folder here, or up one level',
     run: async (arg) => {
-      const node = workspace.open ?? workspace.selected
+      const node = workspace.target
       if (!node) return workspace.say('nothing selected', 'error')
       const target = arg.trim()
       if (!target) return workspace.say('usage: :mv <folder|..>', 'error')
@@ -364,7 +367,11 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'edit the open document, or open a node by id',
     run: async (arg) => {
-      const id = arg ? Number(arg) : workspace.open?.id ?? workspace.selected?.id
+      const node = arg ? undefined : workspace.target
+      if (node && node.kind !== 'document') {
+        return workspace.say(`${node.slug} is a ${node.kind} — l opens it`, 'error')
+      }
+      const id = arg ? Number(arg) : node?.id
       if (!id || Number.isNaN(id)) return workspace.say('usage: :e <id>', 'error')
       await workspace.guard(() => workspace.openNode(id, true))
       hooks.focusEditor()
@@ -424,17 +431,20 @@ export const commands: CommandSpec[] = [
       if (workspace.view === 'board') {
         const card = workspace.card
         if (!card) return workspace.say('no card selected', 'error')
-        if (!confirm(`delete the card "${card.title}"?`)) return
+        if (!(await workspace.ask(`delete the card "${card.title}"?`))) return
         return workspace.guard(() => workspace.deleteCard())
       }
-      const id = arg ? Number(arg) : workspace.open?.id ?? workspace.selected?.id
+      // Whatever has focus: the row under the cursor in the list, the open
+      // document only while the document pane is the one being looked at.
+      const id = arg ? Number(arg) : workspace.target?.id
       if (!id || Number.isNaN(id)) return workspace.say('nothing to delete', 'error')
       const node = workspace.open?.id === id ? workspace.open : workspace.nodes.find((n) => n.id === id)
+      const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
       const what =
         node && node.kind !== 'document'
-          ? `delete ${node.kind} "${node.name}" and everything in it?`
-          : `delete #${id}?`
-      if (!confirm(`${what} this cannot be undone.`)) return
+          ? `delete the ${node.kind} ${name} and everything in it?`
+          : `delete ${name}?`
+      if (!(await workspace.ask(`${what} this cannot be undone.`))) return
       await workspace.guard(() => workspace.deleteNode(id))
     },
   },
@@ -453,13 +463,13 @@ export const commands: CommandSpec[] = [
 
       // The open document is renamed through the draft, so an unsaved body is
       // written with the new name instead of being left behind by it.
-      if (workspace.open) {
+      const node = workspace.target
+      if (node && node.id === workspace.open?.id) {
         workspace.draft.name = arg
         workspace.dirty = true
         return workspace.guard(() => workspace.save())
       }
 
-      const node = workspace.selected
       if (!node) return workspace.say('nothing selected — :name! renames the space', 'error')
       await workspace.guard(() => workspace.renameNode(node.id, arg))
     },
@@ -485,7 +495,7 @@ export const commands: CommandSpec[] = [
         ? workspace.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted)
         : workspace.space
       if (!space) return workspace.say(`no such space: ${wanted || '(none open)'}`, 'error')
-      if (!confirm(`delete the space "${space.name}" and everything in it? this cannot be undone.`)) {
+      if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? this cannot be undone.`))) {
         return
       }
       await workspace.guard(() => workspace.deleteSpace(space.id))
@@ -510,9 +520,9 @@ export const commands: CommandSpec[] = [
     group: 'sharing',
     help: 'publish the document behind an unguessable link and copy it',
     run: async () => {
-      const id = workspace.open?.id ?? workspace.selected?.id
+      const node = workspace.target
+      const id = node?.id
       if (!id) return workspace.say('nothing selected', 'error')
-      const node = workspace.open?.id === id ? workspace.open : workspace.selected
       if (node?.shared) return workspace.say('already shared — :link for a new link, :unshare to revoke')
       await workspace.guard(() => workspace.toggleShare(id))
     },
@@ -522,9 +532,9 @@ export const commands: CommandSpec[] = [
     group: 'sharing',
     help: 'revoke the share link',
     run: async () => {
-      const id = workspace.open?.id ?? workspace.selected?.id
+      const node = workspace.target
+      const id = node?.id
       if (!id) return workspace.say('nothing selected', 'error')
-      const node = workspace.open?.id === id ? workspace.open : workspace.selected
       if (!node?.shared) return workspace.say('not shared')
       await workspace.guard(() => workspace.toggleShare(id))
     },
@@ -534,9 +544,9 @@ export const commands: CommandSpec[] = [
     group: 'sharing',
     help: 'mint a new share link for the document and copy it',
     run: async () => {
-      const id = workspace.open?.id ?? workspace.selected?.id
+      const node = workspace.target
+      const id = node?.id
       if (!id) return workspace.say('nothing selected', 'error')
-      const node = workspace.open?.id === id ? workspace.open : workspace.selected
       if (!node?.shared) return workspace.say('not shared — :share first', 'error')
       await workspace.guard(async () => {
         const url = await workspace.mintShareLink(id)

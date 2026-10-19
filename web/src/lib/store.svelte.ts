@@ -65,6 +65,13 @@ class Workspace {
   flash = $state<Flash>(null)
 
   overlay = $state<'none' | 'help' | 'media' | 'overview'>('none')
+
+  /*
+   * A `[y/N]` question in the command line's place, instead of the browser's
+   * confirm(): it names the thing about to go, and it is answered from the
+   * keyboard without a modal the rest of the page cannot see past.
+   */
+  prompt = $state<{ text: string; resolve: (yes: boolean) => void } | null>(null)
   media = $state<MediaFile[]>([])
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
@@ -92,6 +99,15 @@ class Workspace {
     return this.nodes[this.cursor]
   }
 
+  /**
+   * What a verb acts on: the open document while the document pane has focus,
+   * the row under the cursor while the list does. Walking the list with a
+   * document still open must not make `dd` delete the document.
+   */
+  get target(): NodeSummary | undefined {
+    return this.open && this.pane === 'document' ? this.open : this.selected
+  }
+
   get space(): NodeSummary | undefined {
     return this.spaces.find((s) => s.id === this.spaceId)
   }
@@ -107,6 +123,19 @@ class Workspace {
 
   get card(): Card | undefined {
     return this.list?.cards[this.cardCursor]
+  }
+
+  ask(text: string): Promise<boolean> {
+    this.prompt?.resolve(false)
+    return new Promise((resolve) => {
+      this.prompt = {
+        text,
+        resolve: (yes) => {
+          this.prompt = null
+          resolve(yes)
+        },
+      }
+    })
   }
 
   say(text: string, kind: 'info' | 'error' = 'info') {
@@ -471,14 +500,18 @@ class Workspace {
       this.#autosave = null
     }
     this.dropStash(id)
+    const node = this.open?.id === id ? this.open : this.nodes.find((n) => n.id === id)
     const { removed } = await api.deleteNode(id)
     if (this.open?.id === id) {
       this.open = null
       this.editing = false
+      this.dirty = false
       this.pane = 'list'
     }
+    if (this.marked?.id === id) this.marked = null
     await this.refresh()
-    this.say(removed > 1 ? `deleted ${removed} nodes` : `deleted #${id}`)
+    const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
+    this.say(removed > 1 ? `deleted ${name} and ${removed - 1} inside it` : `deleted ${name}`)
   }
 
   /**

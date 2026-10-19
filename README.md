@@ -49,7 +49,9 @@ works once the frontend has been built at least once.
 
 ## Keys
 
-The desktop UI is modal. In the browse pane:
+The desktop UI is modal, and a key acts on whatever has focus: in the list
+that is the row under the cursor, even while another document is open beside
+it; in the document pane it is that document. In the browse pane:
 
 | key | action |
 | --- | --- |
@@ -65,7 +67,7 @@ The desktop UI is modal. In the browse pane:
 | `h` | up one level in the tree |
 | `/` | full-text search (`n` clears it) |
 | `s` / `y` | toggle sharing / mint a new share link |
-| `x`, `dd` | delete the entry |
+| `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
 | `:` | command line |
 | `Ctrl-S` | save from anywhere |
 | `?` | help |
