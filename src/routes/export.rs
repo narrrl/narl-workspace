@@ -23,14 +23,20 @@ struct ExportNode {
     name: String,
     slug: String,
     body: String,
+    media_id: Option<String>,
 }
 
 /// Where a document lands in the archive: the slugs of its ancestors as
 /// directories, its own slug as the file. Slugs are already unique among
 /// siblings, so the path is unique without adding the id to it.
 fn document_path(nodes: &HashMap<i64, ExportNode>, node: &ExportNode) -> String {
-    let mut segments = vec![format!("{}.md", node.slug)];
-    let mut parent = node.parent_id;
+    tree_path(nodes, node.parent_id, format!("{}.md", node.slug))
+}
+
+/// `leaf` under the directories of a node's ancestors.
+fn tree_path(nodes: &HashMap<i64, ExportNode>, parent: Option<i64>, leaf: String) -> String {
+    let mut segments = vec![leaf];
+    let mut parent = parent;
     // Bounded by the number of nodes, so a parent chain that somehow loops
     // cannot spin here.
     for _ in 0..nodes.len() {
@@ -78,15 +84,19 @@ fn day_string(seconds: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// Uploads are stored under a uuid; the archive gives them their name back.
 /// Only characters that are safe in a path *and* need no escaping inside a
 /// markdown link survive, because the entries link to these names directly.
-fn media_filename(id: &str, original: &str) -> String {
+fn safe_name(original: &str) -> String {
     let safe: String = original
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
         .collect();
-    let safe = safe.trim_matches(['.', '_']).to_string();
+    safe.trim_matches(['.', '_']).to_string()
+}
+
+/// Uploads are stored under a uuid; the archive gives them their name back.
+fn media_filename(id: &str, original: &str) -> String {
+    let safe = safe_name(original);
     if safe.is_empty() {
         id.to_string()
     } else {
@@ -94,12 +104,32 @@ fn media_filename(id: &str, original: &str) -> String {
     }
 }
 
+/// Where a file node lands: in its folder, under its own name. Two files may
+/// share a name where they can never share a slug, so the loser of a clash is
+/// told apart by its node id.
+fn file_path(
+    nodes: &HashMap<i64, ExportNode>,
+    node: &ExportNode,
+    taken: &mut std::collections::HashSet<String>,
+) -> String {
+    let safe = safe_name(&node.name);
+    let name = if safe.is_empty() { node.slug.clone() } else { safe };
+    let path = tree_path(nodes, node.parent_id, name.clone());
+    if taken.insert(path.clone()) {
+        return path;
+    }
+    let path = tree_path(nodes, node.parent_id, format!("{}-{name}", node.id));
+    taken.insert(path.clone());
+    path
+}
+
 const README: &str = "\
 This is a complete copy of a ~/workspace.
 
-  <space>/   one directory per space, holding the same tree of folders and
-             documents that the workspace shows; one markdown file per document
-  media/     every file the documents embed
+  <space>/   one directory per space, holding the same tree of folders,
+             documents and files that the workspace shows; one markdown file
+             per document, and every file under its own name
+  media/     the files documents embed that are not in the tree themselves
 
 Embedded media, and links from one document to another, are relative — so the
 documents render and cross-link correctly in any markdown reader as long as the
@@ -110,7 +140,7 @@ tree stays intact. Nothing here needs the workspace application to read it.
 /// can trust, so this is deliberately a plain archive of plain files.
 pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Response> {
     let nodes: HashMap<i64, ExportNode> = sqlx::query(
-        "SELECT id, parent_id, kind, name, slug, body FROM nodes ORDER BY created_at, id",
+        "SELECT id, parent_id, kind, name, slug, body, media_id FROM nodes ORDER BY created_at, id",
     )
     .fetch_all(&state.db)
     .await?
@@ -123,6 +153,7 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             name: row.get("name"),
             slug: row.get("slug"),
             body: row.get("body"),
+            media_id: row.get("media_id"),
         };
         (node.id, node)
     })
@@ -150,8 +181,19 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
         zip.start_file("README.txt", text)?;
         zip.write_all(README.as_bytes())?;
 
+        // A file node's bytes go where the node is; the rest go to media/.
+        // Ordered by id, so a clash of names resolves the same way every time.
+        let mut files: Vec<&ExportNode> = nodes.values().filter(|n| n.media_id.is_some()).collect();
+        files.sort_by_key(|n| n.id);
+        let mut taken = std::collections::HashSet::new();
+        let in_tree: HashMap<String, String> = files
+            .into_iter()
+            .filter_map(|n| Some((n.media_id.clone()?, file_path(&nodes, n, &mut taken))))
+            .collect();
+
         let names: Vec<(String, String)> = media
             .iter()
+            .filter(|(id, _)| !in_tree.contains_key(id))
             .map(|(id, filename)| (id.clone(), media_filename(id, filename)))
             .collect();
 
@@ -176,6 +218,9 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             for (id, name) in &names {
                 body = body.replace(&format!("/api/media/{id}"), &format!("{up}media/{name}"));
             }
+            for (id, target) in &in_tree {
+                body = body.replace(&format!("/api/media/{id}"), &relative_link(&path, target));
+            }
             for (address, target) in &addresses {
                 // Matching the `)` or `#` that ends a markdown link is what
                 // keeps `/n/work/a` from matching inside `/n/work/ab`.
@@ -192,13 +237,17 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             zip.write_all(document.as_bytes())?;
         }
 
-        for (id, name) in &names {
+        let entries = names
+            .iter()
+            .map(|(id, name)| (id, format!("media/{name}")))
+            .chain(in_tree.iter().map(|(id, path)| (id, path.clone())));
+        for (id, entry) in entries {
             // A row whose file has gone missing must not fail the whole backup.
-            let Ok(bytes) = std::fs::read(uploads.join(id)) else {
+            let Ok(mut source) = std::fs::File::open(uploads.join(id)) else {
                 continue;
             };
-            zip.start_file(format!("media/{name}"), blob)?;
-            zip.write_all(&bytes)?;
+            zip.start_file(entry, blob)?;
+            std::io::copy(&mut source, &mut zip)?;
         }
 
         let mut file = zip.finish()?;
@@ -229,7 +278,7 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
 mod tests {
     use std::collections::HashMap;
 
-    use super::{day_string, document_path, media_filename, relative_link, ExportNode};
+    use super::{day_string, document_path, file_path, media_filename, relative_link, ExportNode};
 
     #[test]
     fn renders_days_without_a_date_crate() {
@@ -251,10 +300,27 @@ mod tests {
                         name: (*slug).into(),
                         slug: (*slug).into(),
                         body: String::new(),
+                        media_id: (*kind == "file").then(|| format!("m{id}")),
                     },
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn a_file_keeps_its_name_and_a_clash_gets_its_id() {
+        let mut nodes = tree(&[
+            (1, None, "space", "uni"),
+            (2, Some(1), "folder", "algo"),
+            (3, Some(2), "file", "slides-pdf"),
+            (4, Some(2), "file", "slides-pdf-2"),
+        ]);
+        nodes.get_mut(&3).unwrap().name = "Slides 3.pdf".into();
+        nodes.get_mut(&4).unwrap().name = "Slides 3.pdf".into();
+
+        let mut taken = std::collections::HashSet::new();
+        assert_eq!(file_path(&nodes, &nodes[&3], &mut taken), "uni/algo/Slides_3.pdf");
+        assert_eq!(file_path(&nodes, &nodes[&4], &mut taken), "uni/algo/4-Slides_3.pdf");
     }
 
     #[test]

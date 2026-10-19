@@ -6,6 +6,7 @@
   import Board from './lib/Board.svelte'
   import CommandLine from './lib/CommandLine.svelte'
   import DocumentPane from './lib/DocumentPane.svelte'
+  import FilePane from './lib/FilePane.svelte'
   import Help from './lib/Help.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
@@ -29,6 +30,7 @@
   let cmdline = $state<string | null>(null)
   let cmdGlobal = $state(false)
   let fileInput = $state<HTMLInputElement>()
+  let treeInput = $state<HTMLInputElement>()
   let folderInput = $state<HTMLInputElement>()
   let importInput = $state<HTMLInputElement>()
   let shell = $state<HTMLDivElement>()
@@ -43,6 +45,7 @@
 
   $effect(() => {
     hooks.pickFiles = () => fileInput?.click()
+    hooks.pickTreeFiles = () => treeInput?.click()
     hooks.pickFolder = () => folderInput?.click()
     hooks.pickArchive = () => importInput?.click()
     hooks.focusList = () => shell?.focus()
@@ -116,6 +119,14 @@
       const uploaded = await workspace.upload(files)
       hooks.insertText(uploaded.map(embedSnippet).join('\n\n'))
     })
+  }
+
+  async function put(event: Event) {
+    const input = event.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    input.value = ''
+    if (files.length === 0) return
+    await workspace.guard(() => workspace.putFiles(files))
   }
 
   /*
@@ -644,7 +655,9 @@
             class:focused={!!workspace.open && workspace.pane === 'document'}
             onpointerdown={() => workspace.open && (workspace.pane = 'document')}
           >
-            {#if workspace.open}
+            {#if workspace.open?.kind === 'file'}
+              <FilePane />
+            {:else if workspace.open}
               <DocumentPane />
             {:else}
               <div class="placeholder">
@@ -686,6 +699,7 @@
 {/if}
 
 <input class="hidden" type="file" multiple bind:this={fileInput} onchange={attach} />
+<input class="hidden" type="file" multiple bind:this={treeInput} onchange={put} />
 <!-- `webkitdirectory` is set from script: it is the one attribute browsers
      agree on for picking a folder, and no typed attribute list carries it. -->
 <input class="hidden" type="file" multiple bind:this={folderInput} onchange={importFolder} />

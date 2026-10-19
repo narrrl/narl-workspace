@@ -1,6 +1,7 @@
 import {
   api,
   ApiError,
+  isContainer,
   type Agenda,
   type AgendaCard,
   type Board,
@@ -11,6 +12,7 @@ import {
   type NodeSummary,
   type SpaceOverview,
 } from './api'
+import { formatBytes } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -369,7 +371,7 @@ class Workspace {
   /** Open whatever `work/einarbeiten/01-was-ist-eebus` names. */
   async openPath(path: string) {
     const node = await api.resolvePath(path)
-    if (node.kind === 'document') {
+    if (!isContainer(node)) {
       if (node.parent_id !== null) await this.goTo(node.parent_id)
       await this.openNode(node.id)
     } else {
@@ -503,7 +505,7 @@ class Workspace {
     if (this.open?.id !== id) await this.flush()
 
     const node = await api.getNode(id)
-    if (node.kind !== 'document') {
+    if (isContainer(node)) {
       await this.goTo(node.id)
       return
     }
@@ -511,7 +513,8 @@ class Workspace {
     this.open = node
     this.draft = { name: node.name, body: node.body, created_at: node.created_at }
     this.dirty = false
-    this.editing = edit
+    // A file has a name and nothing to write in.
+    this.editing = edit && node.kind === 'document'
     this.pane = 'document'
     this.#syncUrl(node.path)
     const index = this.nodes.findIndex((n) => n.id === id)
@@ -529,7 +532,7 @@ class Workspace {
     }
   }
 
-  /** What Enter does: descend into a folder, open a document. */
+  /** What Enter does: descend into a folder, open a document or a file. */
   async openSelected(edit = false) {
     const selected = this.selected
     if (!selected) return
@@ -538,8 +541,8 @@ class Workspace {
       const node = await api.getNode(selected.id)
       return this.openPath(node.path.map((crumb) => crumb.slug).join('/'))
     }
-    if (selected.kind === 'document') await this.openNode(selected.id, edit)
-    else await this.goTo(selected.id)
+    if (isContainer(selected)) await this.goTo(selected.id)
+    else await this.openNode(selected.id, edit)
   }
 
   /** A new document is created immediately so uploads have something to attach to. */
@@ -1088,6 +1091,26 @@ class Workspace {
     ]
     if (report.skipped.length > 0) parts.push(`${report.skipped.length} skipped`)
     this.say(`imported ${parts.join(', ')}`)
+  }
+
+  /**
+   * Upload files into the folder being browsed, as nodes of their own. The
+   * status line counts up while they go, because a large one takes a while.
+   */
+  async putFiles(files: File[]) {
+    const parent = this.parentId
+    if (parent === null) return
+    const total = files.reduce((sum, file) => sum + file.size, 0)
+    const what = files.length === 1 ? files[0].name : `${files.length} files`
+    this.say(`uploading ${what} (${formatBytes(total)}) …`)
+
+    const created = await api.putFiles(parent, files, (fraction) =>
+      this.say(`uploading ${what} — ${Math.floor(fraction * 100)}%`),
+    )
+    this.query = ''
+    this.globalSearch = false
+    await this.refresh(created[0]?.id)
+    this.say(created.length === 1 ? `uploaded ${this.here}/${created[0].slug}` : `uploaded ${created.length} files`)
   }
 
   async upload(files: File[]): Promise<MediaFile[]> {

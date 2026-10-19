@@ -1,4 +1,4 @@
-import { api, type BackupStatus } from './api'
+import { api, isContainer, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
 import { formatDay, parseDay, parseDue, type ScrollAmount } from './util'
 
@@ -7,6 +7,8 @@ export type { ScrollAmount }
 /** Filled in by App.svelte so ex-commands can reach the DOM-bound bits. */
 export const hooks = {
   pickFiles: () => {},
+  /** Files for the folder being browsed, rather than for the document. */
+  pickTreeFiles: () => {},
   pickFolder: () => {},
   pickArchive: () => {},
   focusEditor: () => {},
@@ -56,7 +58,7 @@ const findFolder = (target: string) => {
   const wanted = target.toLowerCase()
   return workspace.nodes.find(
     (node) =>
-      node.kind !== 'document' && (node.slug === wanted || node.name.toLowerCase() === wanted),
+      isContainer(node) && (node.slug === wanted || node.name.toLowerCase() === wanted),
   )
 }
 
@@ -382,6 +384,9 @@ export const commands: CommandSpec[] = [
     help: 'edit the open document, or open a node by id',
     run: async (arg) => {
       const node = arg ? undefined : workspace.target
+      if (node?.kind === 'file') {
+        return workspace.say(`${node.slug} is a file — nothing to write in, :name renames it`, 'error')
+      }
       if (node && node.kind !== 'document') {
         return workspace.say(`${node.slug} is a ${node.kind} — l opens it`, 'error')
       }
@@ -455,7 +460,7 @@ export const commands: CommandSpec[] = [
       const node = workspace.open?.id === id ? workspace.open : workspace.nodes.find((n) => n.id === id)
       const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
       const what =
-        node && node.kind !== 'document'
+        node && isContainer(node)
           ? `delete the ${node.kind} ${name} and everything in it?`
           : `delete ${name}?`
       if (!(await workspace.ask(`${what} this cannot be undone.`))) return
@@ -616,8 +621,8 @@ export const commands: CommandSpec[] = [
     name: 'upload',
     aliases: ['up'],
     group: 'editing',
-    help: 'pick files to attach at the cursor',
-    run: () => hooks.pickFiles(),
+    help: 'while writing, attach files at the cursor — otherwise put files into this folder',
+    run: () => (workspace.editing ? hooks.pickFiles() : hooks.pickTreeFiles()),
   },
   {
     name: 'media',

@@ -1,6 +1,7 @@
 //! The virtual filesystem an SFTP client sees: `/<space>/<folder>/.../<doc>.md`.
 //! Directories are spaces and folders; the files that persist are documents,
-//! always `.md`. There is no on-disk mirror — every call reads or writes
+//! always `.md`. File nodes are not shown here yet: a folder holding only those
+//! lists as empty, and refuses `rmdir` because it is not. There is no on-disk mirror — every call reads or writes
 //! `nodes` directly, so a save here is a save in the browser too.
 //!
 //! A document reads as `# <title>` followed by its body, the same shape the
@@ -214,7 +215,7 @@ impl SpaceFs {
         for slug in [leaf, slugged.as_str()] {
             let row = sqlx::query(
                 "SELECT id, kind, slug, updated_at FROM nodes
-                 WHERE parent_id IS ?1 AND slug = ?2 AND kind <> 'document'",
+                 WHERE parent_id IS ?1 AND slug = ?2 AND kind IN ('space', 'folder')",
             )
             .bind(parent)
             .bind(slug)
@@ -383,7 +384,7 @@ impl SpaceFs {
         let parent = self.resolve_dir(&segs).await?;
         let rows = sqlx::query(&format!(
             "SELECT kind, slug, updated_at, {DOC_SIZE} AS size FROM nodes
-             WHERE parent_id IS ?1 ORDER BY kind, slug"
+             WHERE parent_id IS ?1 AND kind <> 'file' ORDER BY kind, slug"
         ))
         .bind(parent)
         .fetch_all(&self.db)

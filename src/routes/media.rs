@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
+    routes::nodes,
     state::AppState,
 };
 
@@ -211,6 +212,109 @@ pub async fn upload(
     }
     state.backup.signal();
     Ok(Json(uploaded))
+}
+
+/// `POST /api/nodes/{id}/files` — every file in the body becomes a file node
+/// in that space or folder, under the name it was uploaded with.
+pub async fn upload_into(
+    _: Session,
+    State(state): State<AppState>,
+    Path(parent): Path<i64>,
+    mut multipart: Multipart,
+) -> AppResult<Json<Vec<nodes::Node>>> {
+    nodes::container(&state.db, parent).await?;
+
+    let mut created = Vec::new();
+    let mut budget = state.config.max_upload_bytes as u64;
+
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("malformed upload: {e}")))?
+    {
+        // A browser sends a bare name; anything path-shaped is cut to its last
+        // segment, because the folder is the one in the URL.
+        let filename = field
+            .file_name()
+            .map(|name| name.rsplit(['/', '\\']).next().unwrap_or(name).trim().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "upload".to_string());
+        let mime = mime_of(&filename, field.content_type());
+
+        let id = Uuid::new_v4().to_string();
+        let size = store_field(&state, &mut field, &id, &mut budget).await?;
+        if size == 0 {
+            continue;
+        }
+
+        match insert_file(&state.db, parent, &id, &filename, &mime, size).await {
+            Ok(node) => created.push(node),
+            Err(e) => {
+                let _ = tokio::fs::remove_file(state.config.uploads_dir().join(&id)).await;
+                return Err(e);
+            }
+        }
+    }
+
+    if created.is_empty() {
+        return Err(AppError::BadRequest("no files in upload".into()));
+    }
+    state.backup.signal();
+
+    let mut out = Vec::with_capacity(created.len());
+    for id in created {
+        out.push(nodes::load(&state, id).await?);
+    }
+    Ok(Json(out))
+}
+
+/// The media row and the file node that owns it, in one transaction so the
+/// tree never shows a file whose bytes it does not know about.
+async fn insert_file(
+    db: &SqlitePool,
+    parent: i64,
+    media_id: &str,
+    filename: &str,
+    mime: &str,
+    size: u64,
+) -> AppResult<i64> {
+    let slug = nodes::unique_slug(db, Some(parent), &nodes::slugify(filename), None).await?;
+    let now = crate::now();
+    let mut tx = db.begin().await?;
+
+    sqlx::query(
+        "INSERT INTO media (id, filename, mime, size, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(media_id)
+    .bind(filename)
+    .bind(mime)
+    .bind(size as i64)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    let id: i64 = sqlx::query(
+        "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
+         VALUES (?1, 'file', ?2, ?3, ?4, ?4, ?5)
+         RETURNING id",
+    )
+    .bind(parent)
+    .bind(filename)
+    .bind(&slug)
+    .bind(now)
+    .bind(media_id)
+    .fetch_one(&mut *tx)
+    .await?
+    .get("id");
+
+    sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
+        .bind(id)
+        .bind(media_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(id)
 }
 
 pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<Media>>> {

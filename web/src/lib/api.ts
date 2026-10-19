@@ -1,5 +1,16 @@
-/** What a node is: a top-level space, a folder inside one, or a document. */
-export type NodeKind = 'space' | 'folder' | 'document'
+/** What a node is: a top-level space, a folder inside one, a document, or a file. */
+export type NodeKind = 'space' | 'folder' | 'document' | 'file'
+
+/** Whether a node can hold other nodes — the ones `l` walks into. */
+export const isContainer = (node: { kind: NodeKind }) => node.kind === 'space' || node.kind === 'folder'
+
+/** The bytes behind a file node. */
+export interface FileInfo {
+  media_id: string
+  mime: string
+  size: number
+  url: string
+}
 
 export interface NodeSummary {
   id: number
@@ -15,6 +26,8 @@ export interface NodeSummary {
   updated_at: number
   shared: boolean
   share_token: string | null
+  /** Files only. */
+  file: FileInfo | null
 }
 
 /** One step of a node's path, the space first and the node itself last. */
@@ -267,6 +280,28 @@ export const api = {
     request<Card>(`/cards/${id}/move`, { method: 'POST', body: body({ list_id, position }) }),
 
   listMedia: () => request<MediaFile[]>('/media'),
+
+  /**
+   * Upload files into a space or folder as file nodes. XHR rather than fetch,
+   * because a gigabyte going up needs to say how far along it is.
+   */
+  putFiles: (parentId: number, files: File[], progress?: (fraction: number) => void) =>
+    new Promise<WorkspaceNode[]>((resolve, reject) => {
+      const form = new FormData()
+      for (const file of files) form.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `/api/nodes/${parentId}/files`)
+      xhr.responseType = 'json'
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) progress?.(event.loaded / event.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response as WorkspaceNode[])
+        else reject(new ApiError(xhr.status, xhr.response?.error ?? xhr.statusText))
+      }
+      xhr.onerror = () => reject(new ApiError(0, 'the upload did not reach the server'))
+      xhr.send(form)
+    }),
 
   upload: (files: File[]) => {
     const form = new FormData()

@@ -10,6 +10,8 @@ one binary. It was called `narl-diary` until it grew everything but the diary.
 - Import a folder — or a zip of one — as a tree of documents, links and all.
 - A kanban board per space, so what is open at work is not mixed up with uni.
 - Drag, drop or paste images, video and audio straight into an entry.
+- Files of any kind — PDFs, archives, recordings — live in the tree beside the
+  notes about them, streamed to disk however large.
 - Share any document behind an unguessable link — revocable at any time.
 - Backs itself up to Proton Drive, end-to-end encrypted, as a registered device.
 - Mails you — a reminder when the diary is empty, due cards, a weekly digest.
@@ -84,7 +86,8 @@ mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
-(`:import!` takes a `.zip` instead). `:name <text>` renames whatever is under
+(`:import!` takes a `.zip` instead). `:upload` outside the editor puts files
+into the folder being browsed, and so does dropping them on the list. `:name <text>` renames whatever is under
 the cursor — a document, a folder, or a card on a board — and `:name!` renames
 the space itself. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
@@ -152,15 +155,31 @@ says so — `:e!` throws it away, the way vim handles a swap file.
 
 `:export` downloads the open document as markdown. `:export!` downloads the
 whole workspace as a zip: the tree as real directories, one markdown file per
-document, every embedded file under its real name, and relative links between
-them, so the archive reads in any markdown viewer without this application.
+document, every file in the tree where it sits and every other embedded file in
+`media/`, under their real names, and relative links between them, so the
+archive reads in any markdown viewer without this application.
+
+## Files
+
+A file is a node like a document, only with bytes instead of text: it sits in
+a folder, shows its size in the list, and `Enter` opens it — images, video,
+audio and plain text are shown in place, anything else is a download. `:name`
+renames it, and the download is called whatever it is called now; `:mv`, `m`
+and `p` move it; `x` deletes it. `:upload` picks files for the folder being
+browsed, or drop them onto the list. Each upload is written to disk as it
+arrives, never held in memory, so the only ceiling is `WORKSPACE_MAX_UPLOAD_MB`
+(1024 by default) — which is per request, so a proxy in front needs a body
+limit at least that large too.
+
+The SFTP mount does not show files yet; a folder that holds only files lists
+as empty there.
 
 ## Importing a folder
 
 `:import` picks a folder and uploads it whole — every file carries the path it
 had inside, and the tree is rebuilt on the other side: directories become
 folders, `.md` and `.markdown` files become documents (titled by their first
-heading), anything else becomes an attached file. `:import!` does the same with
+heading), anything else becomes a file in the tree. `:import!` does the same with
 a zip, which is the shape `:export!` writes, so a workspace can be poured back
 into another one.
 

@@ -98,7 +98,8 @@ a:focus-visible { background: var(--light); color: var(--ink); text-decoration: 
  * A button rests as a hairline and a label. Hover lifts it a step and lights
  * the label; only focus inverts — the NieR cursor, light fill and ink text.
  */
-button {
+/* `a.button` is a link that has to look like one: open, download. */
+button, a.button {
   font: inherit;
   font-size: 11px;
   letter-spacing: 0.12em;
@@ -114,9 +115,10 @@ button {
     color var(--t-base) var(--ease-glide),
     border-color var(--t-base) var(--ease-glide);
 }
-button:hover { background: var(--surface-alt); color: var(--light); border-color: var(--outline); }
-button:active { transform: translateY(1px); }
-button:focus-visible { background: var(--light); color: var(--ink); border-color: var(--light); outline: none; }
+a.button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+:is(button, a.button):hover { background: var(--surface-alt); color: var(--light); border-color: var(--outline); }
+:is(button, a.button):active { transform: translateY(1px); }
+:is(button, a.button):focus-visible { background: var(--light); color: var(--ink); border-color: var(--light); outline: none; }
 button:disabled { color: var(--muted); cursor: default; }
 
 input, textarea {

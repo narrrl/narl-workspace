@@ -4,7 +4,7 @@
 //! `docs/`, a folder of lecture notes, an export of this very diary. Storing it
 //! as opaque files would make it unsearchable and uneditable, so the importer
 //! reproduces the directory as nodes: directories become folders, markdown
-//! becomes documents, everything else becomes media. The links between the
+//! becomes documents, everything else becomes a file. The links between the
 //! files are rewritten as they land, because a set of documents that can no
 //! longer reach each other is a worse copy of what was uploaded.
 
@@ -25,7 +25,7 @@ use crate::{
     error::{AppError, AppResult},
     routes::{
         media,
-        nodes::{self, next_slug, slugify, DOCUMENT, FOLDER},
+        nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER},
     },
     state::AppState,
 };
@@ -434,7 +434,7 @@ pub async fn import(
     multipart: Multipart,
 ) -> AppResult<Json<ImportReport>> {
     let target = nodes::load(&state, id).await?;
-    if target.kind == DOCUMENT {
+    if !nodes::is_container(&target.kind) {
         return Err(AppError::BadRequest(
             "a folder can only be imported into a space or a folder".into(),
         ));
@@ -597,6 +597,35 @@ async fn build(
             .execute(&mut *tx)
             .await?;
 
+            // The file sits in the tree under the name it had, and owns its
+            // bytes the way a document owns what it embeds — so deleting the
+            // folder it landed in takes it along.
+            let name = file_name(&upload.path);
+            let taken = siblings.entry(parent).or_default();
+            let slug = next_slug(taken, &slugify(name))?;
+            taken.insert(slug.clone());
+
+            let node: i64 = sqlx::query(
+                "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
+                 RETURNING id",
+            )
+            .bind(parent)
+            .bind(FILE)
+            .bind(name)
+            .bind(&slug)
+            .bind(now)
+            .bind(media_id)
+            .fetch_one(&mut *tx)
+            .await?
+            .get("id");
+
+            sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
+                .bind(node)
+                .bind(media_id)
+                .execute(&mut *tx)
+                .await?;
+
             landed.insert(
                 upload.path.clone(),
                 Landed::Media(format!("/api/media/{media_id}")),
@@ -608,7 +637,6 @@ async fn build(
     // Second pass: point the links at where things landed, and attach every
     // file a document embeds to it the way a hand-written document does.
     let mut links = 0usize;
-    let mut attached: BTreeSet<String> = BTreeSet::new();
 
     for (id, path, body) in &documents {
         let (rewritten, count) = rewrite_links(body, parent_of(path), &landed);
@@ -632,23 +660,6 @@ async fn build(
             .bind(&media_id)
             .execute(&mut *tx)
             .await?;
-            attached.insert(media_id);
-        }
-    }
-
-    // A file nobody links to still belongs to the folder it was uploaded in,
-    // or deleting that folder would leave it behind with no way back to it.
-    for upload in &uploads {
-        if let Some(Landed::Media(url)) = landed.get(&upload.path) {
-            let media_id = url.trim_start_matches("/api/media/").to_string();
-            if attached.contains(&media_id) {
-                continue;
-            }
-            sqlx::query("INSERT OR IGNORE INTO node_media (node_id, media_id) VALUES (?1, ?2)")
-                .bind(dir_ids[parent_of(&upload.path)])
-                .bind(&media_id)
-                .execute(&mut *tx)
-                .await?;
         }
     }
 

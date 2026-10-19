@@ -38,6 +38,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/nodes/{id}", delete(nodes::remove))
         .route("/nodes/{id}/move", post(nodes::move_node))
         .route("/nodes/{id}/import", post(import::import))
+        .route("/nodes/{id}/files", post(media::upload_into))
         .route("/nodes/{id}/share", post(share::enable))
         .route("/nodes/{id}/share", delete(share::disable))
         .route("/media", post(media::upload).get(media::list))

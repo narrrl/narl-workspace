@@ -16,10 +16,26 @@ use crate::{
 
 /// What a node is. Spaces are the roots (`diary`, `work`, `uni`, ...), folders
 /// group things inside them to any depth, documents are the leaves that hold
-/// text. One table, one recursion, so a space can nest exactly like a folder.
+/// text and files the leaves that hold anything else. One table, one recursion,
+/// so a space can nest exactly like a folder.
 pub const SPACE: &str = "space";
 pub const FOLDER: &str = "folder";
 pub const DOCUMENT: &str = "document";
+pub const FILE: &str = "file";
+
+/// Whether a node of this kind can hold other nodes.
+pub fn is_container(kind: &str) -> bool {
+    kind == SPACE || kind == FOLDER
+}
+
+/// The bytes behind a file node, as the client needs them to show or fetch it.
+#[derive(Serialize)]
+pub struct FileInfo {
+    pub media_id: String,
+    pub mime: String,
+    pub size: i64,
+    pub url: String,
+}
 
 #[derive(Serialize)]
 pub struct NodeSummary {
@@ -36,6 +52,8 @@ pub struct NodeSummary {
     pub updated_at: i64,
     pub shared: bool,
     pub share_token: Option<String>,
+    /// Files only.
+    pub file: Option<FileInfo>,
 }
 
 #[derive(Serialize)]
@@ -56,6 +74,7 @@ pub struct Node {
     pub updated_at: i64,
     pub shared: bool,
     pub share_token: Option<String>,
+    pub file: Option<FileInfo>,
     /// This node's ancestors, the space first and the node itself last — the
     /// breadcrumb, and everything needed to build its /n/... path.
     pub path: Vec<Crumb>,
@@ -136,8 +155,10 @@ const EXCERPT_CHARS: usize = 180;
 
 /// The columns every list query selects, so a row always converts the same way.
 const SUMMARY_COLUMNS: &str = "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board,
-     n.created_at, n.updated_at, n.share_token,
-     (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count";
+     n.created_at, n.updated_at, n.share_token, n.media_id,
+     (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count,
+     (SELECT m.mime FROM media m WHERE m.id = n.media_id) AS file_mime,
+     (SELECT m.size FROM media m WHERE m.id = n.media_id) AS file_size";
 
 /// A short, plain-ish preview of the body for the list pane. `head` is only the
 /// leading `HEAD_CHARS` of the document, so truncation is inferred from its
@@ -258,6 +279,14 @@ pub async fn unique_slug(
 
 fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
     let share_token: Option<String> = row.get("share_token");
+    let file = row
+        .get::<Option<String>, _>("media_id")
+        .map(|media_id| FileInfo {
+            url: format!("/api/media/{media_id}"),
+            media_id,
+            mime: row.get::<Option<String>, _>("file_mime").unwrap_or_default(),
+            size: row.get::<Option<i64>, _>("file_size").unwrap_or_default(),
+        });
     NodeSummary {
         id: row.get("id"),
         parent_id: row.get("parent_id"),
@@ -272,6 +301,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         updated_at: row.get("updated_at"),
         shared: share_token.is_some(),
         share_token,
+        file,
     }
 }
 
@@ -492,17 +522,7 @@ pub async fn create(
         )));
     }
 
-    let parent_kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
-        .bind(input.parent_id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?
-        .get("kind");
-    if parent_kind == DOCUMENT {
-        return Err(AppError::BadRequest(
-            "a document cannot contain other nodes".into(),
-        ));
-    }
+    container(&state.db, input.parent_id).await?;
 
     let now = crate::now();
     let created_at = input.created_at.unwrap_or(now);
@@ -565,6 +585,17 @@ pub async fn update(
         return Err(AppError::BadRequest("only a space has a board".into()));
     }
 
+    // A file has no text, only a name, and the name is also what a download
+    // of it is called.
+    let body = if kind == FILE { "" } else { input.body.as_str() };
+    if kind == FILE {
+        sqlx::query("UPDATE media SET filename = ?1 WHERE id = (SELECT media_id FROM nodes WHERE id = ?2)")
+            .bind(name)
+            .bind(id)
+            .execute(&state.db)
+            .await?;
+    }
+
     let affected = sqlx::query(
         "UPDATE nodes
          SET name = ?1, body = ?2, slug = ?3, updated_at = ?4,
@@ -573,7 +604,7 @@ pub async fn update(
          WHERE id = ?7",
     )
     .bind(name)
-    .bind(&input.body)
+    .bind(body)
     .bind(&slug)
     .bind(crate::now())
     .bind(input.created_at)
@@ -587,7 +618,9 @@ pub async fn update(
         return Err(AppError::NotFound);
     }
 
-    media::link_to_node(&state.db, id, &input.body).await?;
+    if kind != FILE {
+        media::link_to_node(&state.db, id, body).await?;
+    }
     state.backup.signal();
     load(&state, id).await.map(Json)
 }
@@ -635,17 +668,7 @@ pub async fn move_node(
         return Err(AppError::BadRequest("a node cannot contain itself".into()));
     }
 
-    let target_kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
-        .bind(input.parent_id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?
-        .get("kind");
-    if target_kind == DOCUMENT {
-        return Err(AppError::BadRequest(
-            "a document cannot contain other nodes".into(),
-        ));
-    }
+    container(&state.db, input.parent_id).await?;
 
     // Moving a folder into its own subtree would cut that subtree loose from
     // every root, where nothing could reach it again.
@@ -686,6 +709,22 @@ pub async fn move_node(
 
     state.backup.signal();
     load(&state, id).await.map(Json)
+}
+
+/// Refuse anything but a space or a folder as the place a node goes into.
+pub async fn container(db: &SqlitePool, id: i64) -> AppResult<()> {
+    let kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(db)
+        .await?
+        .ok_or(AppError::NotFound)?
+        .get("kind");
+    if !is_container(&kind) {
+        return Err(AppError::BadRequest(format!(
+            "a {kind} cannot contain other nodes"
+        )));
+    }
+    Ok(())
 }
 
 /// A node and everything beneath it, the node itself first.
@@ -758,6 +797,7 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         updated_at: summary.updated_at,
         shared: summary.shared,
         share_token: summary.share_token,
+        file: summary.file,
         path: path_of(&state.db, id).await?,
     })
 }
@@ -814,6 +854,100 @@ mod tests {
             .map(|n| n.slug)
             .collect();
         assert_eq!(slugs, ["b", "c"]);
+    }
+
+    /// 0010 widens a CHECK by editing the stored schema. Every connection —
+    /// not just the one that ran it — has to accept a file node afterwards,
+    /// the database has to stay intact, and a file an old import hung on a
+    /// folder has to come out as a file node in that folder.
+    #[tokio::test]
+    async fn files_join_the_tree_on_a_database_that_predates_them() {
+        use sqlx::{sqlite::SqliteConnectOptions, Connection, Executor};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(dir.path().join("t.db"))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .expect("a database");
+
+        let mut before = sqlx::migrate!("./migrations");
+        before.migrations = before.migrations.iter().filter(|m| m.version < 10).cloned().collect();
+        before.run(&db).await.expect("migrations up to 0009");
+
+        let folder: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
+             VALUES ((SELECT id FROM nodes WHERE slug = 'uni'), 'folder', 'algo', 'algo', 1, 1)
+             RETURNING id",
+        )
+        .fetch_one(&db)
+        .await
+        .expect("a folder");
+        db.execute(
+            "INSERT INTO media (id, filename, mime, size, created_at)
+             VALUES ('0a1b2c3d-0000-0000-0000-000000000000', 'slides.pdf', 'application/pdf', 3, 1)",
+        )
+        .await
+        .expect("media");
+        sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, '0a1b2c3d-0000-0000-0000-000000000000')")
+            .bind(folder)
+            .execute(&db)
+            .await
+            .expect("hung on the folder");
+
+        // Opened before the migration, so it holds the schema as it was.
+        let mut stale = db.acquire().await.expect("a second connection");
+        stale.ping().await.expect("ping");
+
+        sqlx::migrate!("./migrations").run(&db).await.expect("0010 applies");
+
+        let (name, slug, owned): (String, String, i64) = sqlx::query_as(
+            "SELECT n.name, n.slug, (SELECT COUNT(*) FROM node_media nm WHERE nm.node_id = n.id)
+             FROM nodes n WHERE n.kind = 'file' AND n.parent_id = ?1",
+        )
+        .bind(folder)
+        .fetch_one(&db)
+        .await
+        .expect("the adopted file");
+        assert_eq!((name.as_str(), slug.as_str(), owned), ("slides.pdf", "file-0a1b2c3d", 1));
+        let on_folder: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM node_media WHERE node_id = ?1")
+            .bind(folder)
+            .fetch_one(&db)
+            .await
+            .expect("count");
+        assert_eq!(on_folder, 0);
+
+        db.execute("INSERT INTO media (id, filename, mime, size, created_at) VALUES ('m2', 'b.zip', 'application/octet-stream', 1, 1)")
+            .await
+            .expect("media");
+        sqlx::query(
+            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
+             VALUES (?1, 'file', 'b.zip', 'b-zip', 1, 1, 'm2')",
+        )
+        .bind(folder)
+        .execute(&mut *stale)
+        .await
+        .expect("the stale connection accepts a file node");
+
+        // A file without bytes, or bytes on a document, is refused.
+        assert!(sqlx::query(
+            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
+             VALUES (?1, 'file', 'x', 'x', 1, 1)",
+        )
+        .bind(folder)
+        .execute(&db)
+        .await
+        .is_err());
+
+        let check: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&db).await.expect("check");
+        assert_eq!(check, "ok");
+        let dangling = sqlx::query("PRAGMA foreign_key_check").fetch_all(&db).await.expect("fk check");
+        assert!(dangling.is_empty());
     }
 
     #[test]

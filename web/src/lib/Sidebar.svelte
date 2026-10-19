@@ -1,9 +1,11 @@
 <script lang="ts">
-  import type { NodeSummary } from './api'
+  import { isContainer, type NodeSummary } from './api'
   import { workspace } from './store.svelte'
-  import { formatDay, formatTime, formatWeekday } from './util'
+  import { formatBytes, formatDay, formatTime, formatWeekday } from './util'
 
   let list = $state<HTMLUListElement>()
+  /** Files are being dragged over the list, which takes them into this folder. */
+  let dropping = $state(false)
 
   // Keep the cursor line visible while navigating with j/k.
   $effect(() => {
@@ -16,9 +18,23 @@
     return node.name.trim() || node.excerpt.trim() || node.slug
   }
 
-  /* A folder is listed by what is in it; a document by when it was written. */
+  /* A folder is listed by what is in it, a document by when it was written, a file by its size. */
   const aside = (node: NodeSummary) =>
-    node.kind === 'document' ? formatTime(node.created_at) : `${node.child_count}`
+    node.file
+      ? formatBytes(node.file.size)
+      : node.kind === 'document'
+        ? formatTime(node.created_at)
+        : `${node.child_count}`
+
+  const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false
+
+  function drop(event: DragEvent) {
+    dropping = false
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (files.length === 0 || workspace.query) return
+    event.preventDefault()
+    void workspace.guard(() => workspace.putFiles(files))
+  }
 
   function pick(index: number) {
     workspace.cursor = index
@@ -26,7 +42,20 @@
   }
 </script>
 
-<div class="sidebar">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="sidebar"
+  class:dropping
+  ondragover={(event) => {
+    if (!carriesFiles(event) || workspace.query) return
+    event.preventDefault()
+    dropping = true
+  }}
+  ondragleave={(event) => {
+    if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) dropping = false
+  }}
+  ondrop={drop}
+>
   <div class="head label rule">
     <span class="marker"></span>
     <span class="name">{workspace.space?.slug ?? 'diary'}</span>
@@ -60,7 +89,7 @@
           onclick={() => pick(index)}
         >
           <span class="dot"></span>
-          <span class="title">{label(node)}{#if node.kind !== 'document'}<span class="slash">/</span>{/if}</span>
+          <span class="title">{label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}</span>
           {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
           <span class="aside">{aside(node)}</span>
@@ -71,7 +100,7 @@
         {#if workspace.query}
           no matches
         {:else}
-          nothing here yet — <span class="kbd">o</span> writes, <span class="kbd">⇧ O</span> makes a folder
+          nothing here yet — <span class="kbd">o</span> writes, <span class="kbd">⇧ O</span> makes a folder, files dropped here land here
         {/if}
       </li>
     {/each}
@@ -85,6 +114,9 @@
     height: 100%;
     min-width: 0;
   }
+
+  /* Files held over the list: the whole pane is the target. */
+  .sidebar.dropping { outline: 1px dashed var(--light-dim); outline-offset: -6px; }
 
   .head {
     flex: none;
