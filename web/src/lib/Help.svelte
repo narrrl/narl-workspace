@@ -14,6 +14,8 @@
     ['Ctrl-D / Ctrl-U', 'half a page down / up the open document'],
     [']] / [[', 'next / previous heading of the document — in the editor too'],
     ['gO', 'the headings as a list: j/k, Enter jumps there'],
+    ['F', 'hints over the links and buttons in view — type one to follow it'],
+    ['gf / gx', 'in the editor: follow the link under the cursor / open it in a tab'],
     ['Enter · l', 'open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password'],
     ['h', 'from the document to the list, from the list up a level'],
     ['o', 'new document here, straight into insert mode'],

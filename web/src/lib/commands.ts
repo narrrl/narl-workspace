@@ -20,6 +20,8 @@ export const hooks = {
   /* Filled in while a document is on screen and not being edited: the reading
      pane owns the scrollback, so the list keys have somewhere to send it. */
   scrollReader: (_amount: ScrollAmount): boolean => false,
+  /* `F`: what holds the links and buttons on screen, null when nothing does. */
+  hintRoot: (): HTMLElement | null => null,
   /* Filled in by the file pane: what Enter does there, false when nothing. */
   fileAction: (): boolean => false,
   /* `]]` / `[[` in whatever is being read; false when it has no headings. */
@@ -56,6 +58,20 @@ const requireOpen = () => {
     return null
   }
   return workspace.open
+}
+
+/**
+ * Where a link in a document goes. `/n/` links are the workspace's own — the
+ * importer writes them between documents — and are opened in place; anything
+ * else would take the workspace's tab with it, so it gets a tab of its own,
+ * as does a workspace link asked for with `gx`.
+ */
+export function followLink(href: string, tab = false) {
+  if (href.startsWith('/n/') && !tab) {
+    const path = href.slice(3).split('#')[0]
+    return void workspace.guard(() => workspace.openPath(decodeURIComponent(path)))
+  }
+  window.open(new URL(href, location.href).href, '_blank', 'noopener,noreferrer')
 }
 
 /** Move the cursor and follow it, so `:next` reads as well as `j` then `Enter`. */

@@ -79,6 +79,7 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
+| `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
 | `O` | a new folder here |
@@ -106,7 +107,8 @@ mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:upload`, `:media`, `:search`, `:backup` and
 `:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
 there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
-headings as they do in the reader. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
+headings as they do in the reader. `gf` follows the link under the cursor, saving
+first, and `gx` opens it in a new tab. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
 list, `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
 `:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words

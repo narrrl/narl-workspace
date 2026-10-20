@@ -19,9 +19,9 @@
   import { tags } from '@lezer/highlight'
   import { Vim, getCM, vim } from '@replit/codemirror-vim'
   import { onDestroy, onMount } from 'svelte'
-  import { commands, hooks, runCommand } from './commands'
+  import { commands, followLink, hooks, runCommand } from './commands'
   import { embedSnippet } from './markdown'
-  import { sourceHeadings } from './util'
+  import { linkAt, sourceHeadings } from './util'
   import { workspace } from './store.svelte'
 
   let host = $state<HTMLDivElement>()
@@ -179,6 +179,26 @@
     Vim.mapCommand('gO', 'action', 'workspaceOutline', {}, { context: 'normal' })
   }
 
+  /*
+   * `gf` follows the link under the cursor — a workspace link opens that
+   * document, saving this one first, anything else gets a tab — and `gx`
+   * opens it in a tab whatever it is, as vim hands it to the browser.
+   */
+  function bindLinkKeys() {
+    const follow = (tab: boolean) => {
+      if (!view) return
+      const head = view.state.selection.main.head
+      const line = view.state.doc.lineAt(head)
+      const href = linkAt(line.text, head - line.from)
+      if (!href) return workspace.say('no link under the cursor', 'error')
+      followLink(href, tab)
+    }
+    Vim.defineAction('workspaceFollowLink', () => follow(false))
+    Vim.defineAction('workspaceOpenLink', () => follow(true))
+    Vim.mapCommand('gf', 'action', 'workspaceFollowLink', {}, { context: 'normal' })
+    Vim.mapCommand('gx', 'action', 'workspaceOpenLink', {}, { context: 'normal' })
+  }
+
   /**
    * Media goes on its own line after the one the cursor is on, so attaching a
    * file never cuts a sentence in half.
@@ -209,6 +229,7 @@
     bridgeExCommands()
     bindHelpKey()
     bindHeadingKeys()
+    bindLinkKeys()
     mirrorUnnamedRegisterToClipboard()
 
     const extensions = [

@@ -9,6 +9,7 @@
   import FilePane from './lib/FilePane.svelte'
   import Headings from './lib/Headings.svelte'
   import Help from './lib/Help.svelte'
+  import Hints from './lib/Hints.svelte'
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
@@ -44,6 +45,8 @@
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
   let pending = $state('')
+  /** `F`: the pane whose links and buttons are wearing hints right now. */
+  let hintRoot = $state<HTMLElement | null>(null)
 
   if (!shareToken) void workspace.boot()
 
@@ -625,6 +628,14 @@
         if (workspace.open && workspace.selected?.id === workspace.open.id) focusPane('document')
         else void workspace.guard(() => workspace.openSelected())
         break
+      case 'F': {
+        // `f` already fills the screen, so the hints vimium puts on `f` live
+        // on its other key.
+        event.preventDefault()
+        const root = reading ? hooks.hintRoot() : null
+        if (root) hintRoot = root
+        break
+      }
       case 'm':
         // Pick nodes up here, walk to a folder, put them down with `p`.
         event.preventDefault()
@@ -808,6 +819,10 @@
 
     <Prompt />
     <SecretPrompt />
+
+    {#if hintRoot}
+      <Hints root={hintRoot} close={() => (hintRoot = null)} />
+    {/if}
 
     {#if workspace.overlay !== 'none'}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->

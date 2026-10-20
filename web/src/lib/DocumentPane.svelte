@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { hooks, runCommand, type ScrollAmount } from './commands'
+  import { followLink, hooks, runCommand, type ScrollAmount } from './commands'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
   import { workspace } from './store.svelte'
@@ -74,11 +74,15 @@
     if (!scroller || !root) return
     const jump = (direction: 1 | -1) => jumpHeading(scroller, headingsIn(root), direction)
     const list = () => readerHeadings(scroller, root)
+    // The outline in the margin is links too, so `F` reaches it as well.
+    const hints = () => scroller
     hooks.jumpHeading = jump
     hooks.headings = list
+    hooks.hintRoot = hints
     return () => {
       if (hooks.jumpHeading === jump) hooks.jumpHeading = () => false
       if (hooks.headings === list) hooks.headings = () => ({ headings: [], current: 0 })
+      if (hooks.hintRoot === hints) hooks.hintRoot = () => null
     }
   })
 
@@ -124,8 +128,7 @@
     const href = anchor?.getAttribute('href') ?? ''
     if (!href.startsWith('/n/')) return
     event.preventDefault()
-    const path = href.slice(3).split('#')[0]
-    void workspace.guard(() => workspace.openPath(decodeURIComponent(path)))
+    followLink(href)
   }
 </script>
 

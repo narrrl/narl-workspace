@@ -85,11 +85,14 @@
       if (locked) return void runCommand('unlock'), true
       return cert?.act() ?? false
     }
+    const hints = () => reader ?? null
     hooks.scrollReader = scroll
     hooks.fileAction = act
+    hooks.hintRoot = hints
     return () => {
       if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
       if (hooks.fileAction === act) hooks.fileAction = () => false
+      if (hooks.hintRoot === hints) hooks.hintRoot = () => null
     }
   })
 
