@@ -1,7 +1,7 @@
 <script lang="ts" module>
   import { EditorView } from '@codemirror/view'
   import { Vim, getCM, vim } from '@replit/codemirror-vim'
-  import { commands, followLink, runCommand } from './commands'
+  import { commands, cycleTile, followLink, runCommand } from './commands'
   import { linkAt, sourceHeadings } from './util'
   import { workspace as ws } from './store.svelte'
 
@@ -112,6 +112,14 @@
     Vim.mapCommand('gx', 'action', 'workspaceOpenLink', {}, { context: 'normal' })
   }
 
+  /* `gt` / `gT` walk the tiles from inside one, as they walk vim's tab pages. */
+  function bindTileKeys() {
+    Vim.defineAction('workspaceNextTile', () => void cycleTile(1))
+    Vim.defineAction('workspacePrevTile', () => void cycleTile(-1))
+    Vim.mapCommand('gt', 'action', 'workspaceNextTile', {}, { context: 'normal' })
+    Vim.mapCommand('gT', 'action', 'workspacePrevTile', {}, { context: 'normal' })
+  }
+
   function bindVim() {
     if (vimBound) return
     vimBound = true
@@ -119,6 +127,7 @@
     bindHelpKey()
     bindHeadingKeys()
     bindLinkKeys()
+    bindTileKeys()
     mirrorUnnamedRegisterToClipboard()
   }
 </script>

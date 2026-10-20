@@ -21,8 +21,18 @@ export type Pane = 'list' | 'document'
 export type View = 'tree' | 'board'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
 
-/** Where a space was left: the folder, the open document, the row, the pane. */
-type Spot = { parentId: number; openId: number | null; cursor: number; pane: Pane }
+/**
+ * Where a space was left: the folder, the open documents, the row, the pane.
+ * `openId` is the focused tile's, all a spot held before there were tiles.
+ */
+type Spot = {
+  parentId: number
+  openId: number | null
+  cursor: number
+  pane: Pane
+  open?: number[]
+  focused?: number
+}
 
 export type Draft = { name: string; body: string; created_at: number }
 
@@ -155,6 +165,78 @@ class Workspace {
   /** Every tile showing `id`. */
   tilesWith(id: number): Tile[] {
     return this.tiles.filter((tile) => tile.open?.id === id)
+  }
+
+  /**
+   * Focus a tile, and follow it in the list and the address bar, as opening
+   * its document did.
+   */
+  focusTile(index: number) {
+    const tile = this.tiles[index]
+    if (!tile) return
+    this.focused = index
+    if (!tile.open) return
+    this.pane = 'document'
+    const row = this.nodes.findIndex((n) => n.id === tile.open?.id)
+    if (row >= 0) this.cursor = row
+    this.#syncUrl(tile.open.path)
+  }
+
+  /**
+   * Tiles with nothing in them go, as long as one is left: a closed document
+   * closes its tile, as `:q` closes a window in vim.
+   */
+  prune() {
+    const current = this.tile
+    if (this.tiles.length > 1) {
+      const kept = this.tiles.filter((tile) => tile.open)
+      this.tiles = kept.length > 0 ? kept : [current]
+      const at = this.tiles.indexOf(current)
+      this.focused = at >= 0 ? at : Math.min(this.focused, this.tiles.length - 1)
+    }
+    if (!this.open) this.pane = 'list'
+  }
+
+  /** `:close`: the focused tile goes, or with only one, its document. */
+  closeTile() {
+    this.tile.clear()
+    this.prune()
+    if (this.open) this.focusTile(this.focused)
+  }
+
+  /**
+   * `L` / Shift-Enter: the row under the cursor in a tile of its own, next to
+   * what is open, rather than in its place.
+   */
+  async openBeside() {
+    const selected = this.selected
+    if (!selected) return
+    if (isContainer(selected)) return this.say(`${selected.slug} is a ${selected.kind} — l goes into it`, 'error')
+    const shown = this.tiles.findIndex((tile) => tile.open?.id === selected.id)
+    if (shown >= 0) return this.focusTile(shown)
+    if (this.open) {
+      this.tiles.push(new Tile())
+      this.focused = this.tiles.length - 1
+    }
+    try {
+      await this.openSelected()
+    } finally {
+      this.prune()
+    }
+  }
+
+  /** `:only`: every other tile goes, after their drafts are written. */
+  async onlyTile() {
+    const others = this.tiles.filter((tile) => tile !== this.tile)
+    for (const tile of others) await this.flushTile(tile)
+    const unsaved = others.filter((tile) => tile.dirty)
+    if (unsaved.length > 0) {
+      const names = unsaved.map((tile) => tile.open?.slug).join(', ')
+      if (!(await this.ask(`${names} could not be written — close anyway? the drafts stay in this browser`))) return
+    }
+    for (const tile of others) tile.stopAutosave()
+    this.tiles = [this.tile]
+    this.focused = 0
   }
 
   /** The board of the current space, loaded only while it is being looked at. */
@@ -517,7 +599,7 @@ class Workspace {
     if (tile.draft.name.trim() || tile.draft.body.trim()) return false
     tile.clear()
     this.dropStash(open.id)
-    if (tile === this.tile) this.pane = 'list'
+    this.prune()
     try {
       await api.deleteNode(open.id)
     } catch {
@@ -580,6 +662,7 @@ class Workspace {
     this.spaces = []
     this.nodes = []
     for (const tile of this.tiles) tile.clear()
+    this.prune()
   }
 
   /*
@@ -633,11 +716,14 @@ class Workspace {
 
   #rememberSpot() {
     if (this.spaceId === null || this.parentId === null) return
+    const open = this.tiles.flatMap((tile) => (tile.open ? [tile.open.id] : []))
     this.#spots[this.spaceId] = {
       parentId: this.parentId,
       openId: this.open?.id ?? null,
       cursor: this.cursor,
       pane: this.pane,
+      open,
+      focused: Math.max(open.indexOf(this.open?.id ?? -1), 0),
     }
     localStorage.setItem('diary:spots', JSON.stringify(this.#spots))
   }
@@ -650,8 +736,10 @@ class Workspace {
       const from = this.spaces.findIndex((s) => s.id === this.spaceId)
       const to = this.spaces.findIndex((s) => s.id === id)
       this.switchDirection = to >= from ? 1 : -1
-      this.tile.clear()
-      this.returnTo = null
+      // Each space has tiles of its own; these come back with this one.
+      for (const tile of this.tiles) tile.stopAutosave()
+      this.tiles = [new Tile()]
+      this.focused = 0
       this.pane = 'list'
     }
     this.spaceId = id
@@ -668,9 +756,24 @@ class Workspace {
       await this.goTo(id)
     }
     if (spot && this.parentId === spot.parentId) {
-      if (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId)) {
-        // Reopened under the board, if that is what is on screen.
-        await this.openNode(spot.openId, false, true)
+      const ids = spot.open ?? (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId) ? [spot.openId] : [])
+      let opened = 0
+      for (const open of ids) {
+        if (opened > 0) {
+          this.tiles.push(new Tile())
+          this.focused = this.tiles.length - 1
+        }
+        try {
+          // Reopened under the board, if that is what is on screen.
+          await this.openNode(open, false, true)
+          opened++
+        } catch {
+          /* deleted or moved away since: one tile fewer */
+        }
+      }
+      this.prune()
+      if (opened > 0) {
+        this.focusTile(Math.min(spot.focused ?? 0, this.tiles.length - 1))
         this.pane = spot.pane
       } else {
         this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
@@ -770,6 +873,14 @@ class Workspace {
     }
     if (isContainer(node)) {
       await this.goTo(node.id)
+      return
+    }
+    // A document already open in another tile is gone to, not opened twice:
+    // two drafts of one document would only overwrite each other.
+    const shown = this.tiles.findIndex((tile) => tile !== this.tile && tile.open?.id === id)
+    if (shown >= 0) {
+      this.focusTile(shown)
+      if (edit && node.kind === 'document') this.editing = true
       return
     }
 
@@ -889,7 +1000,7 @@ class Workspace {
     const node = showing[0]?.open ?? this.nodes.find((n) => n.id === id)
     const { removed } = await api.deleteNode(id)
     for (const tile of showing) tile.clear()
-    if (showing.includes(this.tile)) this.pane = 'list'
+    this.prune()
     this.marked = this.marked.filter((n) => n.id !== id)
     await this.refresh()
     const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
@@ -928,6 +1039,7 @@ class Workspace {
   async deleteSpace(id: number) {
     const { removed } = await api.deleteNode(id)
     for (const tile of this.tiles) tile.clear()
+    this.prune()
     this.rawBoard = null
     this.view = 'tree'
     this.spaces = await api.listSpaces()
@@ -966,7 +1078,7 @@ class Workspace {
       await this.flushTile(tile)
       tile.clear()
     }
-    if (leaving.includes(this.tile)) this.pane = 'list'
+    this.prune()
     const { moved, unchanged } = await api.moveNodes(
       nodes.map((n) => n.id),
       parent,
@@ -1310,15 +1422,22 @@ class Workspace {
     this.view = 'tree'
     if (this.parentId !== space) await this.goTo(space)
     else await this.refresh()
+    // The notes open beside whatever was being read, and `q` takes their
+    // tile away again on the way back to the board.
+    if (this.open && this.open.id !== nodeId) {
+      this.tiles.push(new Tile())
+      this.focused = this.tiles.length - 1
+    }
     await this.openNode(nodeId, card.node_id === null)
+    this.prune()
     if (card.node_id === null) this.enterInsert = true
     this.returnTo = 'board'
   }
 
   /** Back to the board a card's document was opened from. */
   async returnToBoard() {
-    this.tile.clear()
     this.returnTo = null
+    this.closeTile()
     this.pane = 'list'
     await this.reloadBoard()
     this.view = 'board'

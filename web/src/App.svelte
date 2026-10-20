@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { followLink, hooks, runCommand } from './lib/commands'
+  import { cycleTile, focusTile, followLink, hooks, runCommand } from './lib/commands'
   import { embedSnippet } from './lib/markdown'
   import Agenda from './lib/Agenda.svelte'
   import Bar from './lib/Bar.svelte'
@@ -22,6 +22,7 @@
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import { workspace } from './lib/store.svelte'
+  import { dwindle, neighbour, type Direction } from './lib/util'
 
   /*
    * A share link is /s/<token>#<key>. The fragment never leaves the browser, so
@@ -50,6 +51,15 @@
   let hintRoot = $state<HTMLElement | null>(null)
 
   if (!shareToken) void workspace.boot()
+
+  /* Where each tile sits, in the order of `workspace.tiles`. */
+  const layout = $derived(dwindle(workspace.tiles.length))
+  /*
+   * The tiles are drawn in the order they were made, whatever order they are
+   * in now, so moving one never moves its element — which would cost it its
+   * scroll position, and a PDF its page.
+   */
+  const drawn = $derived([...workspace.tiles].sort((a, b) => a.id - b.id))
 
   $effect(() => {
     folderInput?.setAttribute('webkitdirectory', '')
@@ -202,7 +212,7 @@
   const offers: [string[], string][] = [
     [['o'], 'write a new document'],
     [['⇧ O'], 'make a folder'],
-    [['j', 'k'], 'browse, l opens'],
+    [['j', 'k'], 'browse, l opens, L opens beside'],
     [['1…9'], 'switch space, Tab cycles'],
     [['w'], 'overview of every space'],
     [['b'], "this space's board"],
@@ -379,6 +389,28 @@
     followLink(file.url, true)
   }
 
+  /*
+   * Alt + h/j/k/l: the focus goes to the tile that way, out of the editor
+   * too; left of the leftmost tile is the list. With Shift the focused tile
+   * goes that way instead, swapping places with the one it lands on.
+   */
+  function tileKey(direction: Direction, shift: boolean) {
+    if (workspace.pane === 'list' || !workspace.open) {
+      if (direction === 'l' && !shift) focusPane('document')
+      return
+    }
+    const next = neighbour(layout, workspace.focused, direction)
+    if (next < 0) {
+      if (direction === 'h' && !shift) focusPane('list')
+      return
+    }
+    if (!shift) return void focusTile(next)
+    const tiles = [...workspace.tiles]
+    ;[tiles[workspace.focused], tiles[next]] = [tiles[next], tiles[workspace.focused]]
+    workspace.tiles = tiles
+    workspace.focused = next
+  }
+
   /** Alt+h / Alt+l: focus moves between the panes, out of the editor too. */
   function focusPane(pane: 'list' | 'document') {
     if (pane === 'document' && !workspace.open) return
@@ -480,9 +512,17 @@
       return
     }
 
-    if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === 'h' || event.key === 'l')) {
+    // `event.code`, so Alt-Shift-h is the same key on every layout, and on a
+    // Mac, where Alt turns h into ˙.
+    const alt = event.altKey && !event.ctrlKey && !event.metaKey ? /^Key([HJKLQ])$/.exec(event.code)?.[1].toLowerCase() : undefined
+    if (alt === 'q' && !event.shiftKey) {
       event.preventDefault()
-      focusPane(event.key === 'h' ? 'list' : 'document')
+      void runCommand('close')
+      return
+    }
+    if (alt && alt !== 'q') {
+      event.preventDefault()
+      tileKey(alt as Direction, event.shiftKey)
       return
     }
 
@@ -574,6 +614,13 @@
       event.preventDefault()
       return
     }
+    // `gt` / `gT` walk the tiles, as they walk vim's tab pages — before `t`
+    // and `T` on their own are taken for the agenda and today's entry.
+    if (previous === 'g' && (key === 't' || key === 'T') && workspace.view !== 'board') {
+      event.preventDefault()
+      void cycleTile(key === 't' ? 1 : -1)
+      return
+    }
     if (key === 'f') {
       event.preventDefault()
       workspace.fullscreen = !workspace.fullscreen
@@ -647,6 +694,7 @@
       openInTab()
       return
     }
+
     if (previous === 'd' && key === 'd') {
       event.preventDefault()
       void runCommand('d')
@@ -683,11 +731,22 @@
         break
       case 'Enter':
       case 'l':
-      case 'ArrowRight':
+      case 'ArrowRight': {
         event.preventDefault()
         if (key === 'Enter' && reading && hooks.fileAction()) break
-        if (workspace.open && workspace.selected?.id === workspace.open.id) focusPane('document')
+        // Shift-Enter, like `L`: beside what is open, in a tile of its own.
+        if (key === 'Enter' && event.shiftKey && !reading) {
+          void workspace.guard(() => workspace.openBeside())
+          break
+        }
+        const shown = workspace.tiles.findIndex((tile) => tile.open && tile.open.id === workspace.selected?.id)
+        if (shown >= 0) void focusTile(shown)
         else void workspace.guard(() => workspace.openSelected())
+        break
+      }
+      case 'L':
+        event.preventDefault()
+        if (!reading) void workspace.guard(() => workspace.openBeside())
         break
       case 'F': {
         // `f` already fills the screen, so the hints vimium puts on `f` live
@@ -833,7 +892,7 @@
       {:else}
         <div
           class="panes switch"
-          class:reading={!!workspace.open}
+          class:reading={workspace.tiles.some((tile) => tile.open)}
           class:full={workspace.fullscreen}
           class:focus-doc={!!workspace.open && workspace.pane === 'document'}
           style="--dir: {workspace.switchDirection}"
@@ -844,31 +903,40 @@
             class:focused={!workspace.open || workspace.pane === 'list'}
             onpointerdown={() => (workspace.pane = 'list')}
           ><Sidebar /></div>
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            class="window entry"
-            class:focused={!!workspace.open && workspace.pane === 'document'}
-            onpointerdown={() => workspace.open && (workspace.pane = 'document')}
-          >
-            {#if workspace.open?.kind === 'file'}
-              <FilePane tile={workspace.tile} />
-            {:else if workspace.open}
-              <DocumentPane tile={workspace.tile} />
-            {:else}
-              <div class="placeholder">
-                <div class="standby resolve">
-                  <h2 class="label rule">nothing open</h2>
-                  <dl>
-                    {#each offers as [keys, what] (what)}
-                      <dt>{#each keys as key (key)}<span class="kbd">{key}</span>{/each}</dt>
-                      <dd>{what}</dd>
-                    {/each}
-                    <dt>status</dt>
-                    <dd class="light">standing by<span class="cursor">_</span></dd>
-                  </dl>
-                </div>
+          <div class="tiles" class:only={workspace.tiles.length === 1}>
+            {#each drawn as tile (tile.id)}
+              {@const index = workspace.tiles.indexOf(tile)}
+              {@const rect = layout[index]}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="window entry"
+                class:current={index === workspace.focused}
+                class:focused={!!tile.open && index === workspace.focused && workspace.pane === 'document'}
+                style="--x: {rect.x}; --y: {rect.y}; --w: {rect.w}; --h: {rect.h}"
+                onpointerdown={() => tile.open && workspace.focusTile(index)}
+                onfocusin={() => tile.open && index !== workspace.focused && workspace.focusTile(index)}
+              >
+                {#if tile.open?.kind === 'file'}
+                  <FilePane {tile} />
+                {:else if tile.open}
+                  <DocumentPane {tile} />
+                {:else}
+                  <div class="placeholder">
+                    <div class="standby resolve">
+                      <h2 class="label rule">nothing open</h2>
+                      <dl>
+                        {#each offers as [keys, what] (what)}
+                          <dt>{#each keys as key (key)}<span class="kbd">{key}</span>{/each}</dt>
+                          <dd>{what}</dd>
+                        {/each}
+                        <dt>status</dt>
+                        <dd class="light">standing by<span class="cursor">_</span></dd>
+                      </dl>
+                    </div>
+                  </div>
+                {/if}
               </div>
-            {/if}
+            {/each}
           </div>
         </div>
       {/if}
@@ -924,10 +992,26 @@
   }
   .panes:not(.reading) .window.entry { border-color: transparent; background: transparent; }
 
-  /* `f`: the focused pane fills the porthole. */
+  /*
+   * The tiles share the column right of the list, each placed by the dwindle
+   * layout. Half a gap is taken off each side of a tile, and the column
+   * reaches half a gap out to make up for it at the edges.
+   */
+  .tiles { position: relative; min-width: 0; min-height: 0; margin: calc(var(--gap) / -2); }
+  .tiles > .window {
+    position: absolute;
+    left: calc(var(--x) * 100% + var(--gap) / 2);
+    top: calc(var(--y) * 100% + var(--gap) / 2);
+    width: calc(var(--w) * 100% - var(--gap));
+    height: calc(var(--h) * 100% - var(--gap));
+  }
+
+  /* `f`: the focused pane fills the porthole — the list, or one tile. */
   .panes.full { grid-template-columns: 1fr; }
-  .panes.full .window:not(.focused) { display: none; }
-  .panes.full:not(.reading) .window.entry { display: none; }
+  .panes.full.focus-doc .window.list,
+  .panes.full:not(.focus-doc) .tiles,
+  .panes.full .tiles > .window:not(.current) { display: none; }
+  .panes.full .tiles > .window.current { inset: calc(var(--gap) / 2); width: auto; height: auto; }
 
   .placeholder { display: grid; place-items: center; height: 100%; padding: 24px; }
   .standby { width: min(100%, 44ch); }
@@ -960,11 +1044,14 @@
 
   .hidden { display: none; }
 
+  /* A phone shows one window: the list, or the focused tile. */
   @media (max-width: 767px) {
     .panes { grid-template-columns: 1fr; }
-    .panes .entry { display: none; }
+    .panes .tiles { display: none; }
     .panes.reading .list { display: none; }
-    .panes.reading .entry { display: block; }
+    .panes.reading .tiles { display: block; }
+    .tiles > .window:not(.current) { display: none; }
+    .tiles > .window.current { inset: calc(var(--gap) / 2); width: auto; height: auto; }
     .overlay { padding: 12px; }
   }
 </style>

@@ -121,7 +121,7 @@
             actions(index)
           }}
           class:active={index === workspace.cursor}
-          class:open={workspace.open?.id === node.id}
+          class:open={workspace.tiles.some((tile) => tile.open?.id === node.id)}
           class:marked={workspace.isMarked(node.id)}
           data-index={index}
           onclick={(event) => click(event, index, node)}

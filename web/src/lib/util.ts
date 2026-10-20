@@ -233,3 +233,62 @@ export function linkAt(line: string, column: number): string | null {
 /** What a share link's reader will miss: a share never serves a sealed file. */
 export const sealedNote = (sealed: number) =>
   sealed > 0 ? ` — ${sealed} sealed file${sealed === 1 ? '' : 's'} in it stay hidden from readers` : ''
+
+/** Where a tile sits, as fractions of the space the tiles share. */
+export type Rect = { x: number; y: number; w: number; h: number }
+export type Direction = 'h' | 'j' | 'k' | 'l'
+
+/**
+ * Hyprland's dwindle: the first tile takes half, and each one after it takes
+ * half of what is left, side by side and then one over the other in turn.
+ */
+export function dwindle(count: number): Rect[] {
+  const rects: Rect[] = []
+  let rest: Rect = { x: 0, y: 0, w: 1, h: 1 }
+  for (let i = 0; i < count; i++) {
+    if (i === count - 1) {
+      rects.push(rest)
+    } else if (i % 2 === 0) {
+      rects.push({ ...rest, w: rest.w / 2 })
+      rest = { ...rest, x: rest.x + rest.w / 2, w: rest.w / 2 }
+    } else {
+      rects.push({ ...rest, h: rest.h / 2 })
+      rest = { ...rest, y: rest.y + rest.h / 2, h: rest.h / 2 }
+    }
+  }
+  return rects
+}
+
+/**
+ * The tile next to `from` in a direction: one that touches its side and
+ * shares some of its length, the nearest and then the most overlapping.
+ * -1 when it is at the edge.
+ */
+export function neighbour(rects: Rect[], from: number, direction: Direction): number {
+  const a = rects[from]
+  if (!a) return -1
+  const near = 1e-6
+  let best = -1
+  let bestGap = Infinity
+  let bestOverlap = 0
+  rects.forEach((b, index) => {
+    if (index === from) return
+    const across = direction === 'h' || direction === 'l'
+    const overlap = across
+      ? Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+      : Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+    if (overlap <= near) return
+    const gap =
+      direction === 'l' ? b.x - (a.x + a.w)
+      : direction === 'h' ? a.x - (b.x + b.w)
+      : direction === 'j' ? b.y - (a.y + a.h)
+      : a.y - (b.y + b.h)
+    if (gap < -near) return
+    if (gap < bestGap - near || (Math.abs(gap - bestGap) <= near && overlap > bestOverlap)) {
+      best = index
+      bestGap = gap
+      bestOverlap = overlap
+    }
+  })
+  return best
+}

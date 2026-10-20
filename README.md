@@ -72,8 +72,12 @@ it; in the document pane it is that document. In the browse pane:
 | `Shift-1` … `9` | send the marked nodes, or the selected one, to that space |
 | `Tab`, `Shift-Tab` | next / previous space |
 | `w` | overview of every space; `hjkl` then `Enter` |
-| `f` | fullscreen the focused pane |
-| `Alt-h` / `Alt-l` | focus the list / the document, from the editor too |
+| `f` | fullscreen the focused pane, or the focused tile |
+| `Alt-h/j/k/l` | focus the tile in that direction, from the editor too; `Alt-h` past the leftmost tile focuses the list |
+| `Alt-Shift-h/j/k/l` | move the focused tile that way |
+| `L`, `Shift-Enter` | open the highlighted row in a new tile instead of the focused one |
+| `gt` / `gT` | next / previous tile, in the editor too |
+| `Alt-q` | close the focused tile (`:close`); asks first if its draft could not be written |
 | `j` / `k` | move down / up, or scroll the document when it has focus |
 | `gg` / `G` | first / last entry, or top / bottom of the document; a first `g`, `d`, `]` or `[` shows in the status line for a second while it waits for the second key |
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
@@ -92,7 +96,7 @@ it; in the document pane it is that document. In the browse pane:
 | `t` | the agenda: what is late, due this week, or in hand, on every board |
 | `T` | today's diary entry, started if there is none |
 | `c` | capture a card into this space's inbox without leaving where you are |
-| `Esc`, `q` | close the document |
+| `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
@@ -112,7 +116,7 @@ there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
 headings as they do in the reader. `gf` follows the link under the cursor, saving
 first, and `gx` opens it in a new tab. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
-list, `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
+list (`:bn` and `:bp` walk the tiles), `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
 `:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words
 and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
@@ -135,6 +139,24 @@ is open. Inside a folder the list starts with `..`, the way up. The dock also
 has today's entry, an upload into the folder, a search across every space,
 and on the board the card moves, renames and deletes; the agenda has a done
 button per card.
+
+## Tiles
+
+Several documents can be open at once. `L` (or `Shift-Enter`) on a row opens
+it in a tile of its own; `Enter` and `l` still open it in the focused tile.
+Right of the list the tiles share the space the way hyprland's dwindle layout
+does: two side by side, a third splits the newer one, and so on. Each keeps
+its own scroll position and its own editor, and the keys always act on the
+focused one. Opening a document that is already in a tile focuses that tile
+rather than opening it twice.
+
+`Alt-h/j/k/l` moves the focus between tiles and `Alt-Shift-h/j/k/l` moves the
+tile itself; `gt` / `gT` and `:bn` / `:bp` cycle through them, `:ls` lists
+them, `:b <n or name>` focuses one, `:close` (`Alt-q`) closes one and `:only`
+every other. `:next` and `:prev` still walk the list. Each space remembers its
+tiles, so switching away and back finds them as they were. A card's notes
+open in a tile beside what was being read, and `q` there goes back to the
+board. Under 768px wide only the focused tile is shown.
 
 ## The SFTP mount
 

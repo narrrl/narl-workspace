@@ -1,3 +1,4 @@
+import { tick } from 'svelte'
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
 import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount } from './util'
@@ -41,7 +42,7 @@ export const hooks = {
 }
 
 /** Help groups the command list under these headings, in this order. */
-export const groups = ['tree', 'board', 'documents', 'editing', 'sharing', 'vault', 'view'] as const
+export const groups = ['tree', 'board', 'documents', 'tiles', 'editing', 'sharing', 'vault', 'view'] as const
 export type Group = (typeof groups)[number]
 
 export interface CommandSpec {
@@ -55,6 +56,12 @@ export interface CommandSpec {
   complete?: (arg: string) => string[]
   /** The forcing variant, `:name!` — vim hands the bang over as an argument. */
   bang?: { help: string; run: (arg: string) => void | Promise<void> }
+}
+
+/** Close the focused tile; the index of the one that has the focus after. */
+const closeFocused = () => {
+  workspace.closeTile()
+  return workspace.focused
 }
 
 const requireOpen = () => {
@@ -77,6 +84,33 @@ export function followLink(href: string, tab = false) {
     return void workspace.guard(() => workspace.openPath(decodeURIComponent(path)))
   }
   window.open(new URL(href, location.href).href, '_blank', 'noopener,noreferrer')
+}
+
+/**
+ * Focus a tile and hand it the keys: its editor while it is being written,
+ * otherwise the shell, whose keys then act on that tile.
+ */
+export async function focusTile(index: number) {
+  if (!workspace.tiles[index]) return
+  workspace.focusTile(index)
+  // The tile's editor fills the hooks once it has seen it has the focus.
+  await tick()
+  if (workspace.editing && workspace.pane === 'document') hooks.focusEditor()
+  else hooks.focusList()
+}
+
+/** `gt` / `gT`, `:bn` / `:bp`: the next or previous tile, round and round. */
+export function cycleTile(delta: 1 | -1) {
+  const count = workspace.tiles.length
+  if (count < 2) return workspace.say('only one tile — L on a row opens another', 'error')
+  return focusTile((workspace.focused + delta + count) % count)
+}
+
+/** `:ls`'s line for one tile: number, `%` for the focused one, `[+]` unsaved. */
+const describeTile = (index: number) => {
+  const tile = workspace.tiles[index]
+  const name = tile.open ? tile.open.name.trim() || tile.open.slug : '(empty)'
+  return `${index + 1}${index === workspace.focused ? '%' : ''} ${name}${tile.dirty ? ' [+]' : ''}`
 }
 
 /** Move the cursor and follow it, so `:next` reads as well as `j` then `Enter`. */
@@ -272,10 +306,8 @@ export const commands: CommandSpec[] = [
       }
       if (workspace.editing) workspace.editing = false
       else if (workspace.returnTo === 'board') return void workspace.guard(() => workspace.returnToBoard())
-      else {
-        workspace.open = null
-        workspace.pane = 'list'
-      }
+      else if (workspace.tiles.length > 1) return focusTile(closeFocused())
+      else workspace.closeTile()
       hooks.focusList()
     },
     bang: {
@@ -361,7 +393,6 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'board',
-    aliases: ['b'],
     group: 'board',
     help: "show this space's board, or go back to the tree",
     run: () => workspace.guard(() => workspace.toggleBoardView()),
@@ -563,17 +594,77 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'next',
-    aliases: ['bn'],
     group: 'documents',
     help: 'open the next node down the list',
     run: () => jumpTo(workspace.cursor + 1),
   },
   {
     name: 'prev',
-    aliases: ['bp'],
     group: 'documents',
     help: 'open the previous node',
     run: () => jumpTo(workspace.cursor - 1),
+  },
+  {
+    name: 'close',
+    aliases: ['clo'],
+    group: 'tiles',
+    help: 'close the focused tile — Alt-q; asks when its draft could not be written',
+    run: () =>
+      workspace.guard(async () => {
+        await workspace.flushTile()
+        if (workspace.dirty) {
+          const name = workspace.open?.slug ?? 'the draft'
+          if (!(await workspace.ask(`${name} could not be written — close anyway? the draft stays in this browser`))) return
+        }
+        await focusTile(closeFocused())
+      }),
+  },
+  {
+    name: 'only',
+    aliases: ['on'],
+    group: 'tiles',
+    help: 'close every tile but the focused one',
+    run: () => workspace.guard(() => workspace.onlyTile()),
+  },
+  {
+    name: 'ls',
+    aliases: ['buffers', 'files'],
+    group: 'tiles',
+    help: 'list the open tiles, % on the focused one',
+    run: () => workspace.say(workspace.tiles.map((_, index) => describeTile(index)).join(' · ')),
+  },
+  {
+    name: 'buffer',
+    aliases: ['b'],
+    args: '<n|name>',
+    group: 'tiles',
+    help: 'focus a tile by its number in :ls, or by the start of its name',
+    complete: () => workspace.tiles.flatMap((tile) => (tile.open ? [tile.open.slug] : [])),
+    run: (arg) => {
+      const wanted = arg.trim().toLowerCase()
+      if (!wanted) return workspace.say(describeTile(workspace.focused))
+      const index = /^\d+$/.test(wanted)
+        ? Number(wanted) - 1
+        : workspace.tiles.findIndex(
+            (tile) => tile.open && (tile.open.slug.startsWith(wanted) || tile.open.name.toLowerCase().startsWith(wanted)),
+          )
+      if (!workspace.tiles[index]) return workspace.say(`E86: no tile ${arg.trim()} — :ls lists them`, 'error')
+      return focusTile(index)
+    },
+  },
+  {
+    name: 'bnext',
+    aliases: ['bn'],
+    group: 'tiles',
+    help: 'the next tile — gt',
+    run: () => cycleTile(1),
+  },
+  {
+    name: 'bprevious',
+    aliases: ['bp', 'bN'],
+    group: 'tiles',
+    help: 'the previous tile — gT',
+    run: () => cycleTile(-1),
   },
   {
     name: 'first',
