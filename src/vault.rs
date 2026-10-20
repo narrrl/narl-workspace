@@ -454,6 +454,16 @@ impl Vault {
             .is_some_and(|open| open.touched.elapsed() < self.idle)
     }
 
+    /// The key while the vault is open, without counting as a use: for what
+    /// is not the owner at the browser — a mount — which may use the vault
+    /// while it is open but must not keep it so.
+    pub fn peek_key(&self) -> Option<Arc<Key>> {
+        self.slot()
+            .as_ref()
+            .filter(|open| open.touched.elapsed() < self.idle)
+            .map(|open| open.key.clone())
+    }
+
     pub fn lock(&self) {
         *self.slot() = None;
     }
@@ -681,6 +691,24 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(30));
         vault.expire();
         assert!(vault.slot().is_none());
+    }
+
+    /// A peek finds the key while it is there and leaves the idle clock
+    /// alone; a `key()` winds it back.
+    #[tokio::test]
+    async fn a_peek_does_not_hold_the_vault_open() {
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let vault = super::Vault::new(db, std::time::Duration::from_millis(40));
+        let started = std::time::Instant::now();
+        *vault.slot() = Some(super::Unlocked {
+            key: std::sync::Arc::new(key(1)),
+            touched: started,
+        });
+        assert!(vault.peek_key().is_some());
+        assert_eq!(vault.slot().as_ref().unwrap().touched, started);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(vault.peek_key().is_none(), "idle, whatever peeked");
+        assert!(vault.key().is_none());
     }
 
     /// Reading from record `k` on gives exactly the plaintext from

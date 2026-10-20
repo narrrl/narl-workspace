@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, LazyLock},
+};
 
 use axum::{
     body::Body,
@@ -541,7 +544,9 @@ pub async fn stream_media(
             file.seek(std::io::SeekFrom::Start(start)).await?;
             Body::from_stream(ReaderStream::new(file.take(length)))
         }
-        Some(key) => Body::from_stream(open_stream(file, &key, id, start, length).await?),
+        Some(key) => Body::from_stream(
+            open_stream(file, &key, state.vault.clone(), id, start, length).await?,
+        ),
     };
 
     let mut response = (
@@ -589,10 +594,12 @@ pub async fn stream_media(
 /// its first byte, so seeking into a sealed video costs one record, not the
 /// whole file before it. The header is checked before the first byte goes
 /// out, so a file that will not open is an error response rather than a
-/// download that breaks off.
+/// download that breaks off — unless the vault locks while it runs: then it
+/// does break off, as a read over the mount does.
 async fn open_stream(
     mut file: tokio::fs::File,
     key: &vault::Key,
+    vault: Arc<vault::Vault>,
     id: &str,
     start: u64,
     length: u64,
@@ -615,21 +622,29 @@ async fn open_stream(
 
     Ok(futures_util::stream::try_unfold(
         (file, opener, skip, length),
-        |(mut file, mut opener, skip, left)| async move {
-            let len = opener.next_len();
-            if len == 0 || left == 0 {
-                return Ok(None);
+        move |(mut file, mut opener, skip, left)| {
+            let vault = vault.clone();
+            async move {
+                let len = opener.next_len();
+                if len == 0 || left == 0 {
+                    return Ok(None);
+                }
+                if !vault.is_open() {
+                    return Err(std::io::Error::other(
+                        "the vault locked during the download",
+                    ));
+                }
+                let mut record = vec![0u8; len];
+                file.read_exact(&mut record).await?;
+                let plain = opener.open(&record).map_err(std::io::Error::other)?;
+                let piece = &plain[skip.min(plain.len())..];
+                let piece = &piece[..piece.len().min(usize::try_from(left).unwrap_or(usize::MAX))];
+                let left = left - piece.len() as u64;
+                Ok(Some((
+                    axum::body::Bytes::copy_from_slice(piece),
+                    (file, opener, 0, left),
+                )))
             }
-            let mut record = vec![0u8; len];
-            file.read_exact(&mut record).await?;
-            let plain = opener.open(&record).map_err(std::io::Error::other)?;
-            let piece = &plain[skip.min(plain.len())..];
-            let piece = &piece[..piece.len().min(usize::try_from(left).unwrap_or(usize::MAX))];
-            let left = left - piece.len() as u64;
-            Ok(Some((
-                axum::body::Bytes::copy_from_slice(piece),
-                (file, opener, 0, left),
-            )))
         },
     ))
 }

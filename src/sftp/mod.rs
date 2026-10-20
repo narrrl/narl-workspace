@@ -5,7 +5,14 @@
 
 mod fs;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use russh::{
@@ -58,29 +65,58 @@ pub async fn serve(state: AppState, bind: SocketAddr) -> Result<()> {
 
     let config = Arc::new(ServerConfig {
         keys: vec![host_key],
+        // Each refusal a second late — russh's ten tries stay, as a client
+        // offers every key its agent holds before the one registered here —
+        // and a peer that has gone away is found out within minutes rather
+        // than held on to: three keepalives unanswered, or half an hour of
+        // nothing at all from a client that does not answer them.
+        auth_rejection_time: Duration::from_secs(1),
+        keepalive_interval: Some(Duration::from_secs(60)),
+        keepalive_max: 3,
+        inactivity_timeout: Some(Duration::from_secs(30 * 60)),
         ..Default::default()
     });
 
-    let mut server = SftpServer { state };
+    let mut server = SftpServer {
+        state,
+        live: Arc::new(AtomicUsize::new(0)),
+    };
     tracing::info!("sftp mount listening on {bind}");
     server.run_on_address(config, bind).await?;
     Ok(())
 }
 
+/// More connections than one owner's machines would ever keep open; past it,
+/// a new one is turned away at login rather than given a filesystem.
+const MAX_CONNECTIONS: usize = 32;
+
 #[derive(Clone)]
 struct SftpServer {
     state: AppState,
+    /// Connections open now, counted up here and down by `Live`.
+    live: Arc<AtomicUsize>,
 }
 
 impl russh::server::Server for SftpServer {
     type Handler = SshSession;
 
     fn new_client(&mut self, _addr: Option<SocketAddr>) -> Self::Handler {
+        self.live.fetch_add(1, Ordering::SeqCst);
         SshSession {
             state: self.state.clone(),
             channel: None,
             key_id: None,
+            live: Live(self.live.clone()),
         }
+    }
+}
+
+/// One connection's place in the count, given back when it closes.
+struct Live(Arc<AtomicUsize>);
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -93,6 +129,7 @@ struct SshSession {
     /// The registered key this session logged in with, re-checked by the
     /// filesystem so that deleting a key ends what it mounted.
     key_id: Option<i64>,
+    live: Live,
 }
 
 impl ServerHandler for SshSession {
@@ -103,6 +140,10 @@ impl ServerHandler for SshSession {
         _user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
+        if self.live.0.load(Ordering::SeqCst) > MAX_CONNECTIONS {
+            tracing::warn!("sftp: {MAX_CONNECTIONS} connections open, refusing another");
+            return Ok(Auth::reject());
+        }
         let fingerprint = public_key
             .fingerprint(russh::keys::HashAlg::Sha256)
             .to_string();

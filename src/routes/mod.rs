@@ -89,7 +89,10 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/share/{token}/{key}", get(share::read))
         .route("/share/{token}/{key}/media/{id}", get(share::serve_media))
         .route("/ssh-keys", get(ssh_keys::list).post(ssh_keys::add))
-        .route("/ssh-keys/{id}", delete(ssh_keys::remove))
+        .route(
+            "/ssh-keys/{id}",
+            delete(ssh_keys::remove).patch(ssh_keys::update),
+        )
         .layer(DefaultBodyLimit::max(JSON_LIMIT))
 }
 

@@ -64,6 +64,8 @@ export interface SshKey {
   fingerprint: string
   created_at: number
   last_used_at: number | null
+  /** May read sealed files over the mount while the vault is open. */
+  vault: boolean
 }
 
 export interface SharedDocument {
@@ -464,4 +466,7 @@ export const api = {
     request<SshKey>('/ssh-keys', { method: 'POST', body: body({ name, public_key }) }),
 
   removeSshKey: (id: number) => request<{ ok: true }>(`/ssh-keys/${id}`, { method: 'DELETE' }),
+
+  setSshKeyVault: (id: number, vault: boolean) =>
+    request<{ ok: true }>(`/ssh-keys/${id}`, { method: 'PATCH', body: body({ vault }) }),
 }

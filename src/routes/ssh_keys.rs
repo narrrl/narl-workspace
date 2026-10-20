@@ -19,6 +19,8 @@ pub struct SshKeySummary {
     pub fingerprint: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    /// May read sealed files over the mount while the vault is open.
+    pub vault: bool,
 }
 
 #[derive(Deserialize)]
@@ -35,7 +37,8 @@ pub async fn list(
     State(state): State<AppState>,
 ) -> AppResult<Json<Vec<SshKeySummary>>> {
     let rows = sqlx::query(
-        "SELECT id, name, fingerprint, created_at, last_used_at FROM ssh_keys ORDER BY created_at",
+        "SELECT id, name, fingerprint, created_at, last_used_at, vault FROM ssh_keys
+         ORDER BY created_at",
     )
     .fetch_all(&state.db)
     .await?;
@@ -48,6 +51,7 @@ pub async fn list(
                 fingerprint: row.get("fingerprint"),
                 created_at: row.get("created_at"),
                 last_used_at: row.get("last_used_at"),
+                vault: row.get("vault"),
             })
             .collect(),
     ))
@@ -93,7 +97,39 @@ pub async fn add(
         fingerprint,
         created_at: now,
         last_used_at: None,
+        vault: false,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateInput {
+    pub vault: bool,
+}
+
+/// Give a key vault access, or take it away. A live session asks on every
+/// read of a sealed file, so taking it away cuts off a read under way.
+pub async fn update(
+    _: Session,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(input): Json<UpdateInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let affected = sqlx::query("UPDATE ssh_keys SET vault = ?1 WHERE id = ?2")
+        .bind(input.vault)
+        .bind(id)
+        .execute(&state.db)
+        .await?
+        .rows_affected();
+    if affected == 0 {
+        return Err(AppError::NotFound);
+    }
+    tracing::info!(
+        key = id,
+        vault = input.vault,
+        "ssh key vault access changed"
+    );
+    state.backup.signal();
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 pub async fn remove(

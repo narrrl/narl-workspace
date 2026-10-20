@@ -100,6 +100,8 @@ pub struct Inspection {
 pub enum Failure {
     Unreadable,
     WrongPassword,
+    /// Asks its key derivation for more work than any real export does.
+    Unreasonable,
 }
 
 pub async fn inspect(
@@ -158,6 +160,9 @@ pub async fn inspect(
         Err(Failure::WrongPassword) => Err(AppError::BadRequest("wrong password".into())),
         Err(Failure::Unreadable) => Err(AppError::BadRequest(
             "not a certificate, key or keystore this can read".into(),
+        )),
+        Err(Failure::Unreasonable) => Err(AppError::BadRequest(
+            "this keystore asks for unreasonable key-stretching, and is not opened".into(),
         )),
     }
 }
@@ -457,6 +462,7 @@ impl Found {
             );
             return Ok(());
         };
+        reasonable_stretching(der)?;
         let plain = info.decrypt(password).map_err(|_| Failure::WrongPassword)?;
         if !self.private_key(plain.as_bytes(), true, None) {
             return Err(Failure::WrongPassword);
@@ -467,6 +473,7 @@ impl Found {
     /// A keystore is tried with no password first, as plenty are exported
     /// with an empty one.
     fn pkcs12(&mut self, der: &[u8], password: Option<&str>) -> Result<(), Failure> {
+        reasonable_stretching(der)?;
         let archive = match Pkcs12Archive::from_pkcs12(der, password.unwrap_or("")) {
             Ok(archive) => archive,
             Err(e) if password_problem(&e) => {
@@ -489,6 +496,84 @@ impl Found {
             self.private_key(&der, true, bag.friendly_name.clone());
         }
         Ok(())
+    }
+}
+
+/// The most rounds a key derivation may ask for. Exports use from two
+/// thousand to a few hundred thousand; ten million already takes seconds.
+const MAX_ROUNDS: u64 = 10_000_000;
+/// scrypt's cost and block size, at most: a gigabyte of memory between them.
+const MAX_SCRYPT_COST: u64 = 1 << 20;
+const MAX_SCRYPT_BLOCK: u64 = 8;
+const SCRYPT: &str = "1.3.6.1.4.1.11591.4.11";
+
+/// Refuse a key or keystore whose key derivation asks for more than any real
+/// one does, before running it. The parameters are the file's to choose, and
+/// a derivation runs to its end on a blocking thread whatever deadline the
+/// request had — a crafted file opened in the browser would pin that thread
+/// for hours, or ask scrypt for more memory than the machine has.
+///
+/// Every place a derivation takes its parameters from has the salt
+/// followed by the count: PBKDF2's parameters, the PKCS#12 PBEs', the MAC's
+/// `{ digest, salt, iterations }`, and scrypt's `{ salt, N, r, p }`. So any
+/// sequence with an INTEGER after an OCTET STRING is held to the ceiling,
+/// throughout the file, inside the octet strings the content sits in too.
+fn reasonable_stretching(der: &[u8]) -> Result<(), Failure> {
+    use x509_parser::der_parser::der::parse_der;
+    match parse_der(der) {
+        Ok((_, object)) => stretching_in(&object),
+        Err(_) => Ok(()),
+    }
+}
+
+fn stretching_in(object: &x509_parser::der_parser::ber::BerObject) -> Result<(), Failure> {
+    use x509_parser::der_parser::{ber::BerObjectContent as Content, der::parse_der};
+
+    let count = |object: &x509_parser::der_parser::ber::BerObject| {
+        object.as_u64().map_err(|_| Failure::Unreasonable)
+    };
+    // What a constructed or wrapping value holds, when it is DER itself.
+    let inner = |mut bytes: &[u8]| -> Result<(), Failure> {
+        while let Ok((rest, object)) = parse_der(bytes) {
+            stretching_in(&object)?;
+            if rest.len() == bytes.len() {
+                break;
+            }
+            bytes = rest;
+        }
+        Ok(())
+    };
+    match &object.content {
+        Content::Sequence(items) | Content::Set(items) => {
+            if let [algorithm, parameters] = items.as_slice() {
+                let scrypt = algorithm
+                    .as_oid_val()
+                    .is_ok_and(|oid| oid.to_id_string() == SCRYPT);
+                if scrypt {
+                    let fields = parameters
+                        .as_sequence()
+                        .map_err(|_| Failure::Unreasonable)?;
+                    let cost = fields.get(1).map(count).transpose()?.unwrap_or(0);
+                    let block = fields.get(2).map(count).transpose()?.unwrap_or(0);
+                    if cost > MAX_SCRYPT_COST || block > MAX_SCRYPT_BLOCK {
+                        return Err(Failure::Unreasonable);
+                    }
+                }
+            }
+            for pair in items.windows(2) {
+                if matches!(pair[0].content, Content::OctetString(_))
+                    && matches!(pair[1].content, Content::Integer(_))
+                    && count(&pair[1])? > MAX_ROUNDS
+                {
+                    return Err(Failure::Unreasonable);
+                }
+            }
+            items.iter().try_for_each(stretching_in)
+        }
+        Content::OctetString(bytes) => inner(bytes),
+        Content::Tagged(_, _, object) => stretching_in(object),
+        Content::Unknown(any) => inner(any.data),
+        _ => Ok(()),
     }
 }
 
@@ -755,6 +840,56 @@ mod tests {
         let json = serde_json::to_string(&found).unwrap();
         // The longest field anywhere is a fingerprint; a key would be kilobytes.
         assert!(json.len() < 2048, "{json}");
+    }
+
+    /// A count past the ceiling is refused wherever it sits, before any
+    /// derivation runs; the counts real exports use pass.
+    #[test]
+    fn refuses_unreasonable_key_stretching() {
+        let params = |count: &[u8]| {
+            let mut der = vec![0x04, 0x02, 0xaa, 0xbb, 0x02, count.len() as u8];
+            der.extend_from_slice(count);
+            let mut seq = vec![0x30, der.len() as u8];
+            seq.extend(der);
+            seq
+        };
+        assert!(reasonable_stretching(&params(&[0x08, 0x00])).is_ok());
+        assert!(matches!(
+            reasonable_stretching(&params(&[0x7f, 0xff, 0xff, 0xff])),
+            Err(Failure::Unreasonable)
+        ));
+
+        // Inside an octet string inside a sequence, as a keystore's bags are.
+        let deep = params(&[0x7f, 0xff, 0xff, 0xff]);
+        let mut wrapped = vec![0x04, deep.len() as u8];
+        wrapped.extend(deep);
+        let mut outer = vec![0x30, wrapped.len() as u8];
+        outer.extend(wrapped);
+        assert!(matches!(
+            reasonable_stretching(&outer),
+            Err(Failure::Unreasonable)
+        ));
+
+        // scrypt { salt, N = 2^22, r = 8, p = 1 }: four gigabytes.
+        let oid = [
+            0x06, 0x09, 0x2b, 0x06, 0x01, 0x04, 0x01, 0xda, 0x47, 0x04, 0x0b,
+        ];
+        let fields = [
+            0x30, 0x0f, 0x04, 0x02, 0xaa, 0xbb, 0x02, 0x03, 0x40, 0x00, 0x00, 0x02, 0x01, 0x08,
+            0x02, 0x01, 0x01,
+        ];
+        let mut scrypt = vec![0x30, (oid.len() + fields.len()) as u8];
+        scrypt.extend(oid);
+        scrypt.extend(fields);
+        assert!(matches!(
+            reasonable_stretching(&scrypt),
+            Err(Failure::Unreasonable)
+        ));
+
+        // The fixtures are ordinary exports.
+        for fixture in [MODERN, LEGACY] {
+            assert!(reasonable_stretching(fixture).is_ok());
+        }
     }
 
     #[test]

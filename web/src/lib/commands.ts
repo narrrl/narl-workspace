@@ -784,16 +784,16 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'sshkey',
-    args: '[add <name> <key> | rm <name>]',
+    args: '[add <name> <key> | rm <name> | vault <name> on|off]',
     group: 'view',
-    help: 'list, add or remove keys allowed to mount the workspace over sftp',
+    help: 'list, add or remove keys allowed to mount the workspace over sftp, and say which may read sealed files',
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
         if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
           const keys = await api.listSshKeys()
           if (keys.length === 0) return workspace.say('no keys registered — :sshkey add <name> <key>')
-          return workspace.say(keys.map((k) => `${k.name} ${k.fingerprint}`).join(' · '))
+          return workspace.say(keys.map((k) => `${k.name}${k.vault ? ' [vault]' : ''} ${k.fingerprint}`).join(' · '))
         }
         const addMatch = /^add\s+(\S+)\s+(.+)$/.exec(trimmed)
         if (addMatch) {
@@ -809,7 +809,21 @@ export const commands: CommandSpec[] = [
           await api.removeSshKey(target.id)
           return workspace.say(`removed ${target.name}`)
         }
-        workspace.say('usage: :sshkey [add <name> <key> | rm <name>]', 'error')
+        // A key reads sealed files over the mount only once given vault access.
+        const vaultMatch = /^vault\s+(\S+)\s+(on|off)$/.exec(trimmed)
+        if (vaultMatch) {
+          const keys = await api.listSshKeys()
+          const target = keys.find((k) => k.name === vaultMatch[1])
+          if (!target) return workspace.say(`no key named ${vaultMatch[1]}`, 'error')
+          const on = vaultMatch[2] === 'on'
+          await api.setSshKeyVault(target.id, on)
+          return workspace.say(
+            on
+              ? `${target.name} reads sealed files over the mount while the vault is open`
+              : `${target.name} no longer reads sealed files`,
+          )
+        }
+        workspace.say('usage: :sshkey [add <name> <key> | rm <name> | vault <name> on|off]', 'error')
       }),
   },
   {

@@ -9,11 +9,12 @@
 //! export writes, and a leading heading written back becomes the title again.
 //! A file is streamed from `uploads/` and written back to it through a
 //! `.part`, never held in memory. A sealed file opens here while the vault is
-//! open in the browser, decrypted a record at a time as it is read, and is
-//! sealed again when it is written over; while the vault is shut it is listed
-//! but refused, and locking the vault cuts off a read already under way. A
-//! file written into a sealed folder, or moved into one, is sealed while the
-//! vault is open and refused while it is shut.
+//! open in the browser and the session's key has been given vault access,
+//! decrypted a record at a time as it is read, and is sealed again when it is
+//! written over; otherwise it is listed but refused, and locking the vault
+//! cuts off a read already under way. A file written into a sealed folder, or
+//! moved into one, is sealed while the vault is open and refused while it is
+//! shut. Nothing a mount does keeps the vault open: only the browser does.
 //!
 //! What an editor writes next to a document — vim's `.swp` and `4913` probe,
 //! a `foo.md~` backup, a dotted temp file it renames over the original — lives
@@ -44,6 +45,13 @@ type SftpResult<T> = Result<T, StatusCode>;
 /// The largest file this filesystem holds, document or scratch. Everything is
 /// buffered in memory until it is closed, so there has to be a ceiling.
 const MAX_FILE: usize = 16 * 1024 * 1024;
+
+/// What one session may hold in memory at once — documents and scratch files
+/// open for writing, and the scratch files kept — and how many handles it may
+/// have open. Far more than an editor or a sync tool needs; a runaway client
+/// is stopped before it takes the server's memory with it.
+const MAX_HELD: usize = 64 * 1024 * 1024;
+const MAX_HANDLES: usize = 256;
 
 /// The byte size of a document as [`render_doc`] lays it out, computed in SQL
 /// so a directory listing does not have to fetch every body.
@@ -296,9 +304,30 @@ struct Upload {
     /// sealed file.
     sealed: bool,
     media_id: String,
-    partial: std::path::PathBuf,
+    partial: Partial,
     file: tokio::fs::File,
     size: u64,
+}
+
+/// The `.part` an upload is written to. Removed when the upload is dropped
+/// unfinished — a session that ends, a client that goes away mid-write — so
+/// the plaintext of a sealed file opened for writing does not sit in
+/// `uploads/` until the next sweep. After a finished upload it is gone
+/// already, renamed or sealed into place.
+struct Partial(std::path::PathBuf);
+
+impl std::ops::Deref for Partial {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 pub struct SpaceFs {
@@ -371,12 +400,71 @@ impl SpaceFs {
         self.vault_key().map(Some)
     }
 
-    /// The vault's key, while it is open; a refusal while it is shut.
+    /// The vault's key, while it is open; a refusal while it is shut. Taken
+    /// without counting as a use, so a mount never holds the vault open.
     fn vault_key(&self) -> SftpResult<Arc<vault::Key>> {
         self.state
             .as_ref()
-            .and_then(|state| state.vault.key())
+            .and_then(|state| state.vault.peek_key())
             .ok_or(StatusCode::PermissionDenied)
+    }
+
+    /// Refuse unless the session's key may read sealed files. A key is a
+    /// standing credential on some other machine; while the vault is open,
+    /// only the keys given vault access in the browser read plaintext.
+    /// Asked afresh each time, so taking the access away takes effect at once.
+    async fn vault_access(&self) -> SftpResult<()> {
+        let Some(key) = self.key_id else {
+            return Ok(());
+        };
+        let allowed: Option<bool> = sqlx::query_scalar("SELECT vault FROM ssh_keys WHERE id = ?1")
+            .bind(key)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
+        match allowed {
+            Some(true) => Ok(()),
+            Some(false) => {
+                tracing::info!(
+                    key,
+                    "sftp: this key has no vault access, a sealed file stays shut"
+                );
+                Err(StatusCode::PermissionDenied)
+            }
+            None => {
+                tracing::warn!(key, "sftp: the session's key has been removed, refusing");
+                Err(StatusCode::PermissionDenied)
+            }
+        }
+    }
+
+    /// Plaintext of a sealed file leaves only while the vault is open and the
+    /// key has vault access — checked on every read, not only at the open.
+    async fn may_read_sealed(&self) -> SftpResult<()> {
+        if !self.vault_open() {
+            return Err(StatusCode::PermissionDenied);
+        }
+        self.vault_access().await
+    }
+
+    /// The bytes this session holds in memory: scratch files, and what is
+    /// open for writing or was read into a buffer.
+    fn held(&self) -> usize {
+        let open: usize = self
+            .handles
+            .values()
+            .map(|handle| match handle {
+                OpenHandle::Read(data)
+                | OpenHandle::Write { buf: data, .. }
+                | OpenHandle::Scratch { buf: data, .. } => data.len(),
+                _ => 0,
+            })
+            .sum();
+        open + self
+            .scratch
+            .values()
+            .map(|file| file.data.len())
+            .sum::<usize>()
     }
 
     /// Whether the vault is open, asked without holding it open: a mount's
@@ -408,8 +496,9 @@ impl SpaceFs {
     }
 
     /// Whether the key this session logged in with is still registered.
-    /// Asked whenever a directory or a file is opened, so a key deleted in
-    /// the browser locks out a mount that is already up, not only the next.
+    /// Asked whenever a directory or a file is opened, written or closed, so a
+    /// key deleted in the browser locks out a mount that is already up, not
+    /// only the next.
     async fn authorized(&self) -> SftpResult<()> {
         let Some(key) = self.key_id else {
             return Ok(());
@@ -493,11 +582,15 @@ impl SpaceFs {
             .map(|(_, file)| file))
     }
 
-    fn allocate(&mut self, handle: OpenHandle) -> String {
+    fn allocate(&mut self, handle: OpenHandle) -> SftpResult<String> {
+        if self.handles.len() >= MAX_HANDLES {
+            tracing::warn!("sftp: {MAX_HANDLES} handles open in one session, refusing another");
+            return Err(StatusCode::Failure);
+        }
         self.next_handle += 1;
         let key = self.next_handle.to_string();
         self.handles.insert(key.clone(), handle);
-        key
+        Ok(key)
     }
 
     /// A space or folder directly under `parent`, by slug — or by the slug its
@@ -740,8 +833,13 @@ impl SpaceFs {
         // Refused at the open, not at the close, when the vault is shut.
         let over_sealed = replaces.is_some_and(|old| old.encrypted);
         let key = self.seal_key(parent, over_sealed).await?;
+        // Written into rather than over, a sealed file is decrypted into the
+        // `.part`, and what the handle holds can be read back through it.
+        if over_sealed && !truncate {
+            self.vault_access().await?;
+        }
         let media_id = uuid::Uuid::new_v4().to_string();
-        let partial = self.uploads.join(format!("{media_id}.part"));
+        let partial = Partial(self.uploads.join(format!("{media_id}.part")));
         let mut size = 0;
         if let (Some(old), false) = (replaces, truncate) {
             let source = self.uploads.join(&old.media_id);
@@ -749,7 +847,8 @@ impl SpaceFs {
                 // Written into, not over: the plaintext goes into the
                 // `.part`, which is sealed again when it is closed.
                 (Some(key), true) => {
-                    let (key, id, part) = (key.clone(), old.media_id.clone(), partial.clone());
+                    let (key, id, part) =
+                        (key.clone(), old.media_id.clone(), partial.to_path_buf());
                     tokio::task::spawn_blocking(move || -> anyhow::Result<u64> {
                         let mut plain = vault::Reader::open(&key, &id, &source)?;
                         Ok(std::io::copy(
@@ -764,7 +863,7 @@ impl SpaceFs {
                         StatusCode::Failure
                     })?
                 }
-                _ => tokio::fs::copy(source, &partial)
+                _ => tokio::fs::copy(source, &*partial)
                     .await
                     .map_err(|_| StatusCode::Failure)?,
             };
@@ -774,7 +873,7 @@ impl SpaceFs {
             .write(true)
             .create(true)
             .truncate(truncate || replaces.is_none())
-            .open(&partial)
+            .open(&*partial)
             .await
             .map_err(|_| StatusCode::Failure)?;
         Ok(Upload {
@@ -804,13 +903,8 @@ impl SpaceFs {
             size,
         } = upload;
         // Asked again: the vault may have locked while the bytes came in.
-        let key = match self.seal_key(parent, sealed).await {
-            Ok(key) => key,
-            Err(e) => {
-                let _ = tokio::fs::remove_file(&partial).await;
-                return Err(e);
-            }
-        };
+        // Refused, the `.part` goes with `partial`.
+        let key = self.seal_key(parent, sealed).await?;
         let landed = async {
             file.sync_all().await?;
             drop(file);
@@ -820,7 +914,7 @@ impl SpaceFs {
                 // names and the mirror never reads.
                 Some(key) => {
                     let (key, id, plain, sealed) =
-                        (key.clone(), media_id.clone(), partial.clone(), target);
+                        (key.clone(), media_id.clone(), partial.to_path_buf(), target);
                     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
                         vault::seal_file(&key, &id, &mut std::fs::File::open(&plain)?, &sealed)?;
                         std::fs::remove_file(&plain)?;
@@ -829,7 +923,7 @@ impl SpaceFs {
                     .await
                     .map_err(anyhow::Error::from)??;
                 }
-                None => tokio::fs::rename(&partial, target).await?,
+                None => tokio::fs::rename(&*partial, target).await?,
             }
             let mime = media::mime_of(&name, None);
             let sealed = key.is_some();
@@ -848,7 +942,7 @@ impl SpaceFs {
         .await;
         if let Err(e) = landed {
             tracing::warn!("sftp: could not store {name}: {e:?}");
-            let _ = tokio::fs::remove_file(&partial).await;
+            drop(partial);
             let _ = tokio::fs::remove_file(self.uploads.join(&media_id)).await;
             return Err(StatusCode::Failure);
         }
@@ -1083,6 +1177,7 @@ impl russh_sftp::server::Handler for SpaceFs {
         path: String,
         attrs: FileAttributes,
     ) -> SftpResult<russh_sftp::protocol::Status> {
+        self.authorized().await?;
         let target = self.target(&path).await?;
         if let Some(size) = attrs.size {
             let size = size as usize;
@@ -1096,7 +1191,11 @@ impl russh_sftp::server::Handler for SpaceFs {
                     self.save_doc(doc.id, bytes).await?;
                 }
                 Target::Scratch(key) => {
+                    let held = self.held();
                     if let Some(file) = self.scratch.get_mut(&key) {
+                        if held.saturating_add(size.saturating_sub(file.data.len())) > MAX_HELD {
+                            return Err(StatusCode::Failure);
+                        }
                         file.data.resize(size, 0);
                         file.mtime = crate::now();
                     }
@@ -1118,10 +1217,13 @@ impl russh_sftp::server::Handler for SpaceFs {
         handle: String,
         attrs: FileAttributes,
     ) -> SftpResult<russh_sftp::protocol::Status> {
+        self.authorized().await?;
+        let held = self.held();
         match self.handles.get_mut(&handle) {
             Some(OpenHandle::Write { buf, .. } | OpenHandle::Scratch { buf, .. }) => {
                 if let Some(size) = attrs.size {
-                    if size as usize > MAX_FILE {
+                    let grows = (size as usize).saturating_sub(buf.len());
+                    if size as usize > MAX_FILE || held.saturating_add(grows) > MAX_HELD {
                         return Err(StatusCode::Failure);
                     }
                     buf.resize(size as usize, 0);
@@ -1150,7 +1252,7 @@ impl russh_sftp::server::Handler for SpaceFs {
     async fn opendir(&mut self, id: u32, path: String) -> SftpResult<Handle> {
         self.authorized().await?;
         let files = self.listing(&path).await?;
-        let handle = self.allocate(OpenHandle::Dir(files));
+        let handle = self.allocate(OpenHandle::Dir(files))?;
         Ok(Handle { id, handle })
     }
 
@@ -1261,6 +1363,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                 } else {
                     let file = existing.ok_or(StatusCode::NoSuchFile)?;
                     let key = if file.encrypted {
+                        self.vault_access().await?;
                         Some(self.vault_key()?)
                     } else {
                         None
@@ -1301,7 +1404,7 @@ impl russh_sftp::server::Handler for SpaceFs {
             }
         };
 
-        let handle = self.allocate(handle);
+        let handle = self.allocate(handle)?;
         Ok(Handle { id, handle })
     }
 
@@ -1312,12 +1415,18 @@ impl russh_sftp::server::Handler for SpaceFs {
         offset: u64,
         len: u32,
     ) -> SftpResult<russh_sftp::protocol::Data> {
-        // Locking the vault shuts what is open as well as what opens next.
-        let vault_open = self.vault_open();
+        // Locking the vault, or taking the key's access away, shuts what is
+        // open as well as what opens next — a sealed file written into
+        // included, whose handle reads back its plaintext.
+        let sealed = match self.handles.get(&handle) {
+            Some(OpenHandle::ReadSealed(_)) => true,
+            Some(OpenHandle::Upload(upload)) => upload.sealed,
+            _ => false,
+        };
+        if sealed {
+            self.may_read_sealed().await?;
+        }
         if let Some(OpenHandle::ReadSealed(sealed)) = self.handles.get_mut(&handle) {
-            if !vault_open {
-                return Err(StatusCode::PermissionDenied);
-            }
             let data = sealed.read(offset, len).await?;
             return Ok(russh_sftp::protocol::Data { id, data });
         }
@@ -1372,8 +1481,16 @@ impl russh_sftp::server::Handler for SpaceFs {
         offset: u64,
         data: Vec<u8>,
     ) -> SftpResult<russh_sftp::protocol::Status> {
+        self.authorized().await?;
+        let held = self.held();
         match self.handles.get_mut(&handle) {
             Some(OpenHandle::Write { buf, .. } | OpenHandle::Scratch { buf, .. }) => {
+                let grows = (offset as usize)
+                    .saturating_add(data.len())
+                    .saturating_sub(buf.len());
+                if held.saturating_add(grows) > MAX_HELD {
+                    return Err(StatusCode::Failure);
+                }
                 write_at(buf, offset, &data)?;
                 Ok(ok_status(id))
             }
@@ -1400,7 +1517,10 @@ impl russh_sftp::server::Handler for SpaceFs {
     }
 
     async fn close(&mut self, id: u32, handle: String) -> SftpResult<russh_sftp::protocol::Status> {
-        match self.handles.remove(&handle) {
+        let handle = self.handles.remove(&handle);
+        // A removed key's writes are dropped rather than saved.
+        self.authorized().await?;
+        match handle {
             Some(OpenHandle::Write {
                 id: node,
                 buf,
@@ -2076,6 +2196,103 @@ mod tests {
         assert_eq!(get(&mut fs, "/proj/open/data.bin").await, "over");
     }
 
+    /// A key reads sealed files only once given vault access, and taking it
+    /// away cuts off a read under way. Nothing it does holds the vault open.
+    #[tokio::test]
+    async fn only_a_key_with_vault_access_reads_sealed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("uploads")).unwrap();
+        let state = crate::routes::tests::state_in(dir.path().into()).await;
+        state.vault.open_with(zeroize::Zeroizing::new([9u8; 32]));
+        let key: i64 = sqlx::query_scalar(
+            "INSERT INTO ssh_keys (name, public_key, fingerprint, created_at)
+             VALUES ('laptop', 'ssh-ed25519 AAAA', 'SHA256:x', 1) RETURNING id",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        let set_access = |on: bool| {
+            sqlx::query("UPDATE ssh_keys SET vault = ?1 WHERE id = ?2")
+                .bind(on)
+                .bind(key)
+                .execute(&state.db)
+        };
+        let mut fs = SpaceFs::new(state.clone(), Some(key));
+        fs.max_upload = 1024;
+        for path in ["/proj", "/proj/vault"] {
+            fs.mkdir(0, path.into(), FileAttributes::empty())
+                .await
+                .expect("mkdir");
+        }
+        sqlx::query("UPDATE nodes SET sealed = 1 WHERE slug = 'vault'")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        const NOTE: &str = "/proj/vault/note.txt";
+
+        // Writing in seals, and needs no access: nothing comes back out.
+        put(&mut fs, NOTE, "secret").await;
+
+        for flags in [OpenFlags::READ, OpenFlags::READ | OpenFlags::WRITE] {
+            assert!(
+                matches!(
+                    open_at(&mut fs, NOTE, flags).await,
+                    Err(StatusCode::PermissionDenied)
+                ),
+                "{flags:?} without access"
+            );
+        }
+        // No `.part` of the plaintext stays behind a refused or dropped open.
+        let parts = || {
+            std::fs::read_dir(dir.path().join("uploads"))
+                .unwrap()
+                .filter(|e| {
+                    e.as_ref()
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .is_some_and(|x| x == "part")
+                })
+                .count()
+        };
+        assert_eq!(parts(), 0);
+
+        set_access(true).await.unwrap();
+        assert_eq!(get(&mut fs, NOTE).await, "secret");
+        let handle = open_at(&mut fs, NOTE, OpenFlags::READ).await.unwrap();
+        set_access(false).await.unwrap();
+        assert!(matches!(
+            read_at(&mut fs, handle.clone(), 0, 6).await,
+            Err(StatusCode::PermissionDenied)
+        ));
+        fs.close(0, handle).await.unwrap();
+
+        // Opened for writing over it, the decrypted copy goes when the
+        // session does.
+        set_access(true).await.unwrap();
+        let handle = open_at(&mut fs, NOTE, OpenFlags::READ | OpenFlags::WRITE)
+            .await
+            .unwrap();
+        assert_eq!(read_at(&mut fs, handle, 0, 6).await.unwrap(), b"secret");
+        assert_eq!(parts(), 1);
+        drop(fs);
+        assert_eq!(parts(), 0);
+    }
+
+    /// One session cannot open handles without end.
+    #[tokio::test]
+    async fn handles_run_out_before_memory_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fs = fs_in(dir.path().to_path_buf()).await;
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .unwrap();
+        for _ in 0..super::MAX_HANDLES {
+            fs.opendir(0, "/proj".into()).await.unwrap();
+        }
+        assert!(fs.opendir(0, "/proj".into()).await.is_err());
+    }
+
     const CREATE: OpenFlags = OpenFlags::WRITE
         .union(OpenFlags::CREATE)
         .union(OpenFlags::TRUNCATE);
@@ -2090,6 +2307,12 @@ mod tests {
             .await
             .expect("write");
         fs.close(0, handle).await.expect("close");
+    }
+
+    async fn open_at(fs: &mut SpaceFs, path: &str, flags: OpenFlags) -> Result<String, StatusCode> {
+        fs.open(0, path.into(), flags, FileAttributes::empty())
+            .await
+            .map(|h| h.handle)
     }
 
     async fn read_at(
