@@ -62,6 +62,7 @@
     ['D', 'due date: fri, tm, +3d, 10-31 …'],
     ['R', 'rename the card, or the list when it is empty'],
     ['z', 'show done cards older than a week'],
+    ['F', 'a letter over every card in view — type it to put the cursor there'],
     ['r', 'read the board again, for changes made elsewhere'],
     ['x · dd', 'delete the card (asks y/N)'],
     ['q · Esc', 'back to the tree'],

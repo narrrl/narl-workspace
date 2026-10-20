@@ -214,6 +214,7 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `D` | due date — `fri`, `tm`, `+3d`, `+2w`, `10-31`, `2026-10-31` |
 | `R` | rename the card, or the column when it has none |
 | `z` | show done cards older than a week |
+| `F` | a letter over every card in view; typing it puts the cursor on that card |
 | `x`, `dd` | delete the card |
 | `q`, `Esc` | back to the tree |
 

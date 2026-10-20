@@ -45,6 +45,7 @@
   let importRoot = false
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
+  let boardEl = $state<HTMLDivElement>()
   /** The first half of `gg`, `dd`, `]]` …, shown until the second comes. */
   let pending = $state('')
   /** `F`: the pane whose links and buttons are wearing hints right now. */
@@ -390,6 +391,22 @@
     }
   }
 
+  /*
+   * `F`: the hints are pinned where the targets are, so a pane still sliding
+   * in — a space switch, the board just opened — is let settle first.
+   */
+  async function showHints(root: HTMLElement) {
+    // What moves the root may be an animation on a pane around it. A blinking
+    // cursor never finishes, so only what ends is waited for.
+    const settling = document.getAnimations().filter((animation) => {
+      const target = (animation.effect as KeyframeEffect | null)?.target
+      if (!target || animation.effect?.getComputedTiming().endTime === Infinity) return false
+      return target.contains(root) || root.contains(target)
+    })
+    await Promise.all(settling.map((animation) => animation.finished.catch(() => {})))
+    if (root.isConnected) hintRoot = root
+  }
+
   /** `gx`: the file as the browser shows it, in a tab of its own. */
   function openInTab() {
     const file = workspace.target?.file
@@ -486,6 +503,10 @@
         return true
       case 'z':
         workspace.showOldDone = !workspace.showOldDone
+        return true
+      case 'F':
+        // A letter over every card in view: typing it puts the cursor there.
+        if (boardEl) void showHints(boardEl)
         return true
       case ' ':
         void workspace.guard(() => workspace.toggleDone())
@@ -772,7 +793,7 @@
         // on its other key.
         event.preventDefault()
         const root = reading ? hooks.hintRoot() : null
-        if (root) hintRoot = root
+        if (root) void showHints(root)
         break
       }
       case 'm':
@@ -906,7 +927,7 @@
       {#if workspace.view === 'board'}
         <!-- The board takes the whole width: its columns are the two panes. -->
         <div class="panes board switch" style="--dir: {workspace.switchDirection}">
-          <div class="window focused"><Board /></div>
+          <div class="window focused" bind:this={boardEl}><Board /></div>
         </div>
       {:else}
         <div
