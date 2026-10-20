@@ -542,7 +542,7 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
             files_as_they_were(state, manifest, &mut uploads, &mut written).await?;
         }
         if let Some(key) = &key {
-            seal_in_place(state, key, &uploads).await?;
+            seal_in_place(state, key.current(), &uploads).await?;
         }
         if uploads.is_empty() {
             return Err(AppError::BadRequest(
@@ -1067,7 +1067,8 @@ mod tests {
         .unwrap();
         assert!(encrypted && sub_sealed);
         let mut back = String::new();
-        crate::vault::Reader::open(&key, "m1", &uploads_dir.join("m1"))
+        crate::vault::Keyring::new(key.clone())
+            .reader("m1", &uploads_dir.join("m1"))
             .unwrap()
             .read_to_string(&mut back)
             .unwrap();

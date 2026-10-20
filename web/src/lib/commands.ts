@@ -889,7 +889,14 @@ export const commands: CommandSpec[] = [
         const vault = workspace.vault
         if (vault?.configured) {
           const left = vault.locks_in ? ` · locks in ${Math.ceil(vault.locks_in / 60)}m unless used` : ''
-          return workspace.say(vault.unlocked ? `vault open${left} — :lock closes it` : 'vault locked — :unlock opens it')
+          const rekey = vault.rekey
+            ? vault.unlocked
+              ? ` · re-sealing after the password change, ${vault.rekey.total ? `${vault.rekey.done}/${vault.rekey.total}` : 'counting'}`
+              : ' · re-sealing after the password change waits for :unlock'
+            : ''
+          return workspace.say(
+            vault.unlocked ? `vault open${left}${rekey} — :lock closes it` : `vault locked${rekey} — :unlock opens it`,
+          )
         }
         const password = await workspace.askSecret('new vault password, 10+ characters — it cannot be recovered')
         if (password === null) return
@@ -925,7 +932,7 @@ export const commands: CommandSpec[] = [
   {
     name: 'passwd',
     group: 'vault',
-    help: "change the vault's password — no file is rewritten",
+    help: "change the vault's password — every sealed file is then re-sealed under a new key, while the vault is open",
     run: () =>
       workspace.guard(async () => {
         const current = await workspace.askSecret('current vault password')
@@ -936,7 +943,11 @@ export const commands: CommandSpec[] = [
         if (again === null) return
         if (again !== password) return workspace.say('the two passwords differ — nothing was changed', 'error')
         workspace.vault = await api.changeVaultPassword(current, password)
-        workspace.say('vault password changed')
+        workspace.say(
+          workspace.vault.rekey
+            ? `vault password changed — re-sealing ${workspace.vault.sealed} file(s) under the new key; leave the vault open, :vault shows how far`
+            : 'vault password changed',
+        )
       }),
   },
   {

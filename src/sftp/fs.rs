@@ -387,7 +387,7 @@ impl SpaceFs {
         &self,
         parent: i64,
         over_sealed: bool,
-    ) -> SftpResult<Option<Arc<vault::Key>>> {
+    ) -> SftpResult<Option<Arc<vault::Keyring>>> {
         let sealed: bool = sqlx::query_scalar("SELECT sealed FROM nodes WHERE id = ?1")
             .bind(parent)
             .fetch_optional(&self.db)
@@ -402,7 +402,7 @@ impl SpaceFs {
 
     /// The vault's key, while it is open; a refusal while it is shut. Taken
     /// without counting as a use, so a mount never holds the vault open.
-    fn vault_key(&self) -> SftpResult<Arc<vault::Key>> {
+    fn vault_key(&self) -> SftpResult<Arc<vault::Keyring>> {
         self.state
             .as_ref()
             .and_then(|state| state.vault.peek_key())
@@ -850,7 +850,7 @@ impl SpaceFs {
                     let (key, id, part) =
                         (key.clone(), old.media_id.clone(), partial.to_path_buf());
                     tokio::task::spawn_blocking(move || -> anyhow::Result<u64> {
-                        let mut plain = vault::Reader::open(&key, &id, &source)?;
+                        let mut plain = key.reader(&id, &source)?;
                         Ok(std::io::copy(
                             &mut plain,
                             &mut std::fs::File::create(&part)?,
@@ -916,7 +916,12 @@ impl SpaceFs {
                     let (key, id, plain, sealed) =
                         (key.clone(), media_id.clone(), partial.to_path_buf(), target);
                     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                        vault::seal_file(&key, &id, &mut std::fs::File::open(&plain)?, &sealed)?;
+                        vault::seal_file(
+                            key.current(),
+                            &id,
+                            &mut std::fs::File::open(&plain)?,
+                            &sealed,
+                        )?;
                         std::fs::remove_file(&plain)?;
                         Ok(())
                     })
@@ -1383,11 +1388,10 @@ impl russh_sftp::server::Handler for SpaceFs {
                                 .read_exact(&mut header)
                                 .await
                                 .map_err(|_| StatusCode::Failure)?;
-                            let opener = vault::Opener::new(&key, &file.media_id, &header, len)
-                                .map_err(|e| {
-                                    tracing::warn!("sftp: could not open {leaf}: {e:?}");
-                                    StatusCode::Failure
-                                })?;
+                            let opener = key.opener(&file.media_id, &header, len).map_err(|e| {
+                                tracing::warn!("sftp: could not open {leaf}: {e:?}");
+                                StatusCode::Failure
+                            })?;
                             OpenHandle::ReadSealed(Box::new(SealedRead {
                                 file: opened,
                                 opener,

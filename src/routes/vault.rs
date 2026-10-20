@@ -74,6 +74,15 @@ fn answer(attempt: Attempt<'_>, outcome: Unlock) -> AppResult<()> {
         Unlock::NotConfigured => Err(AppError::BadRequest(
             "there is no vault yet — :vault sets one up".into(),
         )),
+        // The password was right; the vault is open, re-sealing goes on.
+        Unlock::Rekeying => {
+            attempt.succeeded();
+            Err(AppError::Conflict(
+                "files are still being re-sealed after the last password change — \
+                 leave the vault open until :vault says it is done"
+                    .into(),
+            ))
+        }
     }
 }
 
@@ -106,7 +115,13 @@ pub async fn change_password(
             .change_password(input.current, input.password)
             .await?,
     )?;
-    tracing::info!("vault password changed");
+    let status = state.vault.status().await?;
+    match status.rekey {
+        Some(_) => {
+            tracing::info!("vault password changed; re-sealing every file under the new key")
+        }
+        None => tracing::info!("vault password changed"),
+    }
     state.backup.signal();
-    Ok(Json(state.vault.status().await?))
+    Ok(Json(status))
 }

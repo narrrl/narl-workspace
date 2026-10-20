@@ -17,6 +17,11 @@
 //! file, and the old id is put on `backup_retired`, which the mirror takes off
 //! Drive for good whatever `WORKSPACE_BACKUP_PRUNE` says. Documents that embed
 //! the file have their links moved to the new id in the same transaction.
+//!
+//! A vault password change re-writes every sealed file the same way, under a
+//! new id with its file key sealed under the new master key — see
+//! [`spawn_rekey`]. Once the old ids are off Drive, an old copy of the
+//! database and the old password open nothing that is still kept anywhere.
 
 use axum::{
     extract::{Path, State},
@@ -229,8 +234,12 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
             unchanged += 1;
             continue;
         }
-        match rewrite(state, &key, target, seal).await {
-            Ok(()) => files += 1,
+        let how = if seal { Rewrite::Seal } else { Rewrite::Open };
+        match rewrite(state, &key, &target.media_id, how).await {
+            Ok(new) => {
+                tracing::info!(node = target.node_id, to = %new, sealed = seal, "file re-written");
+                files += 1
+            }
             Err(e) => {
                 tracing::warn!(node = target.node_id, "could not re-write a file: {e:?}");
                 failed.push(e);
@@ -266,32 +275,52 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     })
 }
 
-/// Re-write one file sealed or opened under a new id, then point everything
-/// at the new id and retire the old one.
-async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool) -> AppResult<()> {
+#[derive(Clone, Copy)]
+enum Rewrite {
+    /// A plain file into the vault.
+    Seal,
+    /// A sealed file out of it.
+    Open,
+    /// A sealed file under the current master key, from whichever it is under.
+    Rekey,
+}
+
+/// Re-write one file under a new id, then point everything at the new id and
+/// retire the old one. Returns the new id.
+async fn rewrite(
+    state: &AppState,
+    keys: &std::sync::Arc<vault::Keyring>,
+    media_id: &str,
+    how: Rewrite,
+) -> AppResult<String> {
     let uploads = state.config.uploads_dir();
-    let old = target.media_id.clone();
+    let old = media_id.to_string();
     let new = Uuid::new_v4().to_string();
+    let seal = !matches!(how, Rewrite::Open);
     let source = uploads.join(&old);
     let partial = uploads.join(format!("{new}.part"));
 
     let written = {
-        let (key, old, new, source, partial) = (
-            key.clone(),
+        let (keys, old, new, source, partial) = (
+            keys.clone(),
             old.clone(),
             new.clone(),
             source.clone(),
             partial.clone(),
         );
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            if seal {
-                let mut plain = std::fs::File::open(&source)?;
-                vault::seal_file(&key, &new, &mut plain, &partial)?;
-            } else {
-                let mut opened = vault::Reader::open(&key, &old, &source)?;
-                let mut out = std::fs::File::create(&partial)?;
-                std::io::copy(&mut opened, &mut out)?;
-                out.sync_all()?;
+            match how {
+                Rewrite::Seal => {
+                    let mut plain = std::fs::File::open(&source)?;
+                    vault::seal_file(keys.current(), &new, &mut plain, &partial)?;
+                }
+                Rewrite::Open => {
+                    let mut opened = keys.reader(&old, &source)?;
+                    let mut out = std::fs::File::create(&partial)?;
+                    std::io::copy(&mut opened, &mut out)?;
+                    out.sync_all()?;
+                }
+                Rewrite::Rekey => vault::rewrap_file(&keys, &old, &new, &source, &partial)?,
             }
             Ok(())
         })
@@ -386,13 +415,87 @@ async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool
 
     // The database no longer knows the old bytes; they go from the disk too.
     let _ = tokio::fs::remove_file(&source).await;
-    tracing::info!(node = target.node_id, from = %old, to = %new, sealed = seal, "file re-written");
+    Ok(new)
+}
+
+/// Re-seal, in the background, every file still under the master key from
+/// before the last password change. It works only while the vault is open,
+/// and never holds it open: locked halfway, it waits for the next unlock and
+/// carries on from there — which file is done is read off each file's own
+/// header. Once none is left, the old master key is forgotten.
+pub fn spawn_rekey(state: AppState) {
+    state.vault.want_rekey();
+    tokio::spawn(async move {
+        loop {
+            state.vault.rekey_wanted().await;
+            if let Err(e) = rekey(&state).await {
+                tracing::error!("re-sealing after a vault password change stopped: {e:#}");
+            }
+        }
+    });
+}
+
+async fn rekey(state: &AppState) -> anyhow::Result<()> {
+    let Some(keys) = state.vault.peek_key().filter(|keys| keys.rekeying()) else {
+        return Ok(());
+    };
+    let sealed: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM media WHERE encrypted ORDER BY created_at, id")
+            .fetch_all(&state.db)
+            .await?;
+    let left = {
+        let (keys, uploads) = (keys.clone(), state.config.uploads_dir());
+        tokio::task::spawn_blocking(move || {
+            sealed
+                .into_iter()
+                // One that will not even be read is no file to re-seal; the
+                // count of failures below is for those that should have been.
+                .filter(|id| {
+                    !vault::sealed_under(keys.current(), id, &uploads.join(id)).unwrap_or(true)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await?
+    };
+
+    let total = left.len() as u64;
+    let mut progress = vault::Rekey { done: 0, total };
+    state.vault.set_progress(Some(progress));
+    tracing::info!("re-sealing {total} file(s) under the new vault key");
+    let mut failed = 0;
+    for id in &left {
+        // Locked meanwhile: the rest waits for the next unlock.
+        let Some(open) = state.vault.peek_key() else {
+            return Ok(());
+        };
+        if !std::sync::Arc::ptr_eq(&open, &keys) {
+            return Ok(());
+        }
+        match rewrite(state, &keys, id, Rewrite::Rekey).await {
+            Ok(_) => state.backup.signal(),
+            // Decrypted, deleted or re-written some other way meanwhile.
+            Err(AppError::NotFound) => {}
+            Err(e) => {
+                tracing::warn!(media = %id, "could not re-seal a file: {e:?}");
+                failed += 1;
+            }
+        }
+        progress.done += 1;
+        state.vault.set_progress(Some(progress));
+    }
+    if failed > 0 {
+        anyhow::bail!("{failed} file(s) would not re-seal; the old key is kept for them");
+    }
+    state.vault.finish_rekey(&keys).await?;
+    tracing::info!("every sealed file is under the new vault key");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
     use zeroize::Zeroizing;
 
     use crate::{error::AppError, routes::media};
@@ -593,5 +696,197 @@ mod tests {
         assert!(!sealed(&w.state, w.folder).await.unwrap());
         assert!(!sealed(&w.state, inner).await.unwrap());
         plain_file(&w.state, inner, "e.txt").await.unwrap();
+    }
+
+    fn password(text: &str) -> vault::Password {
+        Zeroizing::new(text.to_string())
+    }
+
+    async fn row_retired(w: &World) -> bool {
+        sqlx::query_scalar::<_, Option<Vec<u8>>>("SELECT retired_sealed FROM vault")
+            .fetch_one(&w.state.db)
+            .await
+            .unwrap()
+            .is_some()
+    }
+
+    async fn sealed_ids(state: &AppState) -> Vec<String> {
+        sqlx::query_scalar("SELECT id FROM media WHERE encrypted ORDER BY id")
+            .fetch_all(&state.db)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_password_change_re_seals_every_file_under_a_new_key() {
+        let w = world().await;
+        w.state.vault.lock();
+        assert!(w
+            .state
+            .vault
+            .setup(password("first password"))
+            .await
+            .unwrap());
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            plain_file(&w.state, w.folder, name).await.unwrap();
+        }
+        seal_node(&w.state, w.folder).await.unwrap();
+        let old_master = w.state.vault.peek_key().unwrap().current().clone();
+        let before = sealed_ids(&w.state).await;
+        assert_eq!(before.len(), 3);
+
+        let changed = w
+            .state
+            .vault
+            .change_password(password("first password"), password("second password"))
+            .await
+            .unwrap();
+        assert!(matches!(changed, vault::Unlock::Opened));
+        assert!(w.state.vault.status().await.unwrap().rekey.is_some());
+
+        // Locked before any file was re-sealed, as a restart would leave it.
+        w.state.vault.lock();
+        let old = w
+            .state
+            .vault
+            .unlock(password("first password"))
+            .await
+            .unwrap();
+        assert!(matches!(old, vault::Unlock::WrongPassword));
+        let new = w
+            .state
+            .vault
+            .unlock(password("second password"))
+            .await
+            .unwrap();
+        assert!(matches!(new, vault::Unlock::Opened));
+
+        // Every file still reads, under whichever key it is.
+        let keys = w.state.vault.peek_key().unwrap();
+        assert!(keys.rekeying());
+        let uploads = w.state.config.uploads_dir();
+        for id in &before {
+            let mut out = Vec::new();
+            keys.reader(id, &uploads.join(id))
+                .unwrap()
+                .read_to_end(&mut out)
+                .unwrap();
+            assert_eq!(out, b"secret bytes");
+        }
+
+        // A second change waits for the first to finish.
+        let again = w
+            .state
+            .vault
+            .change_password(password("second password"), password("third password"))
+            .await
+            .unwrap();
+        assert!(matches!(again, vault::Unlock::Rekeying));
+
+        rekey(&w.state).await.unwrap();
+        assert!(!row_retired(&w).await);
+        assert!(w.state.vault.status().await.unwrap().rekey.is_none());
+        assert!(!w.state.vault.peek_key().unwrap().rekeying());
+
+        let after = sealed_ids(&w.state).await;
+        assert_eq!(after.len(), 3);
+        let current = w.state.vault.peek_key().unwrap();
+        for id in &after {
+            assert!(!before.contains(id), "re-sealed under a new id");
+            let path = uploads.join(id);
+            assert!(vault::sealed_under(current.current(), id, &path).unwrap());
+            assert!(!vault::sealed_under(&old_master, id, &path).unwrap());
+            let mut out = Vec::new();
+            current
+                .reader(id, &path)
+                .unwrap()
+                .read_to_end(&mut out)
+                .unwrap();
+            assert_eq!(out, b"secret bytes");
+        }
+        // The old copies are gone from the disk and on their way off Drive.
+        for id in &before {
+            assert!(!uploads.join(id).exists());
+            let retired: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM backup_retired WHERE path = 'uploads/' || ?1",
+            )
+            .bind(id)
+            .fetch_one(&w.state.db)
+            .await
+            .unwrap();
+            assert_eq!(retired, 1);
+        }
+
+        // And the next change goes ahead.
+        let third = w
+            .state
+            .vault
+            .change_password(password("second password"), password("third password"))
+            .await
+            .unwrap();
+        assert!(matches!(third, vault::Unlock::Opened));
+    }
+
+    #[tokio::test]
+    async fn a_vault_locked_halfway_carries_on_after_the_next_unlock() {
+        let w = world().await;
+        w.state.vault.lock();
+        assert!(w
+            .state
+            .vault
+            .setup(password("first password"))
+            .await
+            .unwrap());
+        for name in ["a.txt", "b.txt"] {
+            plain_file(&w.state, w.folder, name).await.unwrap();
+        }
+        seal_node(&w.state, w.folder).await.unwrap();
+        w.state
+            .vault
+            .change_password(password("first password"), password("second password"))
+            .await
+            .unwrap();
+
+        // One file by hand, then the lock: what is left is half and half.
+        let keys = w.state.vault.peek_key().unwrap();
+        let first = sealed_ids(&w.state).await.remove(0);
+        rewrite(&w.state, &keys, &first, Rewrite::Rekey)
+            .await
+            .unwrap();
+        w.state.vault.lock();
+        rekey(&w.state).await.unwrap();
+        assert!(row_retired(&w).await, "nothing happens while it is locked");
+
+        w.state
+            .vault
+            .unlock(password("second password"))
+            .await
+            .unwrap();
+        rekey(&w.state).await.unwrap();
+        assert!(!row_retired(&w).await);
+        let current = w.state.vault.peek_key().unwrap();
+        for id in sealed_ids(&w.state).await {
+            let path = w.state.config.uploads_dir().join(&id);
+            assert!(vault::sealed_under(current.current(), &id, &path).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn with_nothing_sealed_a_change_needs_no_re_sealing() {
+        let w = world().await;
+        w.state.vault.lock();
+        assert!(w
+            .state
+            .vault
+            .setup(password("first password"))
+            .await
+            .unwrap());
+        w.state
+            .vault
+            .change_password(password("first password"), password("second password"))
+            .await
+            .unwrap();
+        assert!(!row_retired(&w).await);
+        assert!(w.state.vault.status().await.unwrap().rekey.is_none());
     }
 }

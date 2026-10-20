@@ -386,13 +386,11 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             let source: Box<dyn std::io::Read> = match (&key, sealed.contains(id)) {
                 // A sealed file that will not open is not a file to leave out
                 // quietly: the archive would claim to be complete and not be.
-                (Some(key), true) => {
-                    Box::new(crate::vault::Reader::open(key, id, &path).map_err(|e| {
-                        AppError::BadRequest(format!(
-                            "{entry} is sealed and would not open ({e}) — nothing was exported"
-                        ))
-                    })?)
-                }
+                (Some(key), true) => Box::new(key.reader(id, &path).map_err(|e| {
+                    AppError::BadRequest(format!(
+                        "{entry} is sealed and would not open ({e}) — nothing was exported"
+                    ))
+                })?),
                 // A row whose file has gone missing must not fail the whole
                 // export; there is nothing to put in its place either way.
                 _ => match std::fs::File::open(&path) {

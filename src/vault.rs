@@ -8,10 +8,10 @@
 //!
 //! Keys:
 //!
-//! - a random 256-bit **master key**, made once at setup and never stored in
-//!   the clear: the `vault` row holds it sealed under a key derived from the
-//!   password with Argon2id. Changing the password re-seals the master key and
-//!   touches no file;
+//! - a random 256-bit **master key**, never stored in the clear: the `vault`
+//!   row holds it sealed under a key derived from the password with Argon2id.
+//!   Changing the password makes a new master key, and every sealed file is
+//!   then re-sealed under it in the background — see [`Keyring`];
 //! - a random 256-bit **file key** per file, sealed under the master key in
 //!   the file's own header, so no two files share a key and nonces never need
 //!   counting across files.
@@ -65,6 +65,9 @@ pub const HEADER: usize = MAGIC.len() + WRAP_NONCE + 32 + TAG + STREAM_NONCE;
 
 /// What the master key is sealed with, besides the password-derived key.
 const MASTER_AAD: &[u8] = b"narl-vault-master-key";
+/// What the master key before a password change is sealed with, besides the
+/// master key after it.
+const RETIRED_AAD: &[u8] = b"narl-vault-retired-key";
 
 /// The shortest password the vault takes. It guards everything in it, and
 /// unlike the login it cannot be reset by editing a config file.
@@ -73,7 +76,11 @@ pub const MIN_PASSWORD: usize = 10;
 /// Argon2id costs for new vaults: 64 MiB, three passes, one lane. A fraction
 /// of a second on a small server, which is the budget for an unlock. Kept per
 /// vault, so raising them later does not lock anybody out.
+#[cfg(not(test))]
 const M_COST: u32 = 64 * 1024;
+/// Tests set up and change real vaults; at full cost each would take seconds.
+#[cfg(test)]
+const M_COST: u32 = 256;
 const T_COST: u32 = 3;
 const P_COST: u32 = 1;
 
@@ -98,30 +105,37 @@ fn derive(password: &str, salt: &[u8], m: u32, t: u32, p: u32) -> Result<Key> {
 }
 
 fn seal_master(kek: &Key, master: &Key) -> Result<([u8; WRAP_NONCE], Vec<u8>)> {
+    wrap(kek, master, MASTER_AAD)
+}
+
+/// `None` is a wrong password: the tag does not verify.
+fn open_master(kek: &Key, nonce: &[u8], sealed: &[u8]) -> Option<Key> {
+    unwrap(kek, nonce, sealed, MASTER_AAD)
+}
+
+/// Seal one 32-byte key under another.
+fn wrap(kek: &Key, key: &Key, aad: &[u8]) -> Result<([u8; WRAP_NONCE], Vec<u8>)> {
     let nonce = random::<WRAP_NONCE>();
     let sealed = Aes256Gcm::new(kek.as_ref().into())
         .encrypt(
             Nonce::from_slice(&nonce),
             Payload {
-                msg: master.as_ref(),
-                aad: MASTER_AAD,
+                msg: key.as_ref(),
+                aad,
             },
         )
-        .map_err(|_| anyhow!("could not seal the master key"))?;
+        .map_err(|_| anyhow!("could not seal a key"))?;
     Ok((nonce, sealed))
 }
 
-/// `None` is a wrong password: the tag does not verify.
-fn open_master(kek: &Key, nonce: &[u8], sealed: &[u8]) -> Option<Key> {
+/// `None` when `kek` is not the key it was sealed under.
+fn unwrap(kek: &Key, nonce: &[u8], sealed: &[u8], aad: &[u8]) -> Option<Key> {
+    if nonce.len() != WRAP_NONCE {
+        return None;
+    }
     let plain = Zeroizing::new(
         Aes256Gcm::new(kek.as_ref().into())
-            .decrypt(
-                Nonce::from_slice(nonce),
-                Payload {
-                    msg: sealed,
-                    aad: MASTER_AAD,
-                },
-            )
+            .decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad })
             .ok()?,
     );
     let mut key = Zeroizing::new([0u8; 32]);
@@ -202,6 +216,13 @@ impl Sealer {
     }
 }
 
+/// A header's wrap nonce, sealed file key and stream nonce.
+fn split_header(header: &[u8]) -> (&[u8], &[u8], &[u8]) {
+    let (wrap_nonce, rest) = header[MAGIC.len()..].split_at(WRAP_NONCE);
+    let (sealed_key, stream_nonce) = rest.split_at(32 + TAG);
+    (wrap_nonce, sealed_key, stream_nonce)
+}
+
 fn file_aad(media_id: &str) -> Vec<u8> {
     let mut aad = MAGIC.to_vec();
     aad.extend_from_slice(media_id.as_bytes());
@@ -239,21 +260,11 @@ impl Opener {
             return Err(anyhow!("sealed file is truncated"));
         }
 
-        let (wrap_nonce, rest) = header[MAGIC.len()..].split_at(WRAP_NONCE);
-        let (sealed_key, stream_nonce) = rest.split_at(32 + TAG);
-        let file_key = Zeroizing::new(
-            Aes256Gcm::new(master.as_ref().into())
-                .decrypt(
-                    Nonce::from_slice(wrap_nonce),
-                    Payload {
-                        msg: sealed_key,
-                        aad: &file_aad(media_id),
-                    },
-                )
-                .map_err(|_| {
-                    anyhow!("this file was not sealed under this vault, or not as {media_id}")
-                })?,
-        );
+        let (wrap_nonce, sealed_key, stream_nonce) = split_header(header);
+        let file_key =
+            unwrap(master, wrap_nonce, sealed_key, &file_aad(media_id)).ok_or_else(|| {
+                anyhow!("this file was not sealed under this vault, or not as {media_id}")
+            })?;
         let stream = StreamBE32::from_aead(
             Aes256Gcm::new(file_key.as_slice().into()),
             stream_nonce.into(),
@@ -304,30 +315,12 @@ impl Opener {
 }
 
 /// A sealed file read as its plaintext, for code that wants `std::io::Read`:
-/// the export's zip writer, re-sealing.
+/// the export's zip writer, re-sealing. Made by [`Keyring::reader`].
 pub struct Reader<R> {
     inner: R,
     opener: Opener,
     buffer: Vec<u8>,
     at: usize,
-}
-
-impl Reader<std::fs::File> {
-    pub fn open(master: &Key, media_id: &str, path: &std::path::Path) -> Result<Self> {
-        let mut file = std::fs::File::open(path)
-            .with_context(|| format!("could not read {}", path.display()))?;
-        let len = file.metadata()?.len();
-        let mut header = [0u8; HEADER];
-        file.read_exact(&mut header)
-            .context("sealed file is truncated")?;
-        let opener = Opener::new(master, media_id, &header, len)?;
-        Ok(Self {
-            inner: file,
-            opener,
-            buffer: Vec::new(),
-            at: 0,
-        })
-    }
 }
 
 impl<R: Read> Read for Reader<R> {
@@ -376,6 +369,116 @@ pub fn seal_file(
     Ok(size)
 }
 
+/// The keys an open vault holds: the master key everything is sealed under
+/// from now on, and — while files sealed before the last password change
+/// are still being re-sealed — the master key before it, which only reads.
+pub struct Keyring {
+    current: Key,
+    retired: Option<Key>,
+}
+
+impl Keyring {
+    pub fn new(current: Key) -> Self {
+        Self {
+            current,
+            retired: None,
+        }
+    }
+
+    /// The key to seal with.
+    pub fn current(&self) -> &Key {
+        &self.current
+    }
+
+    /// Whether files sealed before the last password change may be left.
+    pub fn rekeying(&self) -> bool {
+        self.retired.is_some()
+    }
+
+    fn masters(&self) -> impl Iterator<Item = &Key> {
+        std::iter::once(&self.current).chain(self.retired.as_ref())
+    }
+
+    /// [`Opener::new`] under whichever key the file was sealed with.
+    pub fn opener(&self, media_id: &str, header: &[u8], len: u64) -> Result<Opener> {
+        let mut first = None;
+        for master in self.masters() {
+            match Opener::new(master, media_id, header, len) {
+                Ok(opener) => return Ok(opener),
+                Err(e) => {
+                    first.get_or_insert(e);
+                }
+            }
+        }
+        Err(first.expect("a keyring holds a key"))
+    }
+
+    /// [`Reader::open`] under whichever key the file was sealed with.
+    pub fn reader(&self, media_id: &str, path: &std::path::Path) -> Result<Reader<std::fs::File>> {
+        let mut file = std::fs::File::open(path)
+            .with_context(|| format!("could not read {}", path.display()))?;
+        let len = file.metadata()?.len();
+        let mut header = [0u8; HEADER];
+        file.read_exact(&mut header)
+            .context("sealed file is truncated")?;
+        let opener = self.opener(media_id, &header, len)?;
+        Ok(Reader {
+            inner: file,
+            opener,
+            buffer: Vec::new(),
+            at: 0,
+        })
+    }
+}
+
+/// Whether the file at `path` was sealed under `master` as `media_id`. Reads
+/// the header only.
+pub fn sealed_under(master: &Key, media_id: &str, path: &std::path::Path) -> Result<bool> {
+    let mut header = [0u8; HEADER];
+    std::fs::File::open(path)?.read_exact(&mut header)?;
+    if &header[..MAGIC.len()] != MAGIC {
+        return Err(anyhow!("not a sealed file"));
+    }
+    let (wrap_nonce, sealed_key, _) = split_header(&header);
+    Ok(unwrap(master, wrap_nonce, sealed_key, &file_aad(media_id)).is_some())
+}
+
+/// Copy the sealed file `old_id` at `source` to `target` as `new_id`, its
+/// file key sealed under the keyring's current master key. Only the header
+/// changes: the records, under the file's own key, are copied as they are.
+pub fn rewrap_file(
+    keys: &Keyring,
+    old_id: &str,
+    new_id: &str,
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<()> {
+    use std::io::Write;
+    let mut source = std::fs::File::open(source)?;
+    let mut header = [0u8; HEADER];
+    source
+        .read_exact(&mut header)
+        .context("sealed file is truncated")?;
+    if &header[..MAGIC.len()] != MAGIC {
+        return Err(anyhow!("not a sealed file"));
+    }
+    let (wrap_nonce, sealed_key, stream_nonce) = split_header(&header);
+    let file_key = keys
+        .masters()
+        .find_map(|master| unwrap(master, wrap_nonce, sealed_key, &file_aad(old_id)))
+        .ok_or_else(|| anyhow!("{old_id} was not sealed under this vault"))?;
+    let (wrap_nonce, sealed_key) = wrap(&keys.current, &file_key, &file_aad(new_id))?;
+
+    let mut out = std::io::BufWriter::new(std::fs::File::create(target)?);
+    out.write_all(MAGIC)?;
+    out.write_all(&wrap_nonce)?;
+    out.write_all(&sealed_key)?;
+    out.write_all(stream_nonce)?;
+    std::io::copy(&mut source, &mut out)?;
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    Ok(())
+}
+
 /// A vault password on its way to Argon2, wiped from memory once it is done.
 pub type Password = Zeroizing<String>;
 
@@ -391,11 +494,22 @@ pub struct Vault {
     db: SqlitePool,
     idle: Duration,
     open: Mutex<Option<Unlocked>>,
+    /// Wakes whatever re-seals files after a password change.
+    rekey: tokio::sync::Notify,
+    /// How far that has come, while it runs.
+    progress: Mutex<Option<Rekey>>,
 }
 
 struct Unlocked {
-    key: Arc<Key>,
+    keys: Arc<Keyring>,
     touched: Instant,
+}
+
+/// Re-sealing after a password change: files done, out of how many.
+#[derive(serde::Serialize, Clone, Copy, Default)]
+pub struct Rekey {
+    pub done: u64,
+    pub total: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -407,6 +521,9 @@ pub struct Status {
     pub locks_in: Option<u64>,
     /// How many files are sealed: what an export needs the vault open for.
     pub sealed: i64,
+    /// Present while files sealed before the last password change are left.
+    /// `total` is 0 until they have been counted, which needs the vault open.
+    pub rekey: Option<Rekey>,
 }
 
 /// What a password check came to.
@@ -414,6 +531,8 @@ pub enum Unlock {
     Opened,
     WrongPassword,
     NotConfigured,
+    /// The last password change is still re-sealing files.
+    Rekeying,
 }
 
 impl Vault {
@@ -422,21 +541,65 @@ impl Vault {
             db,
             idle,
             open: Mutex::new(None),
+            rekey: tokio::sync::Notify::new(),
+            progress: Mutex::new(None),
         })
+    }
+
+    fn put(&self, keys: Keyring) {
+        let rekeying = keys.rekeying();
+        *self.slot() = Some(Unlocked {
+            keys: Arc::new(keys),
+            touched: Instant::now(),
+        });
+        if rekeying {
+            self.rekey.notify_one();
+        }
+    }
+
+    /// Wait until there may be files to re-seal.
+    pub async fn rekey_wanted(&self) {
+        self.rekey.notified().await;
+    }
+
+    /// Ask for a look at whether files are left to re-seal: at startup, when
+    /// the vault may have been changed while nothing was watching.
+    pub fn want_rekey(&self) {
+        self.rekey.notify_one();
+    }
+
+    pub fn set_progress(&self, progress: Option<Rekey>) {
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = progress;
+    }
+
+    /// Every file is under the current master key: forget the one before it,
+    /// on disk and in memory. `keys` is the keyring that did the work; a
+    /// vault that has since been locked, or changed again, is left alone.
+    pub async fn finish_rekey(&self, keys: &Arc<Keyring>) -> Result<()> {
+        sqlx::query("UPDATE vault SET retired_nonce = NULL, retired_sealed = NULL WHERE id = 1")
+            .execute(&self.db)
+            .await?;
+        let mut slot = self.slot();
+        if let Some(open) = slot.as_mut().filter(|open| Arc::ptr_eq(&open.keys, keys)) {
+            open.keys = Arc::new(Keyring::new(keys.current.clone()));
+        }
+        drop(slot);
+        self.set_progress(None);
+        Ok(())
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Option<Unlocked>> {
         self.open.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The master key, if the vault is open — and keep it open a while longer.
+    /// The keys, if the vault is open — and keep it open a while longer.
     /// A vault left alone past the idle time closes on the next look.
-    pub fn key(&self) -> Option<Arc<Key>> {
+    pub fn key(&self) -> Option<Arc<Keyring>> {
         let mut slot = self.slot();
         match slot.as_mut() {
             Some(open) if open.touched.elapsed() < self.idle => {
                 open.touched = Instant::now();
-                Some(open.key.clone())
+                Some(open.keys.clone())
             }
             Some(_) => {
                 *slot = None;
@@ -457,11 +620,11 @@ impl Vault {
     /// The key while the vault is open, without counting as a use: for what
     /// is not the owner at the browser — a mount — which may use the vault
     /// while it is open but must not keep it so.
-    pub fn peek_key(&self) -> Option<Arc<Key>> {
+    pub fn peek_key(&self) -> Option<Arc<Keyring>> {
         self.slot()
             .as_ref()
             .filter(|open| open.touched.elapsed() < self.idle)
-            .map(|open| open.key.clone())
+            .map(|open| open.keys.clone())
     }
 
     pub fn lock(&self) {
@@ -472,10 +635,7 @@ impl Vault {
     /// vault allows.
     #[cfg(test)]
     pub fn open_with(&self, key: Key) {
-        *self.slot() = Some(Unlocked {
-            key: Arc::new(key),
-            touched: Instant::now(),
-        });
+        self.put(Keyring::new(key));
     }
 
     /// Drop the key once it has gone unused past the idle time. Without this
@@ -508,7 +668,11 @@ impl Vault {
     }
 
     pub async fn status(&self) -> Result<Status> {
-        let configured = self.row().await?.is_some();
+        let row = self.row().await?;
+        let configured = row.is_some();
+        let rekeying =
+            row.is_some_and(|row| row.get::<Option<Vec<u8>>, _>("retired_sealed").is_some());
+        let progress = *self.progress.lock().unwrap_or_else(|e| e.into_inner());
         let sealed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media WHERE encrypted")
             .fetch_one(&self.db)
             .await?;
@@ -523,12 +687,14 @@ impl Vault {
             unlocked: remaining.is_some(),
             locks_in: remaining.map(|left| left.as_secs()),
             sealed,
+            rekey: rekeying.then(|| progress.unwrap_or_default()),
         })
     }
 
     async fn row(&self) -> Result<Option<sqlx::sqlite::SqliteRow>> {
         Ok(sqlx::query(
-            "SELECT salt, m_cost, t_cost, p_cost, nonce, sealed FROM vault WHERE id = 1",
+            "SELECT salt, m_cost, t_cost, p_cost, nonce, sealed, retired_nonce, retired_sealed
+             FROM vault WHERE id = 1",
         )
         .fetch_optional(&self.db)
         .await?)
@@ -567,15 +733,12 @@ impl Vault {
             return Ok(false);
         }
 
-        *self.slot() = Some(Unlocked {
-            key: Arc::new(master),
-            touched: Instant::now(),
-        });
+        self.put(Keyring::new(master));
         Ok(true)
     }
 
-    /// The master key the password stands for, if it is the right one.
-    async fn check(&self, password: Password) -> Result<Option<Option<Key>>> {
+    /// The keys the password stands for, if it is the right one.
+    async fn check(&self, password: Password) -> Result<Option<Option<Keyring>>> {
         let Some(row) = self.row().await? else {
             return Ok(None);
         };
@@ -583,45 +746,77 @@ impl Vault {
         let (m, t, p): (i64, i64, i64) = (row.get("m_cost"), row.get("t_cost"), row.get("p_cost"));
         let nonce: Vec<u8> = row.get("nonce");
         let sealed: Vec<u8> = row.get("sealed");
-        let key = tokio::task::spawn_blocking(move || -> Result<Option<Key>> {
+        let retired: Option<(Vec<u8>, Vec<u8>)> = row
+            .get::<Option<Vec<u8>>, _>("retired_nonce")
+            .zip(row.get::<Option<Vec<u8>>, _>("retired_sealed"));
+        let keys = tokio::task::spawn_blocking(move || -> Result<Option<Keyring>> {
             let kek = derive(&password, &salt, m as u32, t as u32, p as u32)?;
-            Ok(open_master(&kek, &nonce, &sealed))
+            let Some(current) = open_master(&kek, &nonce, &sealed) else {
+                return Ok(None);
+            };
+            let retired = match retired {
+                None => None,
+                Some((nonce, sealed)) => Some(
+                    unwrap(&current, &nonce, &sealed, RETIRED_AAD)
+                        .ok_or_else(|| anyhow!("the vault's previous key does not open"))?,
+                ),
+            };
+            Ok(Some(Keyring { current, retired }))
         })
         .await??;
-        Ok(Some(key))
+        Ok(Some(keys))
     }
 
     pub async fn unlock(&self, password: Password) -> Result<Unlock> {
         Ok(match self.check(password).await? {
             None => Unlock::NotConfigured,
             Some(None) => Unlock::WrongPassword,
-            Some(Some(key)) => {
-                *self.slot() = Some(Unlocked {
-                    key: Arc::new(key),
-                    touched: Instant::now(),
-                });
+            Some(Some(keys)) => {
+                self.put(keys);
                 Unlock::Opened
             }
         })
     }
 
-    /// Re-seal the master key under a new password. No file changes: they are
-    /// sealed under the master key, which stays what it was.
+    /// A new password, and a new master key with it. The old master key is
+    /// kept, sealed under the new one, only until every file has been
+    /// re-sealed; the old password opens nothing from the moment this
+    /// returns. Refused while the last change is still re-sealing, so there
+    /// are never more than two master keys to try.
     pub async fn change_password(&self, current: Password, new: Password) -> Result<Unlock> {
-        let master = match self.check(current).await? {
+        let old = match self.check(current).await? {
             None => return Ok(Unlock::NotConfigured),
             Some(None) => return Ok(Unlock::WrongPassword),
-            Some(Some(key)) => key,
+            Some(Some(keys)) if keys.rekeying() => {
+                self.put(keys);
+                return Ok(Unlock::Rekeying);
+            }
+            Some(Some(keys)) => keys.current,
         };
+        let sealed_files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media WHERE encrypted")
+            .fetch_one(&self.db)
+            .await?;
         let salt = random::<16>();
-        let (nonce, sealed, master) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let (nonce, sealed, retired, keys) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let master: Key = Zeroizing::new(random::<32>());
             let kek = derive(&new, &salt, M_COST, T_COST, P_COST)?;
             let (nonce, sealed) = seal_master(&kek, &master)?;
-            Ok((nonce, sealed, master))
+            // Nothing sealed, nothing to carry over.
+            let retired = match sealed_files {
+                0 => None,
+                _ => Some(wrap(&master, &old, RETIRED_AAD)?),
+            };
+            let keys = Keyring {
+                current: master,
+                retired: retired.is_some().then_some(old),
+            };
+            Ok((nonce, sealed, retired, keys))
         })
         .await??;
+        let (retired_nonce, retired_sealed) = retired.unzip();
         sqlx::query(
-            "UPDATE vault SET salt = ?1, m_cost = ?2, t_cost = ?3, p_cost = ?4, nonce = ?5, sealed = ?6
+            "UPDATE vault SET salt = ?1, m_cost = ?2, t_cost = ?3, p_cost = ?4, nonce = ?5, sealed = ?6,
+                              retired_nonce = ?7, retired_sealed = ?8
              WHERE id = 1",
         )
         .bind(salt.as_slice())
@@ -630,12 +825,12 @@ impl Vault {
         .bind(P_COST as i64)
         .bind(nonce.as_slice())
         .bind(sealed)
+        .bind(retired_nonce.as_ref().map(|nonce| nonce.as_slice()))
+        .bind(retired_sealed)
         .execute(&self.db)
         .await?;
-        *self.slot() = Some(Unlocked {
-            key: Arc::new(master),
-            touched: Instant::now(),
-        });
+        self.set_progress(None);
+        self.put(keys);
         Ok(Unlock::Opened)
     }
 }
@@ -646,7 +841,7 @@ mod tests {
 
     use zeroize::Zeroizing;
 
-    use super::{derive, open_master, seal_master, Opener, Reader, Sealer, CHUNK, HEADER, TAG};
+    use super::{derive, open_master, seal_master, Opener, Sealer, CHUNK, HEADER, TAG};
 
     fn key(byte: u8) -> super::Key {
         Zeroizing::new([byte; 32])
@@ -683,7 +878,7 @@ mod tests {
         let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         let vault = super::Vault::new(db, std::time::Duration::from_millis(20));
         *vault.slot() = Some(super::Unlocked {
-            key: std::sync::Arc::new(key(1)),
+            keys: std::sync::Arc::new(super::Keyring::new(key(1))),
             touched: std::time::Instant::now(),
         });
         vault.expire();
@@ -701,7 +896,7 @@ mod tests {
         let vault = super::Vault::new(db, std::time::Duration::from_millis(40));
         let started = std::time::Instant::now();
         *vault.slot() = Some(super::Unlocked {
-            key: std::sync::Arc::new(key(1)),
+            keys: std::sync::Arc::new(super::Keyring::new(key(1))),
             touched: started,
         });
         assert!(vault.peek_key().is_some());
@@ -766,7 +961,8 @@ mod tests {
         let path = dir.path().join("x");
         std::fs::write(&path, seal(&master, "x", &plain, CHUNK)).expect("write");
         let mut out = Vec::new();
-        Reader::open(&master, "x", &path)
+        super::Keyring::new(master)
+            .reader("x", &path)
             .expect("reader")
             .read_to_end(&mut out)
             .expect("read");
@@ -810,5 +1006,38 @@ mod tests {
         );
         let wrong = derive("correct horse!", b"saltsaltsaltsalt", 256, 1, 1).expect("derive");
         assert!(open_master(&wrong, &nonce, &sealed).is_none());
+    }
+
+    #[test]
+    fn a_rewrapped_file_opens_under_the_new_key_only() {
+        let (old, new) = (key(1), key(2));
+        let plain: Vec<u8> = (0..(2 * CHUNK + 9)).map(|i| (i % 253) as u8).collect();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (source, target) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::write(&source, seal(&old, "a", &plain, CHUNK)).expect("write");
+
+        let keys = super::Keyring {
+            current: new.clone(),
+            retired: Some(old.clone()),
+        };
+        // Both are readable while the change is under way.
+        let mut out = Vec::new();
+        keys.reader("a", &source)
+            .unwrap()
+            .read_to_end(&mut out)
+            .unwrap();
+        assert_eq!(out, plain);
+
+        super::rewrap_file(&keys, "a", "b", &source, &target).unwrap();
+        assert!(super::sealed_under(&new, "b", &target).unwrap());
+        assert!(!super::sealed_under(&old, "b", &target).unwrap());
+        let mut out = Vec::new();
+        super::Keyring::new(new)
+            .reader("b", &target)
+            .unwrap()
+            .read_to_end(&mut out)
+            .unwrap();
+        assert_eq!(out, plain);
+        assert!(super::Keyring::new(old).reader("b", &target).is_err());
     }
 }

@@ -309,12 +309,17 @@ it back out. `:unlock` and `:lock` open and close it, `:passwd` changes the
 password. A sealed file carries a lock in the list, and the bar says `vault
 open` while it is.
 
-`:passwd` wraps the same key under the new password, so no file has to be
-rewritten — and so it does not take back what the old password opens. A copy
-of `diary.db` from before the change (a `diary.db.pre-*` snapshot, a backup in
-Proton Drive) still unwraps the key with the old password, and that key still
-opens every sealed file. Change the password because you want a new one, not
-to shut out someone who has the old one and an old copy.
+`:passwd` makes a new master key as well as a new password. The old password
+stops opening anything at once; every sealed file is then re-sealed under the
+new key in the background, under a new name, while the vault is open — `:vault`
+shows how far it has come, and locking halfway only pauses it until the next
+`:unlock`. The old copies are deleted from `uploads/` and, on the next mirror
+run, from Proton Drive for good. After that, a copy of `diary.db` from before
+the change (a `diary.db.pre-*` snapshot, an old revision in Proton Drive) and
+the old password open nothing that is still kept anywhere. What they cannot
+take back is a copy someone already made of the files themselves. Re-sealing
+rewrites only each file's header, but every sealed file is uploaded to Proton
+Drive once more. A second `:passwd` waits until the first has finished.
 
 `:encrypt` on a folder or space seals it for good, not just once: every file
 in it now, and every file that lands in it later. An upload, an import, an SFTP
@@ -340,7 +345,10 @@ master key, and only that sealed copy is stored. Each file gets a random key of
 its own, sealed under the master key in the file's header together with its
 id, and its bytes are AES-256-GCM in 64 KiB records, the last one marked as
 last — so a file that is swapped, cut short or tampered with refuses to open.
-Changing the password re-seals the master key and rewrites no file.
+Changing the password makes a new master key. Until every file is re-sealed,
+the old one is kept sealed under the new one, so either kind of file opens and
+an interrupted re-seal carries on where it stopped; re-sealing a file wraps its
+own key under the new master key and copies its records as they are.
 
 A sealed file is served with `Cache-Control: no-store`, so the browser keeps
 no copy of what it showed once the vault shuts. A sealed image in a document

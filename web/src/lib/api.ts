@@ -199,6 +199,11 @@ export interface VaultStatus {
   locks_in: number | null
   /** How many files are sealed: what an export needs the vault open for. */
   sealed: number
+  /**
+   * Present while files sealed before the last password change are still
+   * being re-sealed under the new key; `total` is 0 until counted.
+   */
+  rekey: { done: number; total: number } | null
 }
 
 /** The Proton Drive mirror, as `/api/backup` reports it. */

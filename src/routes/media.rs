@@ -297,7 +297,14 @@ pub async fn upload_into(
         let mime = mime_of(&filename, field.content_type());
 
         let id = Uuid::new_v4().to_string();
-        let size = store_field(&state, &mut field, &id, &mut budget, key.as_deref()).await?;
+        let size = store_field(
+            &state,
+            &mut field,
+            &id,
+            &mut budget,
+            key.as_deref().map(vault::Keyring::current),
+        )
+        .await?;
         if size == 0 {
             continue;
         }
@@ -598,7 +605,7 @@ pub async fn stream_media(
 /// does break off, as a read over the mount does.
 async fn open_stream(
     mut file: tokio::fs::File,
-    key: &vault::Key,
+    key: &vault::Keyring,
     vault: Arc<vault::Vault>,
     id: &str,
     start: u64,
@@ -609,7 +616,7 @@ async fn open_stream(
     let len = file.metadata().await?.len();
     let mut header = [0u8; vault::HEADER];
     file.read_exact(&mut header).await?;
-    let mut opener = vault::Opener::new(key, id, &header, len)?;
+    let mut opener = key.opener(id, &header, len)?;
     let first = start / vault::CHUNK as u64;
     if first > 0 {
         opener.skip_to(first)?;

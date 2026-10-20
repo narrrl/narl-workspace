@@ -137,6 +137,7 @@ async fn main() -> Result<()> {
         epoch: Arc::new(std::sync::atomic::AtomicI64::new(epoch)),
         sessions,
     };
+    routes::seal::spawn_rekey(state.clone());
 
     if let Some(sftp_bind) = config.sftp.bind {
         let sftp_state = state.clone();

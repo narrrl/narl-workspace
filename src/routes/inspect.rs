@@ -35,7 +35,7 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     state::AppState,
-    vault::{self, Password},
+    vault::Password,
 };
 
 /// Certificates and keys are kilobytes. Anything past this is not one, and is
@@ -137,7 +137,7 @@ pub async fn inspect(
         let mut bytes = Zeroizing::new(Vec::new());
         match key {
             Some(key) => {
-                vault::Reader::open(&key, &media_id, &path)?
+                key.reader(&media_id, &path)?
                     .take(MAX_INSPECT)
                     .read_to_end(&mut bytes)?;
             }
