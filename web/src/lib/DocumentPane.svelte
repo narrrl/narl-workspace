@@ -21,7 +21,7 @@
 
   const focused = $derived(workspace.tile === tile)
   const doc = $derived(tile.open!)
-  const html = $derived(renderMarkdown(tile.editing ? tile.draft.body : doc.body))
+  const html = $derived(renderMarkdown(tile.editing ? tile.draft.body : doc.body, { wikilinks: doc.wikilinks }))
   const words = $derived(
     (tile.editing ? tile.draft.body : doc.body).split(/\s+/).filter(Boolean).length,
   )
@@ -161,6 +161,10 @@
         <dd>{relative(doc.updated_at)}</dd>
         <dt>words</dt>
         <dd>{words}<span class="unit">words</span></dd>
+        {#if doc.backlinks > 0}
+          <dt>linked</dt>
+          <dd><button class="linked" title="what links here (gb)" onclick={() => runCommand('backlinks')}>from {doc.backlinks}</button></dd>
+        {/if}
       </dl>
 
       <div class="actions">
@@ -298,6 +302,9 @@
   }
   .meta dt { color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
   .meta dd { margin: 0 10px 0 0; color: var(--fg); }
+  /* Read as the rest of the line, and still a way to the backlinks. */
+  .meta .linked { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--overlay); text-underline-offset: 4px; }
+  .meta .linked:hover, .meta .linked:focus-visible { color: var(--light); }
 
   .actions { display: flex; gap: 4px; flex-wrap: wrap; flex: none; }
   .actions .on { color: var(--light); border-color: var(--light-dim); }

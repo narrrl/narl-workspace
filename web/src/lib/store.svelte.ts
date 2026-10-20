@@ -5,6 +5,7 @@ import {
   unreachable,
   type Agenda,
   type AgendaCard,
+  type Backlink,
   type Board,
   type Card,
   type Crumb,
@@ -281,7 +282,7 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash' | 'history'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks'>('none')
   /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
   outline = $state.raw<Heading[]>([])
   outlineCursor = $state(0)
@@ -317,6 +318,9 @@ class Workspace {
   history = $state<RevisionSummary[]>([])
   historyCursor = $state(0)
   revision = $state.raw<Revision | null>(null)
+  /** `:backlinks`: the documents that link to the open one. */
+  backlinks = $state<Backlink[]>([])
+  backlinksCursor = $state(0)
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
@@ -1096,6 +1100,29 @@ class Workspace {
     this.say(`restored the version from ${formatStamp(revision.saved_at)} — :history has the one it replaced`)
   }
 
+  /**
+   * Follow a `[[title]]`: to the document it names, or — when there is none
+   * — to a new one called that, here, after asking. Which document a title
+   * names the server says when the text is written, so it is written first.
+   */
+  async followTitle(title: string) {
+    await this.flushTile()
+    const path = this.open?.wikilinks[title]
+    if (path) return this.openPath(path)
+    if (!(await this.ask(`no document called "${title}" yet — write it in ${this.here}?`))) return
+    await this.createDocument(title)
+  }
+
+  /** `:backlinks`: what links to the open document, the last written first. */
+  async loadBacklinks() {
+    const open = this.open
+    if (!open) return
+    // A link typed and not yet written is not one the server knows about.
+    await this.flush()
+    this.backlinks = await api.backlinks(open.id)
+    this.backlinksCursor = 0
+  }
+
   async loadTrash() {
     this.trash = await api.trash()
     this.trashCursor = Math.min(this.trashCursor, Math.max(this.trash.length - 1, 0))
@@ -1135,8 +1162,26 @@ class Workspace {
     }
     if (this.path.some((crumb) => crumb.id === id)) this.path = saved.path
     if (saved.kind === 'space') this.spaces = await api.listSpaces()
+    await this.reread()
     await this.refresh()
     this.say(`renamed to ${saved.slug}`)
+  }
+
+  /**
+   * Read the open documents again after a rename or a move: their paths may
+   * have changed with it, and their text too, where the server rewrote a
+   * link to what moved. One being written is left as it is — saving it is
+   * then refused, and `:e!` takes the rewritten text.
+   */
+  async reread() {
+    for (const tile of this.tiles) {
+      if (!tile.open || tile.editing || tile.dirty) continue
+      const node = await api.getNode(tile.open.id).catch(() => null)
+      if (!node) continue
+      tile.open = node
+      tile.draft = { name: node.name, body: node.body, created_at: node.created_at }
+    }
+    if (this.open) this.#syncUrl(this.open.path)
   }
 
   /**
@@ -1168,6 +1213,7 @@ class Workspace {
   /** Reparent the node under the cursor, for `:mv`. */
   async moveNode(id: number, parentId: number) {
     await api.moveNode(id, parentId)
+    await this.reread()
     await this.refresh()
     this.say(`moved #${id}`)
   }
@@ -1194,6 +1240,7 @@ class Workspace {
     )
     const gone = new Set(nodes.map((n) => n.id))
     this.marked = this.marked.filter((n) => !gone.has(n.id))
+    if (moved > 0) await this.reread()
     await this.refresh(nodes.length === 1 ? nodes[0].id : undefined)
     const what = nodes.length === 1 ? nodes[0].name.trim() || nodes[0].slug : `${moved}`
     const already = unchanged > 0 ? ` — ${unchanged} already ${unchanged === 1 ? 'was' : 'were'}` : ''

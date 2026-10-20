@@ -35,7 +35,7 @@ use crate::{
         Backup,
     },
     error::{AppError, AppResult},
-    routes::{media, nodes, revisions, seal, trash},
+    routes::{links, media, nodes, revisions, seal, trash},
     state::AppState,
     vault,
 };
@@ -778,6 +778,14 @@ impl SpaceFs {
         media::link_to_node(&mut tx, id, &body)
             .await
             .map_err(|_| StatusCode::Failure)?;
+        links::index(&mut tx, id, &body)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
+        // A heading may have renamed it, and a `[[link]]` to the old title
+        // then follows it; a new document is what some link was waiting for.
+        links::follow(&mut tx, id)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
         tx.commit().await.map_err(|_| StatusCode::Failure)?;
         self.changed();
         Ok(())
@@ -1095,6 +1103,9 @@ impl SpaceFs {
             .bind(&name)
             .bind(&file.media_id)
             .execute(&mut *tx)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
+        links::follow(&mut tx, file.id)
             .await
             .map_err(|_| StatusCode::Failure)?;
         tx.commit().await.map_err(|_| StatusCode::Failure)?;
@@ -1715,6 +1726,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                 .map_err(|_| StatusCode::Failure)?;
                 // A move that keeps the name keeps the title too.
                 let name = (new_leaf != slug).then_some(new_leaf);
+                let mut tx = crate::db::begin_write(&self.db)
+                    .await
+                    .map_err(|_| StatusCode::Failure)?;
                 sqlx::query(
                     "UPDATE nodes SET parent_id = ?1, name = COALESCE(?2, name), slug = ?3,
                      updated_at = ?4 WHERE id = ?5",
@@ -1724,9 +1738,13 @@ impl russh_sftp::server::Handler for SpaceFs {
                 .bind(&new_slug)
                 .bind(now)
                 .bind(node)
-                .execute(&self.db)
+                .execute(&mut *tx)
                 .await
                 .map_err(|_| StatusCode::Failure)?;
+                links::follow(&mut tx, node)
+                    .await
+                    .map_err(|_| StatusCode::Failure)?;
+                tx.commit().await.map_err(|_| StatusCode::Failure)?;
                 self.changed();
             }
 
@@ -1754,6 +1772,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                         )
                         .await
                         .map_err(|_| StatusCode::Failure)?;
+                        let mut tx = crate::db::begin_write(&self.db)
+                            .await
+                            .map_err(|_| StatusCode::Failure)?;
                         sqlx::query(
                             "UPDATE nodes SET parent_id = ?1, slug = ?2, updated_at = ?3 WHERE id = ?4",
                         )
@@ -1761,9 +1782,13 @@ impl russh_sftp::server::Handler for SpaceFs {
                         .bind(&new_slug)
                         .bind(now)
                         .bind(doc.id)
-                        .execute(&self.db)
+                        .execute(&mut *tx)
                         .await
                         .map_err(|_| StatusCode::Failure)?;
+                        links::follow(&mut tx, doc.id)
+                            .await
+                            .map_err(|_| StatusCode::Failure)?;
+                        tx.commit().await.map_err(|_| StatusCode::Failure)?;
                         self.changed();
                     }
                     // Onto a name that is not a document: an editor moving the
@@ -2501,6 +2526,36 @@ mod tests {
                 .await
                 .expect("revisions");
         assert_eq!(kept, [("v1\n".to_string(), "sftp".to_string())]);
+    }
+
+    /// A move over the mount, and a heading that renames, rewrite the links
+    /// to the document as a move and a rename in the browser do.
+    #[tokio::test]
+    async fn links_follow_a_document_moved_over_the_mount() {
+        let mut fs = fs().await;
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        fs.mkdir(0, "/proj/old".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        put(&mut fs, "/proj/plan.md", "# Plan\n\nv1\n").await;
+        put(
+            &mut fs,
+            "/proj/notes.md",
+            "# Notes\n\nsee [it](/n/proj/plan) and [[Plan]]\n",
+        )
+        .await;
+
+        fs.rename(0, "/proj/plan.md".into(), "/proj/old/roadmap.md".into())
+            .await
+            .expect("rename");
+        let (.., body) = node(&fs, "notes").await;
+        assert_eq!(body, "see [it](/n/proj/old/roadmap) and [[Plan]]\n");
+
+        put(&mut fs, "/proj/old/roadmap.md", "# Roadmap\n\nv2\n").await;
+        let (.., body) = node(&fs, "notes").await;
+        assert_eq!(body, "see [it](/n/proj/old/roadmap) and [[Roadmap]]\n");
     }
 
     #[tokio::test]

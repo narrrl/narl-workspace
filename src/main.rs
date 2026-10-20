@@ -143,6 +143,13 @@ async fn main() -> Result<()> {
         sessions,
     };
     routes::seal::spawn_rekey(state.clone());
+    // Before the first request, so no document reads as linked from nowhere.
+    match routes::links::backfill(&state.db).await {
+        Ok(0) => {}
+        Ok(1) => tracing::info!("indexed the links of 1 document"),
+        Ok(linking) => tracing::info!("indexed the links of {linking} documents"),
+        Err(e) => tracing::warn!("could not index the links between documents: {e:?}"),
+    }
 
     if let Some(sftp_bind) = config.sftp.bind {
         let sftp_state = state.clone();

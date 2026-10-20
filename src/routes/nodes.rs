@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use axum::{
     extract::{Path, Query, State},
@@ -10,7 +10,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{media, revisions, trash},
+    routes::{links, media, revisions, trash},
     state::AppState,
 };
 
@@ -104,6 +104,11 @@ pub struct Node {
     /// This node's ancestors, the space first and the node itself last — the
     /// breadcrumb, and everything needed to build its /n/... path.
     pub path: Vec<Crumb>,
+    /// How many documents link here.
+    pub backlinks: i64,
+    /// Where each `[[title]]` in the body leads, as an /n/... path. A title
+    /// that leads nowhere is not in it.
+    pub wikilinks: BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -595,21 +600,9 @@ pub async fn resolve(
     State(state): State<AppState>,
     Query(params): Query<ResolveQuery>,
 ) -> AppResult<Json<Node>> {
-    let mut current: Option<i64> = None;
-    for segment in params.path.split('/').filter(|s| !s.is_empty()) {
-        // A path starts at a space, never at the trash beside them.
-        let row = sqlx::query(
-            "SELECT id FROM nodes
-             WHERE parent_id IS ?1 AND slug = ?2 AND (?1 IS NOT NULL OR kind = 'space')",
-        )
-        .bind(current)
-        .bind(segment)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-        current = Some(row.get("id"));
-    }
-    load(&state, current.ok_or(AppError::NotFound)?)
+    // A path starts at a space, never at the trash beside them.
+    let found = links::resolve_path(&mut *state.db.acquire().await?, &params.path).await?;
+    load(&state, found.ok_or(AppError::NotFound)?)
         .await
         .map(Json)
 }
@@ -650,6 +643,9 @@ pub async fn create(
     .get("id");
 
     media::link_to_node(&mut tx, id, &input.body).await?;
+    links::index(&mut tx, id, &input.body).await?;
+    // A `[[link]]` written before the document it names now finds it.
+    links::follow(&mut tx, id).await?;
     tx.commit().await?;
     state.backup.signal();
     load(&state, id).await.map(Json)
@@ -743,6 +739,12 @@ pub async fn update(
 
     if kind != FILE {
         media::link_to_node(&mut tx, id, body).await?;
+        links::index(&mut tx, id, body).await?;
+    }
+    // A new name is a new path, for this and everything under it, and a new
+    // title: the links written with the old ones are rewritten to find it.
+    if name != previous_name {
+        links::follow(&mut tx, id).await?;
     }
     tx.commit().await?;
     state.backup.signal();
@@ -878,11 +880,13 @@ pub async fn move_nodes(
         moved: 0,
         unchanged: 0,
     };
+    let mut moved = Vec::with_capacity(nodes.len());
     for (id, name, from) in nodes {
         if from == Some(parent) && position.is_none() {
             done.unchanged += 1;
             continue;
         }
+        moved.push(id);
         // The slug has to be free where it lands, not where it came from —
         // and it sees the ones moved in before it, so two `notes` stay apart.
         let slug = unique_slug(&mut tx, Some(parent), &slugify(&name), Some(id)).await?;
@@ -899,6 +903,11 @@ pub async fn move_nodes(
         .execute(&mut *tx)
         .await?;
         done.moved += 1;
+    }
+    // Once all of them are where they go, so a link between two of them is
+    // rewritten to where both now are.
+    for id in moved {
+        links::follow(&mut tx, id).await?;
     }
     tx.commit().await?;
 
@@ -1023,6 +1032,13 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
 
     let body: String = row.get("body");
     let summary = row_to_summary(&row, &body.chars().take(HEAD_CHARS).collect::<String>());
+    let (backlinks, wikilinks) = {
+        let mut conn = state.db.acquire().await?;
+        (
+            links::linked_from(&mut conn, id).await?,
+            links::wikilinks(&mut conn, id, &body).await?,
+        )
+    };
 
     Ok(Node {
         id: summary.id,
@@ -1043,6 +1059,8 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         sealed: summary.sealed,
         file: summary.file,
         path: path_of(&state.db, id).await?,
+        backlinks,
+        wikilinks,
     })
 }
 

@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { marked, type TokenizerAndRendererExtension } from 'marked'
 import { mathEngine } from './math.svelte'
+import { titleHref } from './util'
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -37,8 +38,38 @@ const mathInline: TokenizerAndRendererExtension = {
   renderer: (token) => tex(token.text, token.display),
 }
 
+/*
+ * `[[Plan]]` and `[[Plan|the plan]]`: a link to a document by its title. The
+ * server says where each title leads, since it is the one that knows the
+ * titles; one that leads nowhere is drawn dimmed, and following it offers to
+ * write the document.
+ */
+const WIKILINK = /^\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/
+
+/** What the page being rendered says about its `[[titles]]`, for the renderer. */
+let wikiContext: { leads: Record<string, string>; sharing: boolean } = { leads: {}, sharing: false }
+
+const wikilink: TokenizerAndRendererExtension = {
+  name: 'wikilink',
+  level: 'inline',
+  start: (src) => src.indexOf('[['),
+  tokenizer(src) {
+    const match = WIKILINK.exec(src)
+    const target = match?.[1].trim()
+    if (match && target) return { type: 'wikilink', raw: match[0], target, label: match[2]?.trim() || target }
+  },
+  renderer: (token) => {
+    const label = escapeHtml(token.label)
+    // The page it leads to is behind the login, as any /n/ link on a share is.
+    if (wikiContext.sharing) return `<span class="private-link" title="a page of the private workspace">${label}</span>`
+    const path = wikiContext.leads[token.target]
+    if (path) return `<a href="/n/${encodeURI(path)}" class="wikilink">${label}</a>`
+    return `<a href="${titleHref(token.target)}" class="wikilink missing" title="not written yet — follow it to write it">${label}</a>`
+  },
+}
+
 marked.use({
-  extensions: [mathBlock, mathInline],
+  extensions: [mathBlock, mathInline, wikilink],
   renderer: {
     code(token) {
       return token.lang === 'math' ? tex(token.text, true) : false
@@ -84,13 +115,18 @@ function escapeHtml(text: string): string {
  * the cookie reading the document with its key handed out, so the key itself
  * never sits in a URL a proxy could log. A link to another document, an
  * address inside the private workspace that would lead the reader to its
- * login page, is kept as its text.
+ * login page, is kept as its text. `wikilinks` says where the `[[titles]]`
+ * lead, as the server answered for the document.
  */
-export function renderMarkdown(source: string, share?: { token: string }): string {
+export function renderMarkdown(
+  source: string,
+  { share, wikilinks = {} }: { share?: { token: string }; wikilinks?: Record<string, string> } = {},
+): string {
   const md = share
     ? source.replaceAll('/api/media/', `/api/share/${encodeURIComponent(share.token)}/media/`)
     : source
 
+  wikiContext = { leads: wikilinks, sharing: !!share }
   const html = marked.parse(md, { async: false }) as string
   if (!share) return DOMPurify.sanitize(html, SANITIZE)
 

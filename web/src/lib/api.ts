@@ -49,6 +49,19 @@ export interface Crumb {
 export interface WorkspaceNode extends NodeSummary {
   body: string
   path: Crumb[]
+  /** How many documents link here. */
+  backlinks: number
+  /** Where each `[[title]]` in the body leads, as an /n/ path; a title that leads nowhere is missing. */
+  wikilinks: Record<string, string>
+}
+
+/** A document that links to the one asked about, and the line it does it on. */
+export interface Backlink {
+  id: number
+  name: string
+  slug: string
+  path: string
+  context: string
 }
 
 /** A space as the overview shows it: itself, and what was last written in it. */
@@ -428,6 +441,9 @@ export const api = {
   revisions: (id: number) => request<RevisionSummary[]>(`/nodes/${id}/revisions`),
 
   revision: (id: number, rev: number) => request<Revision>(`/nodes/${id}/revisions/${rev}`),
+
+  /** The documents that link to this one, the last written first. */
+  backlinks: (id: number) => request<Backlink[]>(`/nodes/${id}/backlinks`),
 
   /** Into the trash; `purged` when it was in the trash already and is now gone. */
   deleteNode: (id: number) =>

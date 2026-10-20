@@ -93,6 +93,8 @@ a {
 }
 a:hover { color: var(--light); text-decoration-color: var(--light); }
 a:focus-visible { background: var(--light); color: var(--ink); text-decoration: none; outline: none; }
+/* A `[[title]]` no document has yet: there, but not written. */
+a.wikilink.missing { color: var(--muted); text-decoration-style: dashed; }
 
 /*
  * A button rests as a hairline and a label. Hover lifts it a step and lights

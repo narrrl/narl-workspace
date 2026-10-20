@@ -86,6 +86,7 @@ it; in the document pane it is that document. In the browse pane:
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |
 | `gh` | the open document's earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |
+| `gb` | the documents that link to the open one — `j`/`k`, `Enter` opens one (`:backlinks`) |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
@@ -117,7 +118,8 @@ mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
 there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
 headings as they do in the reader. `gf` follows the link under the cursor, saving
-first, and `gx` opens it in a new tab. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
+first, and `gx` opens it in a new tab. `[[` in insert mode offers the titles of
+documents to link to. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
 list (`:bn` and `:bp` walk the tiles), `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
 `:clear` drops the search, `:trash` lists what was deleted, `:reload` re-reads the folder, `:stats` counts words
@@ -312,6 +314,31 @@ the tree is never one of them: it is deleted from its folder, not from
 `:media` lists every upload: `j`/`k` walk it, `i` or `Enter` embeds the
 highlighted one at the cursor while writing, `y` copies its address and `x`
 deletes it, asking first.
+
+## Links
+
+A document links to another by its address, `[the plan](/n/work/notes/plan)`,
+or by its title, `[[Plan]]` or `[[Plan|the plan]]`. A title is looked for in
+the space the link is written in first, then in every other; it is a name in
+any case, or the slug that name has. `[[` in the editor offers the titles as
+the search finds them. A title no document has yet is drawn dimmed, and
+following it — a click, `F`, `gf` — offers to write that document in the
+folder being browsed.
+
+Links keep working when what they link to moves. Renaming a document, or a
+folder above it, or moving either somewhere else — in the browser or over the
+mount — rewrites the links to it in every document that has one, in the same
+write: the path to the new one, a `[[title]]` to the new name, the label left
+as it was. A rewritten document keeps a version of what it said before, like
+any other save. A link to something in the trash stays as it is and follows
+it when it is restored; once it is deleted for good the text of the link
+stays, and leads nowhere.
+
+`gb` or `:backlinks` lists the documents that link to the open one, each with
+the line it does so on, and the line under the title says how many there are.
+A link inside a card, or one written into prose rather than as a markdown
+link, is not counted or rewritten. The links of the documents written before
+there were any are indexed once, when the server first starts with this.
 
 ## Files
 
@@ -692,6 +719,7 @@ sealed or not.
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |
 | `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
 | `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
+| `GET` | `/api/nodes/{id}/backlinks` | the documents that link to this one, with the line each does it on |
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |

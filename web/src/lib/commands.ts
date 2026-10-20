@@ -2,7 +2,7 @@ import { tick } from 'svelte'
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
 import { emptyTrash } from './Trash.svelte'
-import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
+import { formatDay, parseDay, parseDue, relative, sealedNote, titleHref, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
 
 export type { ScrollAmount, SidewaysAmount }
 
@@ -76,13 +76,24 @@ const requireOpen = () => {
   return workspace.open
 }
 
+const TITLE_HREF = titleHref('')
+
 /**
  * Where a link in a document goes. `/n/` links are the workspace's own — the
- * importer writes them between documents — and are opened in place; anything
+ * importer writes them between documents — and are opened in place, as is a
+ * `[[title]]`, or the offer to write it when no document has it; anything
  * else would take the workspace's tab with it, so it gets a tab of its own,
  * as does a workspace link asked for with `gx`.
  */
 export function followLink(href: string, tab = false) {
+  if (href.startsWith(TITLE_HREF)) {
+    const title = decodeURIComponent(href.slice(TITLE_HREF.length))
+    const path = workspace.open?.wikilinks[title]
+    if (tab) {
+      if (!path) return workspace.say(`no document called "${title}" yet`, 'error')
+      href = `/n/${path}`
+    } else return void workspace.guard(() => workspace.followTitle(title))
+  }
   if (href.startsWith('/n/') && !tab) {
     const path = href.slice(3).split('#')[0]
     return void workspace.guard(() => workspace.openPath(decodeURIComponent(path)))
@@ -786,6 +797,19 @@ export const commands: CommandSpec[] = [
       await workspace.guard(async () => {
         await workspace.loadHistory()
         workspace.overlay = 'history'
+      })
+    },
+  },
+  {
+    name: 'backlinks',
+    aliases: ['bl'],
+    group: 'documents',
+    help: 'the documents that link to the open one — j/k, Enter opens one (gb)',
+    run: async () => {
+      if (!requireOpen()) return
+      await workspace.guard(async () => {
+        await workspace.loadBacklinks()
+        workspace.overlay = 'backlinks'
       })
     },
   },

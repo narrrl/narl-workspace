@@ -44,6 +44,8 @@
     ['x · dd', 'delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N)'],
     ['u', 'undo the last delete: it comes back out of the trash — :trash has the rest'],
     ['gh', "the open document's earlier versions, as diffs — Enter brings one back"],
+
+    ['gb', 'the documents that link to the open one — [[title]] links by title, [[ completes one while writing'],
     [':', 'command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before'],
     ['Ctrl-S', 'save, from anywhere'],
     ['?', 'this screen — in the editor too'],

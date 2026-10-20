@@ -133,6 +133,7 @@
 </script>
 
 <script lang="ts">
+  import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
   import { HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
@@ -146,6 +147,7 @@
   } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { onDestroy, onMount } from 'svelte'
+  import { api } from './api'
   import { hooks } from './commands'
   import { embedSnippet } from './markdown'
   import { workspace, type Tile } from './store.svelte'
@@ -200,6 +202,16 @@
         display: 'flex',
         alignItems: 'center',
       },
+      '.cm-tooltip': {
+        backgroundColor: 'var(--hull)',
+        color: 'var(--fg)',
+        border: '1px solid var(--rim)',
+      },
+      '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+        backgroundColor: 'var(--surface-alt)',
+        color: 'var(--light)',
+      },
+      '.cm-completionDetail': { color: 'var(--muted)', fontStyle: 'normal', marginLeft: '1ch' },
       '.cm-vim-panel input': {
         fontFamily: 'inherit',
         fontSize: 'inherit',
@@ -211,6 +223,29 @@
     },
     { dark: true },
   )
+
+  /*
+   * `[[` offers the titles of documents as the search finds them, each with
+   * where it sits; picking one closes the brackets.
+   */
+  async function titleCompletions(context: CompletionContext): Promise<CompletionResult | null> {
+    const typed = context.matchBefore(/\[\[[^[\]|\n]*/)
+    if (!typed) return null
+    const query = typed.text.slice(2).trim()
+    if (!query) return null
+    const found = await api.listNodes({ q: query }).catch(() => [])
+    if (context.aborted) return null
+    const options = found
+      .filter((node) => node.kind === 'document' || node.kind === 'file')
+      .filter((node) => node.id !== tile.open?.id)
+      .map((node) => {
+        // What a `[[link]]` can hold: a name with no bracket or bar in it, or else the slug.
+        const name = node.name.trim()
+        const title = name && !/[[\]|\n]/.test(name) ? name : node.slug
+        return { label: title, detail: node.location, apply: `${title}]]` }
+      })
+    return { from: typed.from + 2, options }
+  }
 
   /** The `#` lines being written, as `gO` lists them, and the one the cursor is under. */
   function editorHeadings() {
@@ -264,6 +299,7 @@
       highlightActiveLine(),
       EditorState.allowMultipleSelections.of(true),
       markdown({ base: markdownLanguage, codeLanguages: [] }),
+      autocompletion({ override: [titleCompletions], icons: false }),
       syntaxHighlighting(markdownHighlight),
       EditorView.lineWrapping,
       placeholder('write…'),

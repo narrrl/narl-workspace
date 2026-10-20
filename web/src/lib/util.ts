@@ -234,22 +234,31 @@ export function sourceHeadings(source: string): { text: string; level: number; l
 
 /**
  * The link the cursor stands on in a line of markdown — `[text](href)`, an
- * embed's `![alt](src)`, `<https://…>` or a bare address — or else the first
+ * embed's `![alt](src)`, `[[title]]`, `<https://…>` or a bare address — or else the first
  * one after it on the line, as vim's `gf` looks ahead to the next name.
  */
 export function linkAt(line: string, column: number): string | null {
   const pattern =
-    /!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<((?:https?:\/\/|\/n\/)[^>\s]+)>|((?:https?:\/\/|\/n\/)[^\s<>()]+)/g
+    /\[\[([^[\]|\n]+)(?:\|[^[\]\n]*)?\]\]|!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<((?:https?:\/\/|\/n\/)[^>\s]+)>|((?:https?:\/\/|\/n\/)[^\s<>()]+)/g
   let ahead: string | null = null
   for (const match of line.matchAll(pattern)) {
-    // A sentence that ends on an address ends with a full stop, not the address.
-    const href = match[1] ?? match[2] ?? match[3].replace(/[.,;:!?]+$/, '')
+    // A sentence that ends on a bare address ends with a full stop, not the address.
+    const href = match[1]?.trim()
+      ? titleHref(match[1].trim())
+      : (match[2] ?? match[3] ?? match[4]?.replace(/[.,;:!?]+$/, ''))
+    if (!href) continue
     const start = match.index
     if (column >= start && column < start + match[0].length) return href
     if (start >= column) ahead ??= href
   }
   return ahead
 }
+
+/**
+ * Where a `[[title]]` points when the page cannot say where it leads: the
+ * title itself, for following it to look it up, or to offer to write it.
+ */
+export const titleHref = (title: string) => `/n/?title=${encodeURIComponent(title)}`
 
 /** What a share link's reader will miss: a share never serves a sealed file. */
 export const sealedNote = (sealed: number) =>

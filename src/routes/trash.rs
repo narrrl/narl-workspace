@@ -248,6 +248,8 @@ pub async fn restore_node(state: &AppState, id: i64) -> AppResult<bool> {
             .bind(id)
             .execute(&mut *tx)
             .await?;
+        // Under another slug when its own was taken meanwhile.
+        crate::routes::links::follow(&mut tx, id).await?;
         tx.commit().await?;
         return Ok(false);
     }

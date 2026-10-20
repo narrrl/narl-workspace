@@ -3,6 +3,7 @@ pub mod boards;
 pub mod export;
 pub mod import;
 pub mod inspect;
+pub mod links;
 pub mod manifest;
 pub mod media;
 pub mod nodes;
@@ -71,6 +72,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/nodes/{id}", put(nodes::update))
         .route("/nodes/{id}", delete(nodes::remove))
         .route("/nodes/{id}/revisions", get(revisions::list))
+        .route("/nodes/{id}/backlinks", get(links::backlinks))
         .route("/nodes/{id}/revisions/{rev}", get(revisions::get))
         .route("/nodes/move", post(nodes::move_many))
         .route("/nodes/{id}/move", post(nodes::move_node))

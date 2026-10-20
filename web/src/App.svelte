@@ -15,6 +15,7 @@
   import Overview from './lib/Overview.svelte'
   import MediaBrowser, { copyMedia, insertMedia, removeMedia } from './lib/MediaBrowser.svelte'
   import Trash, { purgeTrashed, restoreTrashed } from './lib/Trash.svelte'
+  import Backlinks, { openBacklink } from './lib/Backlinks.svelte'
   import History, { moveHistory, restoreShown } from './lib/History.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
@@ -422,6 +423,31 @@
     }
   }
 
+  /** The backlinks' keys: j/k through the documents that link here, Enter opens one. */
+  function backlinksKey(event: KeyboardEvent): boolean {
+    const last = Math.max(workspace.backlinks.length - 1, 0)
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        workspace.backlinksCursor = Math.min(workspace.backlinksCursor + 1, last)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.backlinksCursor = Math.max(workspace.backlinksCursor - 1, 0)
+        return true
+      case 'G':
+        workspace.backlinksCursor = last
+        return true
+      case 'Enter': {
+        const link = workspace.backlinks[workspace.backlinksCursor]
+        if (link) void openBacklink(link)
+        return true
+      }
+      default:
+        return false
+    }
+  }
+
   /** The history's keys: j/k through the versions, Enter brings the one shown back. */
   function historyKey(event: KeyboardEvent): boolean {
     switch (event.key) {
@@ -637,6 +663,12 @@
         return
       }
     }
+    if (workspace.overlay === 'backlinks' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (backlinksKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'trash' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (trashKey(event)) {
         event.preventDefault()
@@ -791,6 +823,11 @@
     if (previous === 'g' && key === 'h') {
       event.preventDefault()
       void runCommand('history')
+      return
+    }
+    if (previous === 'g' && key === 'b') {
+      event.preventDefault()
+      void runCommand('backlinks')
       return
     }
     if (previous === 'g' && key === 'x') {
@@ -1075,7 +1112,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

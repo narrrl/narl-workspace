@@ -23,7 +23,7 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     routes::{
-        boards,
+        boards, links,
         manifest::{self, Manifest, NodeMeta},
         media,
         nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
@@ -968,6 +968,7 @@ async fn build(
                 .await?;
         }
         media::link_to_node(&mut tx, *id, &rewritten).await?;
+        links::index(&mut tx, *id, &rewritten).await?;
     }
 
     // The boards come back only where spaces do.
