@@ -289,12 +289,11 @@ impl Notifier {
         .rows_affected();
 
         // The upsert touches a row either way, so "new" is asked separately.
-        let first_seen: i64 = sqlx::query_scalar(
-            "SELECT first_seen_at FROM login_events WHERE device_hash = ?",
-        )
-        .bind(&hash)
-        .fetch_one(&self.db)
-        .await?;
+        let first_seen: i64 =
+            sqlx::query_scalar("SELECT first_seen_at FROM login_events WHERE device_hash = ?")
+                .bind(&hash)
+                .fetch_one(&self.db)
+                .await?;
         if inserted == 0 || first_seen != now {
             return Ok(());
         }
@@ -411,7 +410,11 @@ fn still_due(tz: Tz, key: &str, card: &CardNow) -> bool {
     let queued_for = key.split(':').nth(2);
     card.done_at.is_none()
         && card.has_board == Some(true)
-        && card.due_at.map(|due| local_day(tz, due).to_string()).as_deref() == queued_for
+        && card
+            .due_at
+            .map(|due| local_day(tz, due).to_string())
+            .as_deref()
+            == queued_for
 }
 
 /// Run the notifier for as long as the server lives.
@@ -550,18 +553,39 @@ mod tests {
     #[test]
     fn a_card_mail_is_only_sent_while_it_is_true() {
         let tz = chrono_tz::UTC;
-        let due = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 20, 12, 0, 0).unwrap().timestamp();
+        let due = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 20, 12, 0, 0)
+            .unwrap()
+            .timestamp();
         let key = "card_due:7:2026-10-20:due";
-        let open = super::CardNow { due_at: Some(due), done_at: None, has_board: Some(true) };
+        let open = super::CardNow {
+            due_at: Some(due),
+            done_at: None,
+            has_board: Some(true),
+        };
         assert!(super::still_due(tz, key, &open));
 
-        let finished = super::CardNow { done_at: Some(due), ..open };
+        let finished = super::CardNow {
+            done_at: Some(due),
+            ..open
+        };
         assert!(!super::still_due(tz, key, &finished));
-        let moved = super::CardNow { due_at: Some(due + 86_400), done_at: None, has_board: Some(true) };
+        let moved = super::CardNow {
+            due_at: Some(due + 86_400),
+            done_at: None,
+            has_board: Some(true),
+        };
         assert!(!super::still_due(tz, key, &moved));
-        let board_off = super::CardNow { due_at: Some(due), done_at: None, has_board: Some(false) };
+        let board_off = super::CardNow {
+            due_at: Some(due),
+            done_at: None,
+            has_board: Some(false),
+        };
         assert!(!super::still_due(tz, key, &board_off));
-        let deleted = super::CardNow { due_at: None, done_at: None, has_board: None };
+        let deleted = super::CardNow {
+            due_at: None,
+            done_at: None,
+            has_board: None,
+        };
         assert!(!super::still_due(tz, key, &deleted));
     }
 
@@ -591,7 +615,12 @@ mod tests {
         let (start, end) = day_bounds(Berlin, today);
         assert_eq!(end - start, 86_400);
         // 19:59 local is 17:59 UTC in summer time.
-        assert!(!time_reached(Berlin, start + 19 * 3600 + 59 * 60, today, AT));
+        assert!(!time_reached(
+            Berlin,
+            start + 19 * 3600 + 59 * 60,
+            today,
+            AT
+        ));
         assert!(time_reached(Berlin, start + 20 * 3600, today, AT));
     }
 

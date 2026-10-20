@@ -159,10 +159,9 @@ pub struct AgendaCard {
 pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json<Agenda>> {
     let cards = agenda_cards(&state.db, crate::now() + (AGENDA_DAYS + 1) * 86400).await?;
 
-    let has_diary: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE role = 'diary'")
-            .fetch_optional(&state.db)
-            .await?;
+    let has_diary: Option<i64> = sqlx::query_scalar("SELECT id FROM nodes WHERE role = 'diary'")
+        .fetch_optional(&state.db)
+        .await?;
     let diary_today = match has_diary {
         Some(_) => {
             let tz = state.config.mail.timezone;
@@ -209,7 +208,11 @@ async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard
             space_id: row.get("space_id"),
             space_slug: row.get("space_slug"),
             list_name: row.get("list_name"),
-            role: if row.get::<bool, _>("is_first") { "inbox" } else { "doing" },
+            role: if row.get::<bool, _>("is_first") {
+                "inbox"
+            } else {
+                "doing"
+            },
         })
         .collect())
 }
@@ -411,11 +414,12 @@ pub(crate) async fn restore(
 
     let mut count = 0;
     for (list, id) in lists.iter().zip(ids) {
-        let mut position: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM cards WHERE list_id = ?1")
-                .bind(id)
-                .fetch_one(&mut *db)
-                .await?;
+        let mut position: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM cards WHERE list_id = ?1",
+        )
+        .bind(id)
+        .fetch_one(&mut *db)
+        .await?;
         for card in &list.cards {
             sqlx::query(
                 "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, position,
@@ -638,13 +642,12 @@ pub async fn create_card(
     linkable(&state.db, input.node_id).await?;
 
     let mut tx = crate::db::begin_write(&state.db).await?;
-    let position: i64 = sqlx::query(
-        "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM cards WHERE list_id = ?1",
-    )
-    .bind(list_id)
-    .fetch_one(&mut *tx)
-    .await?
-    .get("next");
+    let position: i64 =
+        sqlx::query("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM cards WHERE list_id = ?1")
+            .bind(list_id)
+            .fetch_one(&mut *tx)
+            .await?
+            .get("next");
 
     let now = crate::now();
     let id: i64 = sqlx::query(
@@ -773,7 +776,9 @@ pub async fn move_card(
 
     let mut tx = crate::db::begin_write(&state.db).await?;
     let now = crate::now();
-    let last = last_list(&mut *tx, to).await?.map_or(input.list_id, |(id, _)| id);
+    let last = last_list(&mut *tx, to)
+        .await?
+        .map_or(input.list_id, |(id, _)| id);
     relocate(&mut tx, &current, input.list_id, last, input.position, now).await?;
     tx.commit().await?;
 
@@ -802,10 +807,11 @@ async fn relocate(
         .execute(&mut *db)
         .await?;
 
-    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
-        .bind(to)
-        .fetch_all(&mut *db)
-        .await?;
+    let ids: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, id")
+            .bind(to)
+            .fetch_all(&mut *db)
+            .await?;
 
     let target = position.unwrap_or(i64::MAX).max(0) as usize;
     for (position, id) in reordered(&ids, card_id, target).iter().enumerate() {
@@ -863,7 +869,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("an in-memory database");
-        sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations apply");
 
         let space: i64 = sqlx::query_scalar(
             "INSERT INTO nodes (parent_id, kind, name, slug, body, has_board, created_at, updated_at)
@@ -916,7 +925,10 @@ mod tests {
             .collect();
         assert_eq!(
             titles,
-            vec![("due soon".to_string(), "inbox"), ("in hand".to_string(), "doing")]
+            vec![
+                ("due soon".to_string(), "inbox"),
+                ("in hand".to_string(), "doing")
+            ]
         );
     }
 
@@ -964,14 +976,18 @@ mod tests {
 
         let current = card(&db, id).await.unwrap();
         let mut conn = db.acquire().await.unwrap();
-        relocate(&mut conn, &current, done, done, None, 100).await.unwrap();
+        relocate(&mut conn, &current, done, done, None, 100)
+            .await
+            .unwrap();
         drop(conn);
         assert_eq!(done_at(db.clone()).await, Some(100));
 
         // A list added after the last one becomes "done", so the card that
         // was finished in the old last list is open again.
         let later = list(2).await;
-        settle(&mut db.acquire().await.unwrap(), space).await.unwrap();
+        settle(&mut db.acquire().await.unwrap(), space)
+            .await
+            .unwrap();
         assert_eq!(done_at(db.clone()).await, None);
 
         // Deleting the new last list hands "done" back to the old one.
@@ -980,7 +996,9 @@ mod tests {
             .execute(&db)
             .await
             .unwrap();
-        settle(&mut db.acquire().await.unwrap(), space).await.unwrap();
+        settle(&mut db.acquire().await.unwrap(), space)
+            .await
+            .unwrap();
         assert!(done_at(db.clone()).await.is_some());
     }
 

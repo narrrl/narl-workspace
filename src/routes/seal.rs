@@ -69,7 +69,11 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     if subtree.is_empty() {
         return Err(AppError::NotFound);
     }
-    let list = subtree.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+    let list = subtree
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
     let targets: Vec<Target> = sqlx::query(&format!(
         "SELECT n.id, n.media_id, m.encrypted
          FROM nodes n JOIN media m ON m.id = n.media_id
@@ -127,7 +131,12 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     } else {
         0
     };
-    Ok(Resealed { files, unchanged, failed: failed.len(), shared: shared as usize })
+    Ok(Resealed {
+        files,
+        unchanged,
+        failed: failed.len(),
+        shared: shared as usize,
+    })
 }
 
 /// Re-write one file sealed or opened under a new id, then point everything
@@ -140,8 +149,13 @@ async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool
     let partial = uploads.join(format!("{new}.part"));
 
     let written = {
-        let (key, old, new, source, partial) =
-            (key.clone(), old.clone(), new.clone(), source.clone(), partial.clone());
+        let (key, old, new, source, partial) = (
+            key.clone(),
+            old.clone(),
+            new.clone(),
+            source.clone(),
+            partial.clone(),
+        );
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             if seal {
                 let mut plain = std::fs::File::open(&source)?;

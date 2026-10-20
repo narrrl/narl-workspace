@@ -18,9 +18,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use russh_sftp::protocol::{
-    File, FileAttributes, Handle, Name, OpenFlags, StatusCode, Version,
-};
+use russh_sftp::protocol::{File, FileAttributes, Handle, Name, OpenFlags, StatusCode, Version};
 use sqlx::{Row, SqlitePool};
 
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -300,11 +298,12 @@ impl SpaceFs {
     /// A name a document or a folder already has, or an earlier file, makes
     /// the later file carry its id.
     async fn files_in(&self, parent: i64) -> SftpResult<Vec<(String, FileNode)>> {
-        let others = sqlx::query("SELECT kind, slug FROM nodes WHERE parent_id = ?1 AND kind <> 'file'")
-            .bind(parent)
-            .fetch_all(&self.db)
-            .await
-            .map_err(|_| StatusCode::Failure)?;
+        let others =
+            sqlx::query("SELECT kind, slug FROM nodes WHERE parent_id = ?1 AND kind <> 'file'")
+                .bind(parent)
+                .fetch_all(&self.db)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
         let mut taken: std::collections::HashSet<String> = others
             .iter()
             .map(|row| {
@@ -498,9 +497,14 @@ impl SpaceFs {
     /// An empty document under `parent`, named after the file it was created
     /// as until a heading says otherwise.
     async fn create_doc(&mut self, parent: i64, stem: &str) -> SftpResult<i64> {
-        let slug = nodes::unique_slug(&mut *self.conn().await?, Some(parent), &nodes::slugify(stem), None)
-            .await
-            .map_err(|_| StatusCode::Failure)?;
+        let slug = nodes::unique_slug(
+            &mut *self.conn().await?,
+            Some(parent),
+            &nodes::slugify(stem),
+            None,
+        )
+        .await
+        .map_err(|_| StatusCode::Failure)?;
         let id: i64 = sqlx::query(
             "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
              VALUES (?1, 'document', ?2, ?3, '', ?4, ?4) RETURNING id",
@@ -577,8 +581,14 @@ impl SpaceFs {
         if current > base && Some(current) != ours {
             let parent: i64 = row.get("parent_id");
             let slug: String = row.get("slug");
-            let copy = self.create_doc(parent, &format!("{slug} (conflict)")).await?;
-            tracing::warn!(id, copy, "sftp: the document changed elsewhere while open; kept this write as a copy");
+            let copy = self
+                .create_doc(parent, &format!("{slug} (conflict)"))
+                .await?;
+            tracing::warn!(
+                id,
+                copy,
+                "sftp: the document changed elsewhere while open; kept this write as a copy"
+            );
             return self.save_doc(copy, buf).await;
         }
         self.save_doc(id, buf).await
@@ -627,7 +637,15 @@ impl SpaceFs {
     /// the one it was opened over — under a new id, because the mirror treats
     /// an upload as never changing once written.
     async fn finish_upload(&self, upload: Upload) -> SftpResult<()> {
-        let Upload { parent, name, replaces, media_id, partial, file, size } = upload;
+        let Upload {
+            parent,
+            name,
+            replaces,
+            media_id,
+            partial,
+            file,
+            size,
+        } = upload;
         let landed = async {
             file.sync_all().await?;
             drop(file);
@@ -635,7 +653,8 @@ impl SpaceFs {
             let mime = media::mime_of(&name, None);
             match replaces {
                 None => {
-                    media::insert_file(&self.db, parent, &media_id, &name, &mime, size, false).await?;
+                    media::insert_file(&self.db, parent, &media_id, &name, &mime, size, false)
+                        .await?;
                 }
                 Some(node) => self.replace_bytes(node, &media_id, &mime, size).await?,
             }
@@ -652,7 +671,13 @@ impl SpaceFs {
         Ok(())
     }
 
-    async fn replace_bytes(&self, node: i64, media_id: &str, mime: &str, size: u64) -> AppResult<()> {
+    async fn replace_bytes(
+        &self,
+        node: i64,
+        media_id: &str,
+        mime: &str,
+        size: u64,
+    ) -> AppResult<()> {
         let mut tx = crate::db::begin_write(&self.db).await?;
         let old: String = sqlx::query_scalar("SELECT media_id FROM nodes WHERE id = ?1")
             .bind(node)
@@ -701,17 +726,35 @@ impl SpaceFs {
     }
 
     /// A scratch file renamed onto a name worth keeping becomes a file node.
-    async fn keep_scratch(&self, parent: i64, name: &str, data: Vec<u8>, replaces: Option<&FileNode>) -> SftpResult<()> {
+    async fn keep_scratch(
+        &self,
+        parent: i64,
+        name: &str,
+        data: Vec<u8>,
+        replaces: Option<&FileNode>,
+    ) -> SftpResult<()> {
         let mut upload = self.begin_upload(parent, name, replaces, true).await?;
-        upload.file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
+        upload
+            .file
+            .write_all(&data)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
         upload.size = data.len() as u64;
         self.finish_upload(upload).await
     }
 
     /// Move a file node, and rename it when the name it lands under is not
     /// the one it already shows as.
-    async fn move_file(&self, file: &FileNode, parent: i64, leaf: &str, shown: &str) -> SftpResult<()> {
-        let mut tx = crate::db::begin_write(&self.db).await.map_err(|_| StatusCode::Failure)?;
+    async fn move_file(
+        &self,
+        file: &FileNode,
+        parent: i64,
+        leaf: &str,
+        shown: &str,
+    ) -> SftpResult<()> {
+        let mut tx = crate::db::begin_write(&self.db)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
         let name: String = if leaf == shown {
             sqlx::query_scalar("SELECT name FROM nodes WHERE id = ?1")
                 .bind(file.id)
@@ -724,15 +767,17 @@ impl SpaceFs {
         let slug = nodes::unique_slug(&mut tx, Some(parent), &nodes::slugify(&name), Some(file.id))
             .await
             .map_err(|_| StatusCode::Failure)?;
-        sqlx::query("UPDATE nodes SET parent_id = ?1, name = ?2, slug = ?3, updated_at = ?4 WHERE id = ?5")
-            .bind(parent)
-            .bind(&name)
-            .bind(&slug)
-            .bind(crate::now())
-            .bind(file.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| StatusCode::Failure)?;
+        sqlx::query(
+            "UPDATE nodes SET parent_id = ?1, name = ?2, slug = ?3, updated_at = ?4 WHERE id = ?5",
+        )
+        .bind(parent)
+        .bind(&name)
+        .bind(&slug)
+        .bind(crate::now())
+        .bind(file.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::Failure)?;
         sqlx::query("UPDATE media SET filename = ?1 WHERE id = ?2")
             .bind(&name)
             .bind(&file.media_id)
@@ -782,7 +827,10 @@ impl SpaceFs {
         for (key, file) in &self.scratch {
             if let Some((parent, name)) = key.rsplit_once('/') {
                 if parent == dir || (parent.is_empty() && dir == "/") {
-                    files.push(File::new(name, file_attrs(file.data.len() as u64, file.mtime)));
+                    files.push(File::new(
+                        name,
+                        file_attrs(file.data.len() as u64, file.mtime),
+                    ));
                 }
             }
         }
@@ -866,7 +914,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                 }
                 // Truncating a file in place is a write; it is done by opening
                 // it for one.
-                Target::File(file) if size as i64 != file.size => return Err(StatusCode::OpUnsupported),
+                Target::File(file) if size as i64 != file.size => {
+                    return Err(StatusCode::OpUnsupported)
+                }
                 Target::Root | Target::Dir { .. } | Target::File(_) => {}
             }
         }
@@ -894,7 +944,11 @@ impl russh_sftp::server::Handler for SpaceFs {
                     if size > self.max_upload {
                         return Err(StatusCode::Failure);
                     }
-                    upload.file.set_len(size).await.map_err(|_| StatusCode::Failure)?;
+                    upload
+                        .file
+                        .set_len(size)
+                        .await
+                        .map_err(|_| StatusCode::Failure)?;
                     upload.size = size;
                 }
                 Ok(ok_status(id))
@@ -957,9 +1011,19 @@ impl russh_sftp::server::Handler for SpaceFs {
                         return Err(StatusCode::Failure);
                     }
                     let (id, buf, base) = match existing {
-                        Some(doc) if pflags.contains(OpenFlags::TRUNCATE) => (doc.id, Vec::new(), doc.updated_at),
-                        Some(doc) => (doc.id, render_doc(&doc.name, &doc.body).into_bytes(), doc.updated_at),
-                        None => (self.create_doc(parent, stem).await?, Vec::new(), crate::now()),
+                        Some(doc) if pflags.contains(OpenFlags::TRUNCATE) => {
+                            (doc.id, Vec::new(), doc.updated_at)
+                        }
+                        Some(doc) => (
+                            doc.id,
+                            render_doc(&doc.name, &doc.body).into_bytes(),
+                            doc.updated_at,
+                        ),
+                        None => (
+                            self.create_doc(parent, stem).await?,
+                            Vec::new(),
+                            crate::now(),
+                        ),
                     };
                     OpenHandle::Write { id, buf, base }
                 } else {
@@ -1001,7 +1065,10 @@ impl russh_sftp::server::Handler for SpaceFs {
                         return Err(StatusCode::Failure);
                     }
                     let truncate = pflags.contains(OpenFlags::TRUNCATE);
-                    OpenHandle::Upload(self.begin_upload(parent, leaf, existing.as_ref(), truncate).await?)
+                    OpenHandle::Upload(
+                        self.begin_upload(parent, leaf, existing.as_ref(), truncate)
+                            .await?,
+                    )
                 } else {
                     let file = existing.ok_or(StatusCode::NoSuchFile)?;
                     if file.encrypted {
@@ -1010,7 +1077,10 @@ impl russh_sftp::server::Handler for SpaceFs {
                     let opened = tokio::fs::File::open(self.uploads.join(&file.media_id))
                         .await
                         .map_err(|_| StatusCode::NoSuchFile)?;
-                    OpenHandle::ReadFile { file: opened, size: file.size as u64 }
+                    OpenHandle::ReadFile {
+                        file: opened,
+                        size: file.size as u64,
+                    }
                 }
             }
         };
@@ -1039,8 +1109,12 @@ impl russh_sftp::server::Handler for SpaceFs {
             }
             let want = (len as u64).min(size - offset) as usize;
             let mut data = vec![0u8; want];
-            file.seek(std::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
-            file.read_exact(&mut data).await.map_err(|_| StatusCode::Failure)?;
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            file.read_exact(&mut data)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
             return Ok(russh_sftp::protocol::Data { id, data });
         }
 
@@ -1082,8 +1156,16 @@ impl russh_sftp::server::Handler for SpaceFs {
                     .checked_add(data.len() as u64)
                     .filter(|&end| end <= self.max_upload)
                     .ok_or(StatusCode::Failure)?;
-                upload.file.seek(std::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
-                upload.file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
+                upload
+                    .file
+                    .seek(std::io::SeekFrom::Start(offset))
+                    .await
+                    .map_err(|_| StatusCode::Failure)?;
+                upload
+                    .file
+                    .write_all(&data)
+                    .await
+                    .map_err(|_| StatusCode::Failure)?;
                 upload.size = upload.size.max(end);
                 Ok(ok_status(id))
             }
@@ -1093,7 +1175,11 @@ impl russh_sftp::server::Handler for SpaceFs {
 
     async fn close(&mut self, id: u32, handle: String) -> SftpResult<russh_sftp::protocol::Status> {
         match self.handles.remove(&handle) {
-            Some(OpenHandle::Write { id: node, buf, base }) => self.finish_doc(node, buf, base).await?,
+            Some(OpenHandle::Write {
+                id: node,
+                buf,
+                base,
+            }) => self.finish_doc(node, buf, base).await?,
             Some(OpenHandle::Upload(upload)) => self.finish_upload(upload).await?,
             Some(OpenHandle::Scratch { path, buf }) => {
                 // Removed while open: like an unlinked file, it is simply gone.
@@ -1108,7 +1194,11 @@ impl russh_sftp::server::Handler for SpaceFs {
         Ok(ok_status(id))
     }
 
-    async fn remove(&mut self, id: u32, filename: String) -> SftpResult<russh_sftp::protocol::Status> {
+    async fn remove(
+        &mut self,
+        id: u32,
+        filename: String,
+    ) -> SftpResult<russh_sftp::protocol::Status> {
         self.authorized().await?;
         match self.target(&filename).await? {
             Target::Doc(doc) => self.delete_node(doc.id).await?,
@@ -1141,9 +1231,14 @@ impl russh_sftp::server::Handler for SpaceFs {
             self.changed();
             return Ok(ok_status(id));
         };
-        let slug = nodes::unique_slug(&mut *self.conn().await?, Some(parent), &nodes::slugify(name), None)
-            .await
-            .map_err(|_| StatusCode::Failure)?;
+        let slug = nodes::unique_slug(
+            &mut *self.conn().await?,
+            Some(parent),
+            &nodes::slugify(name),
+            None,
+        )
+        .await
+        .map_err(|_| StatusCode::Failure)?;
         sqlx::query(
             "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
              VALUES (?1, 'folder', ?2, ?3, ?4, ?4)",
@@ -1200,7 +1295,12 @@ impl russh_sftp::server::Handler for SpaceFs {
         match source {
             Target::Root => return Err(StatusCode::PermissionDenied),
 
-            Target::Dir { id: node, kind, slug, .. } => {
+            Target::Dir {
+                id: node,
+                kind,
+                slug,
+                ..
+            } => {
                 match dest {
                     Some(Target::Dir { id: other, .. }) if other == node => {}
                     Some(_) => return Err(StatusCode::Failure),
@@ -1222,10 +1322,14 @@ impl russh_sftp::server::Handler for SpaceFs {
                         }
                     }
                 }
-                let new_slug =
-                    nodes::unique_slug(&mut *self.conn().await?, new_parent, &nodes::slugify(new_leaf), Some(node))
-                        .await
-                        .map_err(|_| StatusCode::Failure)?;
+                let new_slug = nodes::unique_slug(
+                    &mut *self.conn().await?,
+                    new_parent,
+                    &nodes::slugify(new_leaf),
+                    Some(node),
+                )
+                .await
+                .map_err(|_| StatusCode::Failure)?;
                 // A move that keeps the name keeps the title too.
                 let name = (new_leaf != slug).then_some(new_leaf);
                 sqlx::query(
@@ -1248,7 +1352,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                     return Err(StatusCode::PermissionDenied);
                 };
                 match (doc_slug(new_leaf), dest) {
-                    (_, Some(Target::Dir { .. } | Target::File(_))) => return Err(StatusCode::Failure),
+                    (_, Some(Target::Dir { .. } | Target::File(_))) => {
+                        return Err(StatusCode::Failure)
+                    }
                     // Onto another document: that one takes this one's text
                     // and keeps its own id, so its share link survives.
                     (Some(_), Some(Target::Doc(other))) if other.id != doc.id => {
@@ -1307,7 +1413,8 @@ impl russh_sftp::server::Handler for SpaceFs {
                     }
                     Some(Target::Root) | None => {}
                 }
-                self.move_file(&file, new_parent, new_leaf, &old_leaf).await?;
+                self.move_file(&file, new_parent, new_leaf, &old_leaf)
+                    .await?;
             }
 
             Target::Scratch(key) => {
@@ -1319,11 +1426,20 @@ impl russh_sftp::server::Handler for SpaceFs {
                     // A temp file renamed over a file, or onto a name worth
                     // keeping: what a sync tool's atomic write looks like.
                     (None, Some(Target::File(other))) => {
-                        let data = self.scratch.remove(&key).map(|f| f.data).unwrap_or_default();
-                        self.keep_scratch(new_parent, new_leaf, data, Some(&other)).await?;
+                        let data = self
+                            .scratch
+                            .remove(&key)
+                            .map(|f| f.data)
+                            .unwrap_or_default();
+                        self.keep_scratch(new_parent, new_leaf, data, Some(&other))
+                            .await?;
                     }
                     (None, None) if !is_ephemeral(new_leaf) => {
-                        let data = self.scratch.remove(&key).map(|f| f.data).unwrap_or_default();
+                        let data = self
+                            .scratch
+                            .remove(&key)
+                            .map(|f| f.data)
+                            .unwrap_or_default();
                         self.keep_scratch(new_parent, new_leaf, data, None).await?;
                     }
                     (Some(_), Some(Target::File(_))) => return Err(StatusCode::Failure),
@@ -1367,7 +1483,9 @@ mod tests {
     };
     use sqlx::sqlite::SqlitePoolOptions;
 
-    use super::{doc_slug, normalize, render_doc, segments, split_heading, write_at, SpaceFs, MAX_FILE};
+    use super::{
+        doc_slug, normalize, render_doc, segments, split_heading, write_at, SpaceFs, MAX_FILE,
+    };
 
     #[test]
     fn writes_past_the_limit_fail_instead_of_wrapping() {
@@ -1381,7 +1499,10 @@ mod tests {
 
     #[test]
     fn dot_dot_climbs_and_stops_at_the_root() {
-        assert_eq!(segments("/proj/notes/../ideas/./a.md"), ["proj", "ideas", "a.md"]);
+        assert_eq!(
+            segments("/proj/notes/../ideas/./a.md"),
+            ["proj", "ideas", "a.md"]
+        );
         assert_eq!(normalize("/../../proj"), "/proj");
         assert_eq!(normalize(""), "/");
     }
@@ -1419,7 +1540,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("an in-memory database");
-        sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations apply");
         SpaceFs::with_db(db, uploads, None)
     }
 
@@ -1429,13 +1553,21 @@ mod tests {
     async fn files_are_nodes_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         let mut fs = fs_in(dir.path().to_path_buf()).await;
-        fs.mkdir(0, "/proj".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         put(&mut fs, "/proj/slides.pdf", "%PDF one").await;
         put(&mut fs, "/proj/notes.md", "# Notes\n\ntext").await;
         assert_eq!(get(&mut fs, "/proj/slides.pdf").await, "%PDF one");
 
         async fn names(fs: &SpaceFs) -> Vec<String> {
-            let mut names: Vec<String> = fs.listing("/proj").await.unwrap().into_iter().map(|f| f.filename).collect();
+            let mut names: Vec<String> = fs
+                .listing("/proj")
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|f| f.filename)
+                .collect();
             names.sort();
             names
         }
@@ -1447,16 +1579,28 @@ mod tests {
         let uploads = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(uploads, 1, "the old bytes went with the old upload");
 
-        fs.rename(0, "/proj/slides.pdf".into(), "/proj/Lecture 1.pdf".into()).await.expect("rename");
+        fs.rename(0, "/proj/slides.pdf".into(), "/proj/Lecture 1.pdf".into())
+            .await
+            .expect("rename");
         assert_eq!(names(&fs).await, ["Lecture 1.pdf", "notes.md"]);
 
         // A sync tool's temp file, renamed onto the name it was for.
         put(&mut fs, "/proj/.handout.pdf.Xy12", "%PDF three").await;
-        fs.rename(0, "/proj/.handout.pdf.Xy12".into(), "/proj/handout.pdf".into()).await.expect("rename");
+        fs.rename(
+            0,
+            "/proj/.handout.pdf.Xy12".into(),
+            "/proj/handout.pdf".into(),
+        )
+        .await
+        .expect("rename");
         assert_eq!(get(&mut fs, "/proj/handout.pdf").await, "%PDF three");
 
-        fs.remove(0, "/proj/Lecture 1.pdf".into()).await.expect("remove");
-        fs.remove(0, "/proj/handout.pdf".into()).await.expect("remove");
+        fs.remove(0, "/proj/Lecture 1.pdf".into())
+            .await
+            .expect("remove");
+        fs.remove(0, "/proj/handout.pdf".into())
+            .await
+            .expect("remove");
         assert_eq!(names(&fs).await, ["notes.md"]);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
@@ -1466,7 +1610,9 @@ mod tests {
     #[tokio::test]
     async fn a_write_over_a_newer_edit_is_kept_as_a_copy() {
         let mut fs = fs().await;
-        fs.mkdir(0, "/proj".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         put(&mut fs, "/proj/plan.md", "# Plan\n\nfirst").await;
 
         let handle = fs
@@ -1478,21 +1624,34 @@ mod tests {
             .execute(&fs.db)
             .await
             .unwrap();
-        fs.write(0, handle.clone(), 0, b"# Plan\n\nfrom sftp".to_vec()).await.unwrap();
+        fs.write(0, handle.clone(), 0, b"# Plan\n\nfrom sftp".to_vec())
+            .await
+            .unwrap();
         fs.close(0, handle).await.unwrap();
 
-        assert_eq!(get(&mut fs, "/proj/plan.md").await, "# Plan\n\nfrom the browser");
-        assert_eq!(get(&mut fs, "/proj/plan-conflict.md").await, "# Plan\n\nfrom sftp");
+        assert_eq!(
+            get(&mut fs, "/proj/plan.md").await,
+            "# Plan\n\nfrom the browser"
+        );
+        assert_eq!(
+            get(&mut fs, "/proj/plan-conflict.md").await,
+            "# Plan\n\nfrom sftp"
+        );
     }
 
     #[tokio::test]
     async fn a_removed_key_ends_the_mount() {
         let mut fs = fs().await;
         fs.key_id = Some(42);
-        assert_eq!(fs.opendir(0, "/".into()).await.err(), Some(StatusCode::PermissionDenied));
+        assert_eq!(
+            fs.opendir(0, "/".into()).await.err(),
+            Some(StatusCode::PermissionDenied)
+        );
     }
 
-    const CREATE: OpenFlags = OpenFlags::WRITE.union(OpenFlags::CREATE).union(OpenFlags::TRUNCATE);
+    const CREATE: OpenFlags = OpenFlags::WRITE
+        .union(OpenFlags::CREATE)
+        .union(OpenFlags::TRUNCATE);
 
     async fn put(fs: &mut SpaceFs, path: &str, text: &str) {
         let handle = fs
@@ -1500,7 +1659,9 @@ mod tests {
             .await
             .expect("open for writing")
             .handle;
-        fs.write(0, handle.clone(), 0, text.as_bytes().to_vec()).await.expect("write");
+        fs.write(0, handle.clone(), 0, text.as_bytes().to_vec())
+            .await
+            .expect("write");
         fs.close(0, handle).await.expect("close");
     }
 
@@ -1510,7 +1671,11 @@ mod tests {
             .await
             .expect("open for reading")
             .handle;
-        let data = fs.read(0, handle.clone(), 0, u32::MAX).await.map(|d| d.data).unwrap_or_default();
+        let data = fs
+            .read(0, handle.clone(), 0, u32::MAX)
+            .await
+            .map(|d| d.data)
+            .unwrap_or_default();
         fs.close(0, handle).await.expect("close");
         String::from_utf8(data).expect("utf-8")
     }
@@ -1528,7 +1693,9 @@ mod tests {
     #[tokio::test]
     async fn mkdir_at_the_root_makes_a_space_and_a_document_lands_in_it() {
         let mut fs = fs().await;
-        fs.mkdir(0, "/Side Project".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/Side Project".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         let kind: String = sqlx::query_scalar("SELECT kind FROM nodes WHERE slug = 'side-project'")
             .fetch_one(&fs.db)
             .await
@@ -1536,18 +1703,31 @@ mod tests {
         assert_eq!(kind, "space");
 
         // Both the name it was made with and the slug it got resolve.
-        fs.stat(0, "/Side Project".into()).await.expect("stat by name");
-        fs.mkdir(0, "/side-project/Ideas".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.stat(0, "/Side Project".into())
+            .await
+            .expect("stat by name");
+        fs.mkdir(0, "/side-project/Ideas".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         assert_eq!(
-            fs.mkdir(0, "/side-project/ideas".into(), FileAttributes::empty()).await.err(),
+            fs.mkdir(0, "/side-project/ideas".into(), FileAttributes::empty())
+                .await
+                .err(),
             Some(StatusCode::Failure)
         );
 
-        put(&mut fs, "/side-project/ideas/My Notes.md", "# First thoughts\n\nhello\n").await;
+        put(
+            &mut fs,
+            "/side-project/ideas/My Notes.md",
+            "# First thoughts\n\nhello\n",
+        )
+        .await;
         let (_, name, body) = node(&fs, "my-notes").await;
         assert_eq!(name, "First thoughts");
         assert_eq!(body, "hello\n");
-        fs.stat(0, "/side-project/ideas/My Notes.md".into()).await.expect("stat by name");
+        fs.stat(0, "/side-project/ideas/My Notes.md".into())
+            .await
+            .expect("stat by name");
 
         let text = get(&mut fs, "/side-project/ideas/my-notes.md").await;
         assert_eq!(text, "# First thoughts\n\nhello\n");
@@ -1563,18 +1743,28 @@ mod tests {
     #[tokio::test]
     async fn a_vim_save_keeps_the_same_document() {
         let mut fs = fs().await;
-        fs.mkdir(0, "/proj".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         put(&mut fs, "/proj/plan.md", "# Plan\n\nv1\n").await;
         let (id, ..) = node(&fs, "plan").await;
 
         // The sequence vim runs with `backupcopy=auto` on a mount.
         put(&mut fs, "/proj/4913", "").await;
-        fs.remove(0, "/proj/4913".into()).await.expect("remove probe");
+        fs.remove(0, "/proj/4913".into())
+            .await
+            .expect("remove probe");
         put(&mut fs, "/proj/.plan.md.swp", "swap").await;
-        fs.rename(0, "/proj/plan.md".into(), "/proj/plan.md~".into()).await.expect("backup");
+        fs.rename(0, "/proj/plan.md".into(), "/proj/plan.md~".into())
+            .await
+            .expect("backup");
         put(&mut fs, "/proj/plan.md", "# Plan\n\nv2\n").await;
-        fs.remove(0, "/proj/plan.md~".into()).await.expect("drop backup");
-        fs.remove(0, "/proj/.plan.md.swp".into()).await.expect("drop swap");
+        fs.remove(0, "/proj/plan.md~".into())
+            .await
+            .expect("drop backup");
+        fs.remove(0, "/proj/.plan.md.swp".into())
+            .await
+            .expect("drop swap");
 
         let (after, name, body) = node(&fs, "plan").await;
         assert_eq!((after, name.as_str(), body.as_str()), (id, "Plan", "v2\n"));
@@ -1588,7 +1778,9 @@ mod tests {
     #[tokio::test]
     async fn a_temp_file_renamed_over_a_document_replaces_its_text() {
         let mut fs = fs().await;
-        fs.mkdir(0, "/proj".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
         put(&mut fs, "/proj/plan.md", "# Plan\n\nv1\n").await;
         let (id, ..) = node(&fs, "plan").await;
 
@@ -1596,25 +1788,40 @@ mod tests {
         let listed = fs.listing("/proj").await.expect("listing");
         assert!(listed.iter().any(|f| f.filename == "plan.md.tmp"));
 
-        fs.rename(0, "/proj/plan.md.tmp".into(), "/proj/plan.md".into()).await.expect("rename");
+        fs.rename(0, "/proj/plan.md.tmp".into(), "/proj/plan.md".into())
+            .await
+            .expect("rename");
         let (after, name, body) = node(&fs, "plan").await;
-        assert_eq!((after, name.as_str(), body.as_str()), (id, "Renamed", "v2\n"));
+        assert_eq!(
+            (after, name.as_str(), body.as_str()),
+            (id, "Renamed", "v2\n")
+        );
         assert!(fs.scratch.is_empty());
     }
 
     #[tokio::test]
     async fn spaces_rename_at_the_root_and_folders_cannot_swallow_themselves() {
         let mut fs = fs().await;
-        fs.mkdir(0, "/proj".into(), FileAttributes::empty()).await.expect("mkdir");
-        fs.mkdir(0, "/proj/a".into(), FileAttributes::empty()).await.expect("mkdir");
-        fs.mkdir(0, "/proj/a/b".into(), FileAttributes::empty()).await.expect("mkdir");
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        fs.mkdir(0, "/proj/a".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        fs.mkdir(0, "/proj/a/b".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
 
-        fs.rename(0, "/proj".into(), "/Gig".into()).await.expect("rename space");
+        fs.rename(0, "/proj".into(), "/Gig".into())
+            .await
+            .expect("rename space");
         let (_, name, _) = node(&fs, "gig").await;
         assert_eq!(name, "Gig");
 
         assert_eq!(
-            fs.rename(0, "/gig/a".into(), "/gig/a/b/a".into()).await.err(),
+            fs.rename(0, "/gig/a".into(), "/gig/a/b/a".into())
+                .await
+                .err(),
             Some(StatusCode::Failure)
         );
         assert_eq!(
@@ -1626,8 +1833,15 @@ mod tests {
             Some(StatusCode::PermissionDenied)
         );
 
-        fs.mkdir(0, "/empty".into(), FileAttributes::empty()).await.expect("mkdir");
-        fs.rmdir(0, "/empty".into()).await.expect("an empty space can go");
-        assert_eq!(fs.rmdir(0, "/gig".into()).await.err(), Some(StatusCode::Failure));
+        fs.mkdir(0, "/empty".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        fs.rmdir(0, "/empty".into())
+            .await
+            .expect("an empty space can go");
+        assert_eq!(
+            fs.rmdir(0, "/gig".into()).await.err(),
+            Some(StatusCode::Failure)
+        );
     }
 }

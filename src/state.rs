@@ -2,7 +2,9 @@ use std::sync::{atomic::AtomicI64, Arc};
 
 use sqlx::SqlitePool;
 
-use crate::{backup::Backup, config::Config, notify::Notifier, throttle::LoginThrottle, vault::Vault};
+use crate::{
+    backup::Backup, config::Config, notify::Notifier, throttle::LoginThrottle, vault::Vault,
+};
 
 #[derive(Clone)]
 pub struct AppState {

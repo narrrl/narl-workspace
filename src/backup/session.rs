@@ -31,10 +31,10 @@ use aes_gcm::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rand::RngCore;
 use proton_drive_rs::KeySalt;
 use proton_sdk::account::KeyPassphrases;
 use proton_sdk::session::{PasswordMode, ProtonApiSession, ResumeParameters};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -114,14 +114,20 @@ mod passphrases {
     use zeroize::Zeroizing;
 
     pub fn serialize<S: Serializer>(value: &KeyPassphrases, out: S) -> Result<S::Ok, S::Error> {
-        out.collect_map(value.iter().map(|(id, passphrase)| (id, STANDARD.encode(passphrase))))
+        out.collect_map(
+            value
+                .iter()
+                .map(|(id, passphrase)| (id, STANDARD.encode(passphrase))),
+        )
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<KeyPassphrases, D::Error> {
         let encoded = BTreeMap::<String, Zeroizing<String>>::deserialize(input)?;
         let mut passphrases = KeyPassphrases::new();
         for (id, passphrase) in encoded {
-            let bytes = STANDARD.decode(passphrase.as_bytes()).map_err(D::Error::custom)?;
+            let bytes = STANDARD
+                .decode(passphrase.as_bytes())
+                .map_err(D::Error::custom)?;
             passphrases.insert(id, bytes);
         }
         Ok(passphrases)
@@ -204,12 +210,18 @@ impl SessionStore {
             ),
             (false, _) => bytes,
         };
-        let stored = serde_json::from_slice(&json)
-            .with_context(|| format!("{} is not a session this build understands", self.path.display()))?;
+        let stored = serde_json::from_slice(&json).with_context(|| {
+            format!(
+                "{} is not a session this build understands",
+                self.path.display()
+            )
+        })?;
 
         if !sealed && self.key.is_some() {
             self.save(&stored)?;
-            tracing::info!("the stored Proton session is now sealed under WORKSPACE_SESSION_KEY_FILE");
+            tracing::info!(
+                "the stored Proton session is now sealed under WORKSPACE_SESSION_KEY_FILE"
+            );
         }
         Ok(Some(stored))
     }
@@ -261,7 +273,13 @@ fn seal(key: &[u8; 32], json: &[u8]) -> Vec<u8> {
     let mut nonce = [0u8; NONCE];
     rand::thread_rng().fill_bytes(&mut nonce);
     let ciphertext = Aes256Gcm::new(key.into())
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: json, aad: MAGIC })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: json,
+                aad: MAGIC,
+            },
+        )
         .expect("AES-GCM seals any input this size");
 
     let mut out = Vec::with_capacity(MAGIC.len() + NONCE + ciphertext.len());
@@ -278,7 +296,13 @@ fn open(key: &[u8; 32], sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
     }
     let (nonce, ciphertext) = rest.split_at(NONCE);
     Aes256Gcm::new(key.into())
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad: MAGIC })
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad: MAGIC,
+            },
+        )
         .map(Zeroizing::new)
         .map_err(|_| anyhow!("the key does not open it, or it was altered"))
 }
@@ -363,8 +387,10 @@ mod tests {
     fn passphrases_survive_the_file_and_the_password_never_reaches_it() {
         let dir = tempfile::tempdir().unwrap();
         let store = SessionStore::new(dir.path().join("proton-session.json"));
-        let passphrases =
-            KeyPassphrases::from_iter([("key-1", b"one\0\xff".to_vec()), ("key-2", b"two".to_vec())]);
+        let passphrases = KeyPassphrases::from_iter([
+            ("key-1", b"one\0\xff".to_vec()),
+            ("key-2", b"two".to_vec()),
+        ]);
 
         // Even a session that still holds the old fields in memory writes
         // neither of them.
@@ -414,10 +440,15 @@ mod tests {
         let path = dir.path().join("proton-session.json");
         let passphrases = KeyPassphrases::from_iter([("key-1", b"secret".to_vec())]);
 
-        keyed(&path, [7; 32]).save(&stored(passphrases.clone())).unwrap();
+        keyed(&path, [7; 32])
+            .save(&stored(passphrases.clone()))
+            .unwrap();
         let raw = std::fs::read(&path).unwrap();
         assert!(raw.starts_with(MAGIC));
-        assert!(!raw.windows(7).any(|w| w == b"refresh"), "tokens left in the clear");
+        assert!(
+            !raw.windows(7).any(|w| w == b"refresh"),
+            "tokens left in the clear"
+        );
 
         let loaded = keyed(&path, [7; 32]).load().unwrap().unwrap();
         assert!(loaded.key_passphrases == passphrases);
@@ -425,7 +456,10 @@ mod tests {
         let wrong = keyed(&path, [8; 32]).load().err().unwrap();
         assert!(format!("{wrong:#}").contains("does not open"), "{wrong:#}");
         let none = SessionStore::new(&path).load().err().unwrap();
-        assert!(none.to_string().contains("WORKSPACE_SESSION_KEY_FILE"), "{none}");
+        assert!(
+            none.to_string().contains("WORKSPACE_SESSION_KEY_FILE"),
+            "{none}"
+        );
 
         let mut flipped = raw.clone();
         *flipped.last_mut().unwrap() ^= 1;
@@ -437,7 +471,9 @@ mod tests {
     fn a_plain_file_is_sealed_the_first_time_a_key_reads_it() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("proton-session.json");
-        SessionStore::new(&path).save(&stored(KeyPassphrases::new())).unwrap();
+        SessionStore::new(&path)
+            .save(&stored(KeyPassphrases::new()))
+            .unwrap();
         assert!(std::fs::read(&path).unwrap().starts_with(b"{"));
 
         let loaded = keyed(&path, [7; 32]).load().unwrap().unwrap();
@@ -457,7 +493,10 @@ mod tests {
         for bad in ["", "not base64 at all", &STANDARD.encode([3u8; 16])] {
             std::fs::write(&file, bad).unwrap();
             let error = read_key(&file).err().unwrap();
-            assert!(error.to_string().contains("openssl rand -base64 32"), "{error}");
+            assert!(
+                error.to_string().contains("openssl rand -base64 32"),
+                "{error}"
+            );
         }
         assert!(read_key(&dir.path().join("missing")).is_err());
     }

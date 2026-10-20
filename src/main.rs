@@ -18,11 +18,9 @@ mod vault;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::Router;
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
-};
 use axum::http::{header, HeaderValue};
+use axum::Router;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use tower_http::{
     compression::CompressionLayer,
     set_header::SetResponseHeaderLayer,
@@ -200,17 +198,16 @@ async fn snapshot_before_migrating(
     migrator: &sqlx::migrate::Migrator,
     config: &Config,
 ) -> Result<()> {
-    let applied: Option<i64> = match sqlx::query_scalar(
-        "SELECT MAX(version) FROM _sqlx_migrations WHERE success",
-    )
-    .fetch_one(db)
-    .await
-    {
-        Ok(version) => version,
-        // No bookkeeping table: nothing has ever been migrated, so there is
-        // nothing to keep.
-        Err(_) => return Ok(()),
-    };
+    let applied: Option<i64> =
+        match sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success")
+            .fetch_one(db)
+            .await
+        {
+            Ok(version) => version,
+            // No bookkeeping table: nothing has ever been migrated, so there is
+            // nothing to keep.
+            Err(_) => return Ok(()),
+        };
     let Some(applied) = applied else {
         return Ok(());
     };
@@ -305,7 +302,10 @@ fn is_slow(method: &axum::http::Method, path: &str) -> bool {
     }
 }
 
-async fn deadline(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+async fn deadline(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
     use axum::response::IntoResponse;
     if is_slow(request.method(), request.uri().path()) {
         return next.run(request).await;
@@ -351,7 +351,9 @@ fn compressible(
     headers: &axum::http::HeaderMap,
     _: &axum::http::Extensions,
 ) -> bool {
-    if status == axum::http::StatusCode::PARTIAL_CONTENT || headers.contains_key(header::ACCEPT_RANGES) {
+    if status == axum::http::StatusCode::PARTIAL_CONTENT
+        || headers.contains_key(header::ACCEPT_RANGES)
+    {
         return false;
     }
     let kind = headers

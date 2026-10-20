@@ -87,7 +87,8 @@ fn random<const N: usize>() -> [u8; N] {
 
 /// The key the password stands for, at the costs the vault was made with.
 fn derive(password: &str, salt: &[u8], m: u32, t: u32, p: u32) -> Result<Key> {
-    let params = argon2::Params::new(m, t, p, Some(32)).map_err(|e| anyhow!("argon2 params: {e}"))?;
+    let params =
+        argon2::Params::new(m, t, p, Some(32)).map_err(|e| anyhow!("argon2 params: {e}"))?;
     let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let mut key = Zeroizing::new([0u8; 32]);
     argon
@@ -99,7 +100,13 @@ fn derive(password: &str, salt: &[u8], m: u32, t: u32, p: u32) -> Result<Key> {
 fn seal_master(kek: &Key, master: &Key) -> Result<([u8; WRAP_NONCE], Vec<u8>)> {
     let nonce = random::<WRAP_NONCE>();
     let sealed = Aes256Gcm::new(kek.as_ref().into())
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: master.as_ref(), aad: MASTER_AAD })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: master.as_ref(),
+                aad: MASTER_AAD,
+            },
+        )
         .map_err(|_| anyhow!("could not seal the master key"))?;
     Ok((nonce, sealed))
 }
@@ -108,7 +115,13 @@ fn seal_master(kek: &Key, master: &Key) -> Result<([u8; WRAP_NONCE], Vec<u8>)> {
 fn open_master(kek: &Key, nonce: &[u8], sealed: &[u8]) -> Option<Key> {
     let plain = Zeroizing::new(
         Aes256Gcm::new(kek.as_ref().into())
-            .decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad: MASTER_AAD })
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: sealed,
+                    aad: MASTER_AAD,
+                },
+            )
             .ok()?,
     );
     let mut key = Zeroizing::new([0u8; 32]);
@@ -133,7 +146,10 @@ impl Sealer {
         let sealed_key = Aes256Gcm::new(master.as_ref().into())
             .encrypt(
                 Nonce::from_slice(&wrap_nonce),
-                Payload { msg: file_key.as_ref(), aad: &file_aad(media_id) },
+                Payload {
+                    msg: file_key.as_ref(),
+                    aad: &file_aad(media_id),
+                },
             )
             .map_err(|_| anyhow!("could not seal a file key"))?;
 
@@ -147,7 +163,13 @@ impl Sealer {
             Aes256Gcm::new(file_key.as_ref().into()),
             stream_nonce.as_slice().into(),
         );
-        Ok((Self { stream, pending: Vec::with_capacity(CHUNK) }, header))
+        Ok((
+            Self {
+                stream,
+                pending: Vec::with_capacity(CHUNK),
+            },
+            header,
+        ))
     }
 
     /// Take more plaintext; returns whatever whole records it completes. A
@@ -223,15 +245,25 @@ impl Opener {
             Aes256Gcm::new(master.as_ref().into())
                 .decrypt(
                     Nonce::from_slice(wrap_nonce),
-                    Payload { msg: sealed_key, aad: &file_aad(media_id) },
+                    Payload {
+                        msg: sealed_key,
+                        aad: &file_aad(media_id),
+                    },
                 )
-                .map_err(|_| anyhow!("this file was not sealed under this vault, or not as {media_id}"))?,
+                .map_err(|_| {
+                    anyhow!("this file was not sealed under this vault, or not as {media_id}")
+                })?,
         );
         let stream = StreamBE32::from_aead(
             Aes256Gcm::new(file_key.as_slice().into()),
             stream_nonce.into(),
         );
-        Ok(Self { stream, position: 0, total: remaining, last })
+        Ok(Self {
+            stream,
+            position: 0,
+            total: remaining,
+            last,
+        })
     }
 
     /// How many bytes the next record takes on disk; 0 once all are read.
@@ -282,12 +314,19 @@ pub struct Reader<R> {
 
 impl Reader<std::fs::File> {
     pub fn open(master: &Key, media_id: &str, path: &std::path::Path) -> Result<Self> {
-        let mut file = std::fs::File::open(path).with_context(|| format!("could not read {}", path.display()))?;
+        let mut file = std::fs::File::open(path)
+            .with_context(|| format!("could not read {}", path.display()))?;
         let len = file.metadata()?.len();
         let mut header = [0u8; HEADER];
-        file.read_exact(&mut header).context("sealed file is truncated")?;
+        file.read_exact(&mut header)
+            .context("sealed file is truncated")?;
         let opener = Opener::new(master, media_id, &header, len)?;
-        Ok(Self { inner: file, opener, buffer: Vec::new(), at: 0 })
+        Ok(Self {
+            inner: file,
+            opener,
+            buffer: Vec::new(),
+            at: 0,
+        })
     }
 }
 
@@ -312,7 +351,12 @@ impl<R: Read> Read for Reader<R> {
 
 /// Seal `source` into `target` under `media_id`, on the calling thread.
 /// Returns the plaintext size.
-pub fn seal_file(master: &Key, media_id: &str, source: &mut impl Read, target: &std::path::Path) -> Result<u64> {
+pub fn seal_file(
+    master: &Key,
+    media_id: &str,
+    source: &mut impl Read,
+    target: &std::path::Path,
+) -> Result<u64> {
     use std::io::Write;
     let mut out = std::io::BufWriter::new(std::fs::File::create(target)?);
     let (mut sealer, header) = Sealer::new(master, media_id)?;
@@ -374,7 +418,11 @@ pub enum Unlock {
 
 impl Vault {
     pub fn new(db: SqlitePool, idle: Duration) -> Arc<Self> {
-        Arc::new(Self { db, idle, open: Mutex::new(None) })
+        Arc::new(Self {
+            db,
+            idle,
+            open: Mutex::new(None),
+        })
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Option<Unlocked>> {
@@ -407,7 +455,10 @@ impl Vault {
     /// next look, with the key sitting in memory all the while.
     fn expire(&self) {
         let mut slot = self.slot();
-        if slot.as_ref().is_some_and(|open| open.touched.elapsed() >= self.idle) {
+        if slot
+            .as_ref()
+            .is_some_and(|open| open.touched.elapsed() >= self.idle)
+        {
             *slot = None;
             tracing::info!("vault locked after {} idle", humantime(self.idle));
         }
@@ -448,9 +499,11 @@ impl Vault {
     }
 
     async fn row(&self) -> Result<Option<sqlx::sqlite::SqliteRow>> {
-        Ok(sqlx::query("SELECT salt, m_cost, t_cost, p_cost, nonce, sealed FROM vault WHERE id = 1")
-            .fetch_optional(&self.db)
-            .await?)
+        Ok(sqlx::query(
+            "SELECT salt, m_cost, t_cost, p_cost, nonce, sealed FROM vault WHERE id = 1",
+        )
+        .fetch_optional(&self.db)
+        .await?)
     }
 
     /// Make the vault, and leave it open. Refuses when there already is one:
@@ -486,7 +539,10 @@ impl Vault {
             return Ok(false);
         }
 
-        *self.slot() = Some(Unlocked { key: Arc::new(master), touched: Instant::now() });
+        *self.slot() = Some(Unlocked {
+            key: Arc::new(master),
+            touched: Instant::now(),
+        });
         Ok(true)
     }
 
@@ -512,7 +568,10 @@ impl Vault {
             None => Unlock::NotConfigured,
             Some(None) => Unlock::WrongPassword,
             Some(Some(key)) => {
-                *self.slot() = Some(Unlocked { key: Arc::new(key), touched: Instant::now() });
+                *self.slot() = Some(Unlocked {
+                    key: Arc::new(key),
+                    touched: Instant::now(),
+                });
                 Unlock::Opened
             }
         })
@@ -545,7 +604,10 @@ impl Vault {
         .bind(sealed)
         .execute(&self.db)
         .await?;
-        *self.slot() = Some(Unlocked { key: Arc::new(master), touched: Instant::now() });
+        *self.slot() = Some(Unlocked {
+            key: Arc::new(master),
+            touched: Instant::now(),
+        });
         Ok(Unlock::Opened)
     }
 }
@@ -611,7 +673,8 @@ mod tests {
         let plain: Vec<u8> = (0..3 * CHUNK + 17).map(|i| (i % 249) as u8).collect();
         let sealed = seal(&master, "id", &plain, CHUNK);
         for first in 0..4u64 {
-            let mut opener = Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
+            let mut opener =
+                Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
             opener.skip_to(first).unwrap();
             let mut at = HEADER + first as usize * super::RECORD;
             let mut out = Vec::new();
@@ -622,7 +685,8 @@ mod tests {
             }
             assert_eq!(out, plain[first as usize * CHUNK..], "from record {first}");
         }
-        let mut opener = Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
+        let mut opener =
+            Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
         assert!(opener.skip_to(4).is_err());
         // A middle record presented where the last one should be does not open.
         opener.skip_to(3).unwrap();
@@ -639,7 +703,11 @@ mod tests {
                 let sealed = seal(&master, "id", &plain, step);
                 let records = size.div_ceil(CHUNK).max(1);
                 assert_eq!(sealed.len(), HEADER + size + records * TAG, "size {size}");
-                assert_eq!(open(&master, "id", &sealed).expect("opens"), plain, "size {size} step {step}");
+                assert_eq!(
+                    open(&master, "id", &sealed).expect("opens"),
+                    plain,
+                    "size {size} step {step}"
+                );
             }
         }
     }
@@ -652,7 +720,10 @@ mod tests {
         let path = dir.path().join("x");
         std::fs::write(&path, seal(&master, "x", &plain, CHUNK)).expect("write");
         let mut out = Vec::new();
-        Reader::open(&master, "x", &path).expect("reader").read_to_end(&mut out).expect("read");
+        Reader::open(&master, "x", &path)
+            .expect("reader")
+            .read_to_end(&mut out)
+            .expect("read");
         assert_eq!(out, plain);
     }
 
@@ -663,12 +734,18 @@ mod tests {
         let sealed = seal(&master, "a", &plain, CHUNK);
 
         assert!(open(&key(3), "a", &sealed).is_err(), "another vault");
-        assert!(open(&master, "b", &sealed).is_err(), "renamed to another id");
+        assert!(
+            open(&master, "b", &sealed).is_err(),
+            "renamed to another id"
+        );
 
         // Cut at a record boundary: what is left still parses as records, and
         // only the missing "last" mark gives it away.
         let cut = &sealed[..HEADER + CHUNK + TAG];
-        assert!(open(&master, "a", cut).is_err(), "truncated at a record boundary");
+        assert!(
+            open(&master, "a", cut).is_err(),
+            "truncated at a record boundary"
+        );
 
         let mut flipped = sealed.clone();
         flipped[HEADER + 10] ^= 1;
@@ -681,7 +758,10 @@ mod tests {
         let kek = derive("correct horse", b"saltsaltsaltsalt", 256, 1, 1).expect("derive");
         let master = key(5);
         let (nonce, sealed) = seal_master(&kek, &master).expect("seal");
-        assert_eq!(open_master(&kek, &nonce, &sealed).expect("opens").as_ref(), master.as_ref());
+        assert_eq!(
+            open_master(&kek, &nonce, &sealed).expect("opens").as_ref(),
+            master.as_ref()
+        );
         let wrong = derive("correct horse!", b"saltsaltsaltsalt", 256, 1, 1).expect("derive");
         assert!(open_master(&wrong, &nonce, &sealed).is_none());
     }

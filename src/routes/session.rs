@@ -9,9 +9,9 @@ use serde_json::json;
 
 use crate::{
     auth::{self, Session},
-    throttle::FREE_ATTEMPTS,
     error::{AppError, AppResult},
     state::AppState,
+    throttle::FREE_ATTEMPTS,
 };
 
 #[derive(Deserialize)]
@@ -46,7 +46,10 @@ pub async fn login(
         .unwrap_or("unknown");
     state.notify.note_login(user_agent).await;
 
-    let token = auth::issue_token(&state.config, state.epoch.load(std::sync::atomic::Ordering::SeqCst));
+    let token = auth::issue_token(
+        &state.config,
+        state.epoch.load(std::sync::atomic::Ordering::SeqCst),
+    );
     Ok((
         StatusCode::OK,
         [(
@@ -98,7 +101,10 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
         Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
         Err(e) => {
             tracing::error!("health check: the database does not answer: {e}");
-            (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "ok": false })))
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "ok": false })),
+            )
         }
     }
 }

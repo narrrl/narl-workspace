@@ -174,7 +174,8 @@ const HEAD_CHARS: usize = 1024;
 const EXCERPT_CHARS: usize = 180;
 
 /// The columns every list query selects, so a row always converts the same way.
-const SUMMARY_COLUMNS: &str = "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board, n.role,
+const SUMMARY_COLUMNS: &str =
+    "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board, n.role,
      n.created_at, n.updated_at, n.share_token, n.media_id,
      (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count,
      (SELECT m.mime FROM media m WHERE m.id = n.media_id) AS file_mime,
@@ -305,9 +306,13 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         .map(|media_id| FileInfo {
             url: format!("/api/media/{media_id}"),
             media_id,
-            mime: row.get::<Option<String>, _>("file_mime").unwrap_or_default(),
+            mime: row
+                .get::<Option<String>, _>("file_mime")
+                .unwrap_or_default(),
             size: row.get::<Option<i64>, _>("file_size").unwrap_or_default(),
-            encrypted: row.get::<Option<bool>, _>("file_encrypted").unwrap_or_default(),
+            encrypted: row
+                .get::<Option<bool>, _>("file_encrypted")
+                .unwrap_or_default(),
         });
     NodeSummary {
         id: row.get("id"),
@@ -330,7 +335,10 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
 }
 
 /// The spaces, in display order. Their child counts are what the switcher shows.
-pub async fn spaces(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<NodeSummary>>> {
+pub async fn spaces(
+    _: Session,
+    State(state): State<AppState>,
+) -> AppResult<Json<Vec<NodeSummary>>> {
     list_spaces(&state.db).await.map(Json)
 }
 
@@ -358,7 +366,10 @@ pub struct SpaceOverview {
 /// Every space with the documents last written in it, from any depth: what
 /// the overview shows, the way the desktop's overview shows each workspace
 /// with its windows.
-pub async fn overview(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<SpaceOverview>>> {
+pub async fn overview(
+    _: Session,
+    State(state): State<AppState>,
+) -> AppResult<Json<Vec<SpaceOverview>>> {
     let mut out = Vec::new();
     for space in list_spaces(&state.db).await? {
         let recent = recent_documents(&state.db, space.id, OVERVIEW_RECENT).await?;
@@ -368,7 +379,11 @@ pub async fn overview(_: Session, State(state): State<AppState>) -> AppResult<Js
 }
 
 /// The `limit` most recently edited documents anywhere under `root`.
-pub async fn recent_documents(db: &SqlitePool, root: i64, limit: i64) -> AppResult<Vec<NodeSummary>> {
+pub async fn recent_documents(
+    db: &SqlitePool,
+    root: i64,
+    limit: i64,
+) -> AppResult<Vec<NodeSummary>> {
     let rows = sqlx::query(&format!(
         "WITH RECURSIVE sub (id) AS (
              SELECT id FROM nodes WHERE id = ?1
@@ -413,10 +428,12 @@ pub async fn insert_space(db: &SqlitePool, name: &str, has_board: bool) -> AppRe
     let mut tx = crate::db::begin_write(db).await?;
     let slug = unique_slug(&mut tx, None, &slugify(name), None).await?;
     let now = crate::now();
-    let position: i64 = sqlx::query("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM nodes WHERE parent_id IS NULL")
-        .fetch_one(&mut *tx)
-        .await?
-        .get("next");
+    let position: i64 = sqlx::query(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM nodes WHERE parent_id IS NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await?
+    .get("next");
 
     let id: i64 = sqlx::query(
         "INSERT INTO nodes (parent_id, kind, name, slug, position, has_board, created_at, updated_at)
@@ -502,7 +519,13 @@ pub async fn list(
         for node in &mut found {
             let path = path_of(&state.db, node.id).await?;
             let parents = &path[..path.len().saturating_sub(1)];
-            node.location = Some(parents.iter().map(|c| c.slug.as_str()).collect::<Vec<_>>().join("/"));
+            node.location = Some(
+                parents
+                    .iter()
+                    .map(|c| c.slug.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
         }
     }
     Ok(Json(found))
@@ -541,7 +564,9 @@ pub async fn resolve(
             .ok_or(AppError::NotFound)?;
         current = Some(row.get("id"));
     }
-    load(&state, current.ok_or(AppError::NotFound)?).await.map(Json)
+    load(&state, current.ok_or(AppError::NotFound)?)
+        .await
+        .map(Json)
 }
 
 pub async fn create(
@@ -595,13 +620,17 @@ pub async fn update(
     // here is still free when it is written, and a file's name and its
     // download name never disagree.
     let mut tx = crate::db::begin_write(&state.db).await?;
-    let row = sqlx::query("SELECT parent_id, kind, name, slug, updated_at FROM nodes WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let row =
+        sqlx::query("SELECT parent_id, kind, name, slug, updated_at FROM nodes WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AppError::NotFound)?;
 
-    if input.base_updated_at.is_some_and(|base| row.get::<i64, _>("updated_at") > base) {
+    if input
+        .base_updated_at
+        .is_some_and(|base| row.get::<i64, _>("updated_at") > base)
+    {
         return Err(AppError::Conflict(
             "changed somewhere else since it was opened — :e! takes that version, :w! writes over it".into(),
         ));
@@ -627,13 +656,19 @@ pub async fn update(
 
     // A file has no text, only a name, and the name is also what a download
     // of it is called.
-    let body = if kind == FILE { "" } else { input.body.as_str() };
+    let body = if kind == FILE {
+        ""
+    } else {
+        input.body.as_str()
+    };
     if kind == FILE {
-        sqlx::query("UPDATE media SET filename = ?1 WHERE id = (SELECT media_id FROM nodes WHERE id = ?2)")
-            .bind(name)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE media SET filename = ?1 WHERE id = (SELECT media_id FROM nodes WHERE id = ?2)",
+        )
+        .bind(name)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     }
 
     sqlx::query(
@@ -740,7 +775,9 @@ pub async fn move_node(
     // A space is a root: under a folder it would drop out of the switcher
     // while its board and its cards carried on as if nothing had happened.
     if kind == SPACE {
-        return Err(AppError::BadRequest("a space cannot be moved into anything".into()));
+        return Err(AppError::BadRequest(
+            "a space cannot be moved into anything".into(),
+        ));
     }
 
     container(&mut tx, input.parent_id).await?;
@@ -775,10 +812,7 @@ pub async fn move_node(
 }
 
 /// Refuse anything but a space or a folder as the place a node goes into.
-pub async fn container(
-    db: &mut SqliteConnection,
-    id: i64,
-) -> AppResult<()> {
+pub async fn container(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
     let kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
         .bind(id)
         .fetch_optional(&mut *db)
@@ -794,10 +828,7 @@ pub async fn container(
 }
 
 /// A node and everything beneath it, the node itself first.
-pub async fn descendants(
-    db: &mut SqliteConnection,
-    id: i64,
-) -> AppResult<Vec<i64>> {
+pub async fn descendants(db: &mut SqliteConnection, id: i64) -> AppResult<Vec<i64>> {
     let rows = sqlx::query(
         "WITH RECURSIVE sub (id) AS (
              SELECT id FROM nodes WHERE id = ?1
@@ -970,7 +1001,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("an in-memory database");
-        sqlx::migrate!("./migrations").run(&db).await.expect("migrations apply");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations apply");
 
         let insert = |parent: i64, kind: &'static str, slug: &'static str, at: i64| {
             let db = db.clone();
@@ -1028,7 +1062,12 @@ mod tests {
             .expect("a database");
 
         let mut before = sqlx::migrate!("./migrations");
-        before.migrations = before.migrations.iter().filter(|m| m.version < 10).cloned().collect();
+        before.migrations = before
+            .migrations
+            .iter()
+            .filter(|m| m.version < 10)
+            .cloned()
+            .collect();
         before.run(&db).await.expect("migrations up to 0009");
 
         let folder: i64 = sqlx::query_scalar(
@@ -1055,7 +1094,10 @@ mod tests {
         let mut stale = db.acquire().await.expect("a second connection");
         stale.ping().await.expect("ping");
 
-        sqlx::migrate!("./migrations").run(&db).await.expect("0010 applies");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("0010 applies");
 
         let (name, slug, owned): (String, String, i64) = sqlx::query_as(
             "SELECT n.name, n.slug, (SELECT COUNT(*) FROM node_media nm WHERE nm.node_id = n.id)
@@ -1065,12 +1107,16 @@ mod tests {
         .fetch_one(&db)
         .await
         .expect("the adopted file");
-        assert_eq!((name.as_str(), slug.as_str(), owned), ("slides.pdf", "file-0a1b2c3d", 1));
-        let on_folder: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM node_media WHERE node_id = ?1")
-            .bind(folder)
-            .fetch_one(&db)
-            .await
-            .expect("count");
+        assert_eq!(
+            (name.as_str(), slug.as_str(), owned),
+            ("slides.pdf", "file-0a1b2c3d", 1)
+        );
+        let on_folder: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM node_media WHERE node_id = ?1")
+                .bind(folder)
+                .fetch_one(&db)
+                .await
+                .expect("count");
         assert_eq!(on_folder, 0);
 
         db.execute("INSERT INTO media (id, filename, mime, size, created_at) VALUES ('m2', 'b.zip', 'application/octet-stream', 1, 1)")
@@ -1095,9 +1141,15 @@ mod tests {
         .await
         .is_err());
 
-        let check: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&db).await.expect("check");
+        let check: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&db)
+            .await
+            .expect("check");
         assert_eq!(check, "ok");
-        let dangling = sqlx::query("PRAGMA foreign_key_check").fetch_all(&db).await.expect("fk check");
+        let dangling = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&db)
+            .await
+            .expect("fk check");
         assert!(dangling.is_empty());
     }
 
@@ -1125,8 +1177,14 @@ mod tests {
     fn fts_query_discards_operators() {
         // Anything that could be read as FTS syntax must not survive as syntax.
         assert_eq!(fts_query("hello"), Some("\"hello\"*".into()));
-        assert_eq!(fts_query("a OR b"), Some("\"a\"* AND \"OR\"* AND \"b\"*".into()));
-        assert_eq!(fts_query("foo\"NEAR/2\"bar"), Some("\"foo\"* AND \"NEAR\"* AND \"2\"* AND \"bar\"*".into()));
+        assert_eq!(
+            fts_query("a OR b"),
+            Some("\"a\"* AND \"OR\"* AND \"b\"*".into())
+        );
+        assert_eq!(
+            fts_query("foo\"NEAR/2\"bar"),
+            Some("\"foo\"* AND \"NEAR\"* AND \"2\"* AND \"bar\"*".into())
+        );
         assert_eq!(fts_query("  "), None);
         assert_eq!(fts_query("***"), None);
     }
@@ -1155,7 +1213,10 @@ mod tests {
 
     #[test]
     fn a_taken_slug_gets_a_number() {
-        let taken: BTreeSet<String> = ["readme", "readme-2"].iter().map(|s| s.to_string()).collect();
+        let taken: BTreeSet<String> = ["readme", "readme-2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(next_slug(&taken, "readme").unwrap(), "readme-3");
         assert_eq!(next_slug(&taken, "notes").unwrap(), "notes");
         assert_eq!(next_slug(&BTreeSet::new(), "readme").unwrap(), "readme");

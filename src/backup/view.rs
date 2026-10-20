@@ -65,7 +65,13 @@ impl Placed {
 pub(crate) fn clean(name: &str, slug: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
@@ -95,7 +101,10 @@ pub(crate) fn layout(nodes: &[TreeNode]) -> Vec<Placed> {
     let mut segment: HashMap<i64, String> = HashMap::new();
     let parent_of: HashMap<i64, Option<i64>> = nodes.iter().map(|n| (n.id, n.parent_id)).collect();
 
-    for node in sorted.iter().filter(|n| n.kind == "space" || n.kind == "folder") {
+    for node in sorted
+        .iter()
+        .filter(|n| n.kind == "space" || n.kind == "folder")
+    {
         let name = clean(&node.name, &node.slug);
         let names = taken.entry(node.parent_id).or_default();
         let name = if names.insert(name.to_lowercase()) {
@@ -207,7 +216,11 @@ pub async fn run(
             Some(uid) => {
                 tracked.insert(
                     node_id,
-                    Tracked { path: row.get("path"), media_id: row.get("media_id"), uid },
+                    Tracked {
+                        path: row.get("path"),
+                        media_id: row.get("media_id"),
+                        uid,
+                    },
                 );
             }
             None => forget(db, node_id).await?,
@@ -215,7 +228,10 @@ pub async fn run(
     }
 
     let mut dirs: HashMap<String, NodeUid> = HashMap::new();
-    for row in sqlx::query("SELECT path, node_uid FROM backup_view_dirs").fetch_all(db).await? {
+    for row in sqlx::query("SELECT path, node_uid FROM backup_view_dirs")
+        .fetch_all(db)
+        .await?
+    {
         if let Some(uid) = parse_uid(&row.get::<String, _>("node_uid")) {
             dirs.insert(row.get("path"), uid);
         }
@@ -229,7 +245,14 @@ pub async fn run(
     .into_iter()
     .collect();
 
-    let mut view = View { db, config, client, root, dirs, summary };
+    let mut view = View {
+        db,
+        config,
+        client,
+        root,
+        dirs,
+        summary,
+    };
 
     // What is gone, or is no longer the same bytes, goes first: it frees the
     // names the moves below may want.
@@ -426,12 +449,21 @@ impl View<'_> {
                 Ok(Some(existing)) => {
                     let uid = existing.uid.clone();
                     self.client
-                        .upload_new_revision_from(&uid, std::fs::File::open(&path)?, size as i64, Vec::new(), Some(crate::now()))
+                        .upload_new_revision_from(
+                            &uid,
+                            std::fs::File::open(&path)?,
+                            size as i64,
+                            Vec::new(),
+                            Some(crate::now()),
+                        )
                         .await
                         .with_context(|| format!("could not upload files/{}", placed.path()))?;
                     uid
                 }
-                _ => return Err(e).with_context(|| format!("could not upload files/{}", placed.path())),
+                _ => {
+                    return Err(e)
+                        .with_context(|| format!("could not upload files/{}", placed.path()))
+                }
             },
         };
 
@@ -465,7 +497,9 @@ impl View<'_> {
                 for (uid, result) in results {
                     match result {
                         Ok(()) => self.summary.pruned += 1,
-                        Err(e) => tracing::warn!(node = %uid, error = %e, "could not trash in files/"),
+                        Err(e) => {
+                            tracing::warn!(node = %uid, error = %e, "could not trash in files/")
+                        }
                     }
                 }
             }
@@ -503,7 +537,10 @@ mod tests {
             node(4, Some(2), "document", "notes"),
             node(5, Some(1), "file", "syllabus.pdf"),
         ];
-        assert_eq!(paths(&layout(&tree)), ["uni/Algorithms/week 1.pdf", "uni/syllabus.pdf"]);
+        assert_eq!(
+            paths(&layout(&tree)),
+            ["uni/Algorithms/week 1.pdf", "uni/syllabus.pdf"]
+        );
     }
 
     #[test]
@@ -538,7 +575,10 @@ mod tests {
 
     #[test]
     fn a_file_whose_folder_is_missing_is_left_out() {
-        let tree = [node(1, None, "space", "uni"), node(3, Some(9), "file", "lost.pdf")];
+        let tree = [
+            node(1, None, "space", "uni"),
+            node(3, Some(9), "file", "lost.pdf"),
+        ];
         assert!(layout(&tree).is_empty());
     }
 

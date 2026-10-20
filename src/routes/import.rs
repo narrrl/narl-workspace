@@ -23,9 +23,9 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     routes::{
-        media,
         boards,
         manifest::{self, Manifest, NodeMeta},
+        media,
         nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
     },
     state::AppState,
@@ -139,7 +139,14 @@ fn split_title(body: &str, path: &str) -> (String, String) {
         .map(str::to_string);
 
     match heading {
-        Some(title) => (title, lines.collect::<Vec<_>>().join("\n").trim_start().to_string()),
+        Some(title) => (
+            title,
+            lines
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_start()
+                .to_string(),
+        ),
         None => {
             let name = file_name(path);
             let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
@@ -287,9 +294,10 @@ async fn collect(
             let limit = state.config.max_upload_bytes as u64;
             let archive = uploads_dir.join(&id);
             let opened = archive.clone();
-            let expanded = tokio::task::spawn_blocking(move || expand_zip(&opened, &uploads_dir, limit))
-                .await
-                .map_err(anyhow::Error::from);
+            let expanded =
+                tokio::task::spawn_blocking(move || expand_zip(&opened, &uploads_dir, limit))
+                    .await
+                    .map_err(anyhow::Error::from);
             let _ = tokio::fs::remove_file(&archive).await;
 
             let (mut files, mut refused, ids) = match expanded? {
@@ -328,7 +336,10 @@ async fn collect(
                 continue;
             }
             let text = String::from_utf8_lossy(&text).to_string();
-            uploads.push(Upload { content: text_content(&path, text), path });
+            uploads.push(Upload {
+                content: text_content(&path, text),
+                path,
+            });
             continue;
         }
 
@@ -340,7 +351,10 @@ async fn collect(
             continue;
         }
         written.push(id.clone());
-        uploads.push(Upload { path, content: Content::File { id, mime, size } });
+        uploads.push(Upload {
+            path,
+            content: Content::File { id, mime, size },
+        });
     }
 
     Ok(uploads)
@@ -417,7 +431,10 @@ fn unpack(
                 continue;
             }
             let text = String::from_utf8_lossy(&text).to_string();
-            uploads.push(Upload { content: text_content(&path, text), path });
+            uploads.push(Upload {
+                content: text_content(&path, text),
+                path,
+            });
             continue;
         }
 
@@ -450,7 +467,11 @@ fn unpack(
         }
 
         uploads.push(Upload {
-            content: Content::File { id, mime: media::mime_of(&path, None), size },
+            content: Content::File {
+                id,
+                mime: media::mime_of(&path, None),
+                size,
+            },
             path,
         });
     }
@@ -486,7 +507,9 @@ pub async fn import(
             "a folder can only be imported into a space or a folder".into(),
         ));
     }
-    run(&state, Into::Node(Box::new(target)), multipart).await.map(Json)
+    run(&state, Into::Node(Box::new(target)), multipart)
+        .await
+        .map(Json)
 }
 
 /// `POST /api/import` — an export poured back in whole: each top-level
@@ -512,7 +535,9 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
             files_as_they_were(state, manifest, &mut uploads, &mut written).await?;
         }
         if uploads.is_empty() {
-            return Err(AppError::BadRequest("nothing importable in that upload".into()));
+            return Err(AppError::BadRequest(
+                "nothing importable in that upload".into(),
+            ));
         }
         build(state, &into, uploads, skipped, manifest).await
     }
@@ -537,8 +562,13 @@ async fn files_as_they_were(
     written: &mut Vec<String>,
 ) -> AppResult<()> {
     for upload in uploads.iter_mut() {
-        let was_file = manifest.nodes.get(&upload.path).is_some_and(|m| m.kind == FILE);
-        let Content::Markdown(text) = &upload.content else { continue };
+        let was_file = manifest
+            .nodes
+            .get(&upload.path)
+            .is_some_and(|m| m.kind == FILE);
+        let Content::Markdown(text) = &upload.content else {
+            continue;
+        };
         if !was_file {
             continue;
         }
@@ -693,7 +723,10 @@ async fn build(
     let mut dir_ids: HashMap<String, i64> = HashMap::new();
     let mut dir_paths: HashMap<String, String> = HashMap::new();
     if let Into::Node(target) = into {
-        siblings.insert(target.id, nodes::sibling_slugs(&mut tx, Some(target.id), None).await?);
+        siblings.insert(
+            target.id,
+            nodes::sibling_slugs(&mut tx, Some(target.id), None).await?,
+        );
         dir_ids.insert(String::new(), target.id);
         dir_paths.insert(String::new(), prefix);
     }
@@ -764,7 +797,10 @@ async fn build(
             (id, slug)
         };
 
-        let path = join(&dir_paths.get(parent_of(dir)).cloned().unwrap_or_default(), &slug);
+        let path = join(
+            &dir_paths.get(parent_of(dir)).cloned().unwrap_or_default(),
+            &slug,
+        );
         dir_ids.insert(dir.clone(), id);
         dir_paths.insert(dir.clone(), path.clone());
         landed.insert(dir.clone(), Landed::Node(format!("/n/{path}")));
@@ -780,7 +816,12 @@ async fn build(
         let dated = meta(&upload.path);
         let (created, updated) = dated.map_or((now, now), |m| (m.created_at, m.updated_at));
 
-        if let Content::File { id: media_id, mime, size } = &upload.content {
+        if let Content::File {
+            id: media_id,
+            mime,
+            size,
+        } = &upload.content
+        {
             let original = manifest
                 .as_ref()
                 .and_then(|m| m.media.get(&upload.path))
@@ -896,7 +937,9 @@ async fn build(
     let mut cards = 0usize;
     if let (Into::Root, Some(manifest)) = (into, &manifest) {
         for (dir, space) in &manifest.spaces {
-            let Some(&space_id) = dir_ids.get(dir) else { continue };
+            let Some(&space_id) = dir_ids.get(dir) else {
+                continue;
+            };
             cards += boards::restore(&mut tx, space_id, &space.lists, &by_path).await?;
             if space.role.as_deref() == Some(nodes::DIARY) {
                 // Only where no space has the role yet: there is one diary.
@@ -935,16 +978,25 @@ mod tests {
     };
 
     fn text(path: &str, content: Content) -> Upload {
-        Upload { path: path.into(), content }
+        Upload {
+            path: path.into(),
+            content,
+        }
     }
 
     #[test]
     fn an_export_uploaded_as_a_folder_is_read_from_where_its_manifest_is() {
         let manifest = r#"{"format": 1, "nodes": {"work/a.md": {"kind": "document", "name": "A", "created_at": 1, "updated_at": 2}}}"#;
         let mut uploads = vec![
-            text("workspace-2026/.workspace.json", Content::Manifest(manifest.into())),
+            text(
+                "workspace-2026/.workspace.json",
+                Content::Manifest(manifest.into()),
+            ),
             text("workspace-2026/work/a.md", Content::Markdown("a".into())),
-            text("workspace-2026/work/deeper/.workspace.json", Content::Manifest("{}".into())),
+            text(
+                "workspace-2026/work/deeper/.workspace.json",
+                Content::Manifest("{}".into()),
+            ),
         ];
         let found = take_manifest(&mut uploads).unwrap().unwrap();
         assert_eq!(found.nodes["work/a.md"].created_at, 1);
@@ -956,7 +1008,10 @@ mod tests {
 
     #[test]
     fn a_manifest_from_a_newer_version_is_refused() {
-        let mut uploads = vec![text(".workspace.json", Content::Manifest(r#"{"format": 99}"#.into()))];
+        let mut uploads = vec![text(
+            ".workspace.json",
+            Content::Manifest(r#"{"format": 99}"#.into()),
+        )];
         assert!(take_manifest(&mut uploads).is_err());
     }
 
@@ -979,18 +1034,27 @@ mod tests {
     #[test]
     fn a_zip_unpacks_markdown_to_memory_and_the_rest_to_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (uploads, skipped, ids) =
-            expand_zip(&archive(dir.path()), dir.path(), 1 << 20).unwrap_or_else(|(e, _)| panic!("{e:?}"));
+        let (uploads, skipped, ids) = expand_zip(&archive(dir.path()), dir.path(), 1 << 20)
+            .unwrap_or_else(|(e, _)| panic!("{e:?}"));
 
         assert_eq!(skipped, ["../escape.txt"]);
         assert_eq!(ids.len(), 1);
-        let blob = uploads.iter().find(|u| u.path == "notes/blob.bin").expect("the blob");
-        let Content::File { id, size, .. } = &blob.content else { panic!("the blob is a file") };
-        assert_eq!(*size, 4096);
-        assert_eq!(std::fs::metadata(dir.path().join(id)).expect("on disk").len(), 4096);
-        assert!(uploads
+        let blob = uploads
             .iter()
-            .any(|u| u.path == "notes/a.md" && matches!(&u.content, Content::Markdown(t) if t.contains("text"))));
+            .find(|u| u.path == "notes/blob.bin")
+            .expect("the blob");
+        let Content::File { id, size, .. } = &blob.content else {
+            panic!("the blob is a file")
+        };
+        assert_eq!(*size, 4096);
+        assert_eq!(
+            std::fs::metadata(dir.path().join(id))
+                .expect("on disk")
+                .len(),
+            4096
+        );
+        assert!(uploads.iter().any(|u| u.path == "notes/a.md"
+            && matches!(&u.content, Content::Markdown(t) if t.contains("text"))));
     }
 
     #[test]
@@ -1005,9 +1069,18 @@ mod tests {
 
     #[test]
     fn refuses_paths_that_escape_the_import() {
-        assert_eq!(normalize_path("docs/readme.md").as_deref(), Some("docs/readme.md"));
-        assert_eq!(normalize_path("./docs//readme.md").as_deref(), Some("docs/readme.md"));
-        assert_eq!(normalize_path("docs\\readme.md").as_deref(), Some("docs/readme.md"));
+        assert_eq!(
+            normalize_path("docs/readme.md").as_deref(),
+            Some("docs/readme.md")
+        );
+        assert_eq!(
+            normalize_path("./docs//readme.md").as_deref(),
+            Some("docs/readme.md")
+        );
+        assert_eq!(
+            normalize_path("docs\\readme.md").as_deref(),
+            Some("docs/readme.md")
+        );
         assert_eq!(normalize_path("../secrets"), None);
         assert_eq!(normalize_path("docs/../../etc/passwd"), None);
         assert_eq!(normalize_path("/etc/passwd"), None);
@@ -1041,8 +1114,14 @@ mod tests {
 
     #[test]
     fn relative_links_resolve_against_their_document() {
-        assert_eq!(join_relative("docs", "img/a.png").as_deref(), Some("docs/img/a.png"));
-        assert_eq!(join_relative("docs/deep", "../a.md").as_deref(), Some("docs/a.md"));
+        assert_eq!(
+            join_relative("docs", "img/a.png").as_deref(),
+            Some("docs/img/a.png")
+        );
+        assert_eq!(
+            join_relative("docs/deep", "../a.md").as_deref(),
+            Some("docs/a.md")
+        );
         assert_eq!(join_relative("", "a.md").as_deref(), Some("a.md"));
         assert_eq!(join_relative("docs", "../../outside.md"), None);
     }
@@ -1053,7 +1132,10 @@ mod tests {
         assert!(split_target("#section").is_none());
         assert!(split_target("/api/media/x").is_none());
         assert!(split_target("mailto:someone@example.org").is_none());
-        assert_eq!(split_target("a%20b.md#top"), Some(("a b.md".into(), "#top")));
+        assert_eq!(
+            split_target("a%20b.md#top"),
+            Some(("a b.md".into(), "#top"))
+        );
     }
 
     #[test]
@@ -1070,8 +1152,14 @@ mod tests {
     #[test]
     fn links_point_at_where_the_files_landed() {
         let landed = HashMap::from([
-            ("einarbeiten/01.md".to_string(), Landed::Node("/n/work/einarbeiten/01".into())),
-            ("einarbeiten/img/a.png".to_string(), Landed::Media("/api/media/uuid".into())),
+            (
+                "einarbeiten/01.md".to_string(),
+                Landed::Node("/n/work/einarbeiten/01".into()),
+            ),
+            (
+                "einarbeiten/img/a.png".to_string(),
+                Landed::Media("/api/media/uuid".into()),
+            ),
         ]);
 
         let body = "see [one](01.md#ziele) and ![pic](img/a.png), \
@@ -1087,10 +1175,8 @@ mod tests {
 
     #[test]
     fn a_link_from_a_sibling_directory_still_resolves() {
-        let landed = HashMap::from([(
-            "a/one.md".to_string(),
-            Landed::Node("/n/work/a/one".into()),
-        )]);
+        let landed =
+            HashMap::from([("a/one.md".to_string(), Landed::Node("/n/work/a/one".into()))]);
         let (out, count) = rewrite_links("[x](../a/one.md)", "b", &landed);
         assert_eq!(count, 1);
         assert_eq!(out, "[x](/n/work/a/one)");

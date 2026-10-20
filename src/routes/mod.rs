@@ -1,10 +1,10 @@
 pub mod backup;
 pub mod boards;
-pub mod nodes;
 pub mod export;
 pub mod import;
 pub mod manifest;
 pub mod media;
+pub mod nodes;
 pub mod seal;
 pub mod session;
 pub mod share;
@@ -35,7 +35,10 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
     Router::new()
         .route("/health", get(session::health))
         .route("/me", get(session::me))
-        .route("/login", post(session::login).layer(DefaultBodyLimit::max(LOGIN_LIMIT)))
+        .route(
+            "/login",
+            post(session::login).layer(DefaultBodyLimit::max(LOGIN_LIMIT)),
+        )
         .route("/logout", post(session::logout))
         .route("/export", get(export::export))
         .route("/backup", get(backup::status).post(backup::run))
@@ -44,9 +47,15 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/agenda", get(boards::agenda))
         .route("/spaces/{id}/board", get(boards::board))
         .route("/spaces/{id}/lists", post(boards::create_list))
-        .route("/lists/{id}", put(boards::rename_list).delete(boards::remove_list))
+        .route(
+            "/lists/{id}",
+            put(boards::rename_list).delete(boards::remove_list),
+        )
         .route("/lists/{id}/cards", post(boards::create_card))
-        .route("/cards/{id}", put(boards::update_card).delete(boards::remove_card))
+        .route(
+            "/cards/{id}",
+            put(boards::update_card).delete(boards::remove_card),
+        )
         .route("/cards/{id}/move", post(boards::move_card))
         .route("/nodes", get(nodes::list).post(nodes::create))
         .route("/resolve", get(nodes::resolve))
@@ -59,12 +68,20 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/nodes/{id}/files", post(media::upload_into).layer(uploads))
         .route("/nodes/{id}/encrypt", post(seal::encrypt))
         .route("/nodes/{id}/decrypt", post(seal::decrypt))
-        .route("/vault", get(vault::status).post(vault::setup).put(vault::change_password))
+        .route(
+            "/vault",
+            get(vault::status)
+                .post(vault::setup)
+                .put(vault::change_password),
+        )
         .route("/vault/unlock", post(vault::unlock))
         .route("/vault/lock", post(vault::lock))
         .route("/nodes/{id}/share", post(share::enable))
         .route("/nodes/{id}/share", delete(share::disable))
-        .route("/media", post(media::upload).layer(uploads).get(media::list))
+        .route(
+            "/media",
+            post(media::upload).layer(uploads).get(media::list),
+        )
         .route("/media/{id}", get(media::serve).delete(media::remove))
         .route("/share/{token}/{key}", get(share::read))
         .route("/share/{token}/{key}/media/{id}", get(share::serve_media))

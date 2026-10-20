@@ -67,7 +67,9 @@ fn tree_path(nodes: &HashMap<i64, ExportNode>, parent: Option<i64>, leaf: String
     // cannot spin here.
     for _ in 0..nodes.len() {
         let Some(id) = parent else { break };
-        let Some(ancestor) = nodes.get(&id) else { break };
+        let Some(ancestor) = nodes.get(&id) else {
+            break;
+        };
         segments.push(ancestor.slug.clone());
         parent = ancestor.parent_id;
     }
@@ -115,7 +117,13 @@ fn day_string(seconds: i64) -> String {
 fn safe_name(original: &str) -> String {
     let safe: String = original
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     safe.trim_matches(['.', '_']).to_string()
 }
@@ -139,7 +147,11 @@ fn file_path(
     taken: &mut std::collections::HashSet<String>,
 ) -> String {
     let safe = safe_name(&node.name);
-    let name = if safe.is_empty() { node.slug.clone() } else { safe };
+    let name = if safe.is_empty() {
+        node.slug.clone()
+    } else {
+        safe
+    };
     let path = tree_path(nodes, node.parent_id, name.clone());
     if taken.insert(path.clone()) {
         return path;
@@ -266,7 +278,8 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
         // way, by taking their id — so no two entries ever share a name.
         let mut ordered: Vec<&ExportNode> = nodes.values().collect();
         ordered.sort_by_key(|n| n.id);
-        let mut taken: HashSet<String> = HashSet::from(["README.txt".into(), manifest::FILE_NAME.into()]);
+        let mut taken: HashSet<String> =
+            HashSet::from(["README.txt".into(), manifest::FILE_NAME.into()]);
         let containers: Vec<(&ExportNode, String)> = ordered
             .iter()
             .filter(|n| is_container(&n.kind))
@@ -295,10 +308,17 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
         let addresses: HashMap<String, String> = documents
             .iter()
             .map(|(_, path)| (format!("/n/{}", path.trim_end_matches(".md")), path.clone()))
-            .chain(containers.iter().map(|(_, path)| (format!("/n/{path}"), path.clone())))
+            .chain(
+                containers
+                    .iter()
+                    .map(|(_, path)| (format!("/n/{path}"), path.clone())),
+            )
             .collect();
 
-        let mut meta = Manifest { format: manifest::FORMAT, ..Manifest::default() };
+        let mut meta = Manifest {
+            format: manifest::FORMAT,
+            ..Manifest::default()
+        };
         let mut note = |path: &str, node: &ExportNode| {
             meta.nodes.insert(
                 path.to_string(),
@@ -335,9 +355,11 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
                     caps[0].to_string()
                 }
             });
-            let body = NODE_LINK.replace_all(&body, |caps: &regex::Captures| match addresses.get(&caps[1]) {
-                Some(target) => format!("]({}{}", relative_link(path, target), &caps[2]),
-                None => caps[0].to_string(),
+            let body = NODE_LINK.replace_all(&body, |caps: &regex::Captures| {
+                match addresses.get(&caps[1]) {
+                    Some(target) => format!("]({}{}", relative_link(path, target), &caps[2]),
+                    None => caps[0].to_string(),
+                }
             });
             let document = if node.name.trim().is_empty() {
                 body.into_owned()
@@ -364,9 +386,13 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             let source: Box<dyn std::io::Read> = match (&key, sealed.contains(id)) {
                 // A sealed file that will not open is not a file to leave out
                 // quietly: the archive would claim to be complete and not be.
-                (Some(key), true) => Box::new(crate::vault::Reader::open(key, id, &path).map_err(|e| {
-                    AppError::BadRequest(format!("{entry} is sealed and would not open ({e}) — nothing was exported"))
-                })?),
+                (Some(key), true) => {
+                    Box::new(crate::vault::Reader::open(key, id, &path).map_err(|e| {
+                        AppError::BadRequest(format!(
+                            "{entry} is sealed and would not open ({e}) — nothing was exported"
+                        ))
+                    })?)
+                }
                 // A row whose file has gone missing must not fail the whole
                 // export; there is nothing to put in its place either way.
                 _ => match std::fs::File::open(&path) {
@@ -409,7 +435,11 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
                 .collect();
             meta.spaces.insert(
                 path.clone(),
-                SpaceMeta { has_board: node.has_board, role: node.role.clone(), lists },
+                SpaceMeta {
+                    has_board: node.has_board,
+                    role: node.role.clone(),
+                    lists,
+                },
             );
         }
 
@@ -490,8 +520,14 @@ mod tests {
         nodes.get_mut(&4).unwrap().name = "Slides 3.pdf".into();
 
         let mut taken = std::collections::HashSet::new();
-        assert_eq!(file_path(&nodes, &nodes[&3], &mut taken), "uni/algo/Slides_3.pdf");
-        assert_eq!(file_path(&nodes, &nodes[&4], &mut taken), "uni/algo/4-Slides_3.pdf");
+        assert_eq!(
+            file_path(&nodes, &nodes[&3], &mut taken),
+            "uni/algo/Slides_3.pdf"
+        );
+        assert_eq!(
+            file_path(&nodes, &nodes[&4], &mut taken),
+            "uni/algo/4-Slides_3.pdf"
+        );
     }
 
     #[test]
@@ -502,7 +538,10 @@ mod tests {
             (3, Some(2), "document", "01-was-ist-eebus"),
             (4, Some(1), "document", "notes"),
         ]);
-        assert_eq!(document_path(&nodes, &nodes[&3]), "work/einarbeiten/01-was-ist-eebus.md");
+        assert_eq!(
+            document_path(&nodes, &nodes[&3]),
+            "work/einarbeiten/01-was-ist-eebus.md"
+        );
         assert_eq!(document_path(&nodes, &nodes[&4]), "work/notes.md");
     }
 
@@ -521,15 +560,24 @@ mod tests {
     fn media_names_cannot_escape_their_folder() {
         assert_eq!(media_filename("abc", "../../etc/passwd"), "abc-etc_passwd");
         // Nothing that would need escaping in the markdown link that points at it.
-        assert_eq!(media_filename("abc", "my photo (1).png"), "abc-my_photo__1_.png");
+        assert_eq!(
+            media_filename("abc", "my photo (1).png"),
+            "abc-my_photo__1_.png"
+        );
         assert_eq!(media_filename("abc", "photo.jpg"), "abc-photo.jpg");
         assert_eq!(media_filename("abc", "..."), "abc");
     }
 
     #[test]
     fn links_between_documents_become_file_paths() {
-        assert_eq!(relative_link("uni/proj/readme.md", "uni/proj/sub/deep.md"), "sub/deep.md");
-        assert_eq!(relative_link("uni/proj/sub/deep.md", "uni/proj/readme.md"), "../readme.md");
+        assert_eq!(
+            relative_link("uni/proj/readme.md", "uni/proj/sub/deep.md"),
+            "sub/deep.md"
+        );
+        assert_eq!(
+            relative_link("uni/proj/sub/deep.md", "uni/proj/readme.md"),
+            "../readme.md"
+        );
         assert_eq!(relative_link("work/a.md", "uni/b.md"), "../uni/b.md");
         assert_eq!(relative_link("work/a.md", "work/b.md"), "b.md");
     }

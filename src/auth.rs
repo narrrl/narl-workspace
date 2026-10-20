@@ -97,10 +97,13 @@ impl Epoch {
 
     /// Sign every device out: the epoch moves on, and no cookie has it yet.
     pub async fn advance(state: &AppState) -> anyhow::Result<i64> {
-        let epoch: i64 = sqlx::query_scalar("UPDATE auth SET epoch = epoch + 1 WHERE id = 1 RETURNING epoch")
-            .fetch_one(&state.db)
-            .await?;
-        state.epoch.store(epoch, std::sync::atomic::Ordering::SeqCst);
+        let epoch: i64 =
+            sqlx::query_scalar("UPDATE auth SET epoch = epoch + 1 WHERE id = 1 RETURNING epoch")
+                .fetch_one(&state.db)
+                .await?;
+        state
+            .epoch
+            .store(epoch, std::sync::atomic::Ordering::SeqCst);
         Ok(epoch)
     }
 }
@@ -114,9 +117,7 @@ pub fn credentials_match(config: &Config, username: &str, password: &str) -> boo
 pub fn session_cookie(config: &Config, token: &str) -> String {
     let max_age = config.session_days * 86_400;
     let secure = if config.secure_cookie { "; Secure" } else { "" };
-    format!(
-        "{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
-    )
+    format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
 pub fn clear_cookie(config: &Config) -> String {
@@ -165,9 +166,11 @@ impl OptionalFromRequestParts<AppState> for Session {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Option<Self>, Self::Rejection> {
-        Ok(<Session as FromRequestParts<AppState>>::from_request_parts(parts, state)
-            .await
-            .ok())
+        Ok(
+            <Session as FromRequestParts<AppState>>::from_request_parts(parts, state)
+                .await
+                .ok(),
+        )
     }
 }
 
@@ -315,13 +318,28 @@ mod tests {
 
     #[test]
     fn only_same_origin_writes_get_through() {
-        assert!(is_same_origin(&headers(&[("sec-fetch-site", "same-origin")])));
-        assert!(!is_same_origin(&headers(&[("sec-fetch-site", "same-site")])));
-        assert!(!is_same_origin(&headers(&[("sec-fetch-site", "cross-site")])));
+        assert!(is_same_origin(&headers(&[(
+            "sec-fetch-site",
+            "same-origin"
+        )])));
+        assert!(!is_same_origin(&headers(&[(
+            "sec-fetch-site",
+            "same-site"
+        )])));
+        assert!(!is_same_origin(&headers(&[(
+            "sec-fetch-site",
+            "cross-site"
+        )])));
 
         let host = ("host", "diary.example.org");
-        assert!(is_same_origin(&headers(&[("origin", "https://diary.example.org"), host])));
-        assert!(!is_same_origin(&headers(&[("origin", "https://evil.example.org"), host])));
+        assert!(is_same_origin(&headers(&[
+            ("origin", "https://diary.example.org"),
+            host
+        ])));
+        assert!(!is_same_origin(&headers(&[
+            ("origin", "https://evil.example.org"),
+            host
+        ])));
         assert!(!is_same_origin(&headers(&[("origin", "null"), host])));
 
         // curl, the CLI, a script with its own credentials.

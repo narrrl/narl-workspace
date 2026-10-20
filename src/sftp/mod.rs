@@ -103,7 +103,9 @@ impl ServerHandler for SshSession {
         _user: &str,
         public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
-        let fingerprint = public_key.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+        let fingerprint = public_key
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
         let matched = sqlx::query("SELECT id FROM ssh_keys WHERE fingerprint = ?1")
             .bind(&fingerprint)
             .fetch_optional(&self.state.db)

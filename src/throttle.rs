@@ -30,7 +30,10 @@ const MAX_DELAY: i64 = 30;
 fn delay_after(failures: u32) -> i64 {
     match failures.checked_sub(FREE_ATTEMPTS) {
         None | Some(0) => 0,
-        Some(over) => 1i64.checked_shl(over - 1).unwrap_or(MAX_DELAY).min(MAX_DELAY),
+        Some(over) => 1i64
+            .checked_shl(over - 1)
+            .unwrap_or(MAX_DELAY)
+            .min(MAX_DELAY),
     }
 }
 
@@ -114,10 +117,16 @@ mod tests {
         let throttle = LoginThrottle::default();
         // Made directly: past the free attempts `begin` would make them wait.
         for _ in 0..10 {
-            Attempt { throttle: &throttle }.failed();
+            Attempt {
+                throttle: &throttle,
+            }
+            .failed();
         }
         assert!(throttle.begin().is_err());
-        Attempt { throttle: &throttle }.succeeded();
+        Attempt {
+            throttle: &throttle,
+        }
+        .succeeded();
         assert!(throttle.begin().is_ok());
     }
 

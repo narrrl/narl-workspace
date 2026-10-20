@@ -89,7 +89,13 @@ pub async fn run(
     // Written once, and only ever re-read by a human who has lost everything
     // else — so it goes up before the data it explains.
     mirror
-        .bytes(data_folder, "RESTORE.txt", "RESTORE.txt", "text/plain", RESTORE.as_bytes())
+        .bytes(
+            data_folder,
+            "RESTORE.txt",
+            "RESTORE.txt",
+            "text/plain",
+            RESTORE.as_bytes(),
+        )
         .await?;
 
     mirror.database(config, data_folder).await?;
@@ -133,7 +139,13 @@ impl Mirror<'_> {
             .context("could not snapshot the database")?;
 
         let result = self
-            .file(data_folder, "diary.db", "diary.db", "application/vnd.sqlite3", &snapshot)
+            .file(
+                data_folder,
+                "diary.db",
+                "diary.db",
+                "application/vnd.sqlite3",
+                &snapshot,
+            )
             .await;
 
         let _ = tokio::fs::remove_file(&snapshot).await;
@@ -232,7 +244,10 @@ impl Mirror<'_> {
             return Ok(());
         }
 
-        let uids: Vec<NodeUid> = orphans.iter().filter_map(|(_, uid)| parse_uid(uid)).collect();
+        let uids: Vec<NodeUid> = orphans
+            .iter()
+            .filter_map(|(_, uid)| parse_uid(uid))
+            .collect();
         for (uid, result) in self.client.trash_nodes(&uids).await? {
             if let Err(e) = result {
                 tracing::warn!(node = %uid, error = %e, "could not trash a pruned file");

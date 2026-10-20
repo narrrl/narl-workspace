@@ -50,9 +50,7 @@ impl Mailer {
         // A URL with credentials has already set them; this only covers the
         // relays that want them and a URL that keeps them out of the string.
         let transport = match (config::var("SMTP_USER"), config::var("SMTP_PASSWORD")) {
-            (Some(user), Some(password)) => {
-                transport.credentials(Credentials::new(user, password))
-            }
+            (Some(user), Some(password)) => transport.credentials(Credentials::new(user, password)),
             _ => transport,
         }
         .build();
@@ -271,14 +269,18 @@ mod tests {
     async fn mails_given_up_on_do_not_hold_up_the_rest() {
         let db = outbox().await;
         for n in 0..60 {
-            super::enqueue(&db, "reminder", &format!("dead:{n}"), "s", "b").await.unwrap();
+            super::enqueue(&db, "reminder", &format!("dead:{n}"), "s", "b")
+                .await
+                .unwrap();
         }
         sqlx::query("UPDATE notifications SET attempts = ?1, last_attempt_at = 0")
             .bind(MAX_ATTEMPTS)
             .execute(&db)
             .await
             .unwrap();
-        super::enqueue(&db, "reminder", "reminder:2026-10-20", "s", "b").await.unwrap();
+        super::enqueue(&db, "reminder", "reminder:2026-10-20", "s", "b")
+            .await
+            .unwrap();
 
         let next: Vec<String> = sqlx::query_scalar(
             "SELECT dedupe_key FROM notifications WHERE sent_at IS NULL AND attempts < ?1

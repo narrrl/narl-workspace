@@ -99,7 +99,13 @@ pub async fn change_password(
 ) -> AppResult<Json<Status>> {
     strong_enough(&input.password)?;
     let attempt = throttle(&state)?;
-    answer(attempt, state.vault.change_password(input.current, input.password).await?)?;
+    answer(
+        attempt,
+        state
+            .vault
+            .change_password(input.current, input.password)
+            .await?,
+    )?;
     tracing::info!("vault password changed");
     state.backup.signal();
     Ok(Json(state.vault.status().await?))

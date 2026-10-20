@@ -83,7 +83,12 @@ impl Backup {
         backup
     }
 
-    fn with_store(db: SqlitePool, config: Arc<Config>, store: SessionStore, disabled: Option<String>) -> Arc<Self> {
+    fn with_store(
+        db: SqlitePool,
+        config: Arc<Config>,
+        store: SessionStore,
+        disabled: Option<String>,
+    ) -> Arc<Self> {
         let configured = disabled.is_none() && matches!(store.load(), Ok(Some(_)));
         Arc::new(Self {
             db,
@@ -103,7 +108,11 @@ impl Backup {
     }
 
     pub fn status(&self) -> Status {
-        let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut status = self
+            .status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         status.pending = self.dirty.load(Ordering::Relaxed);
         status
     }
@@ -189,7 +198,9 @@ impl Backup {
             Err(std::fs::TryLockError::WouldBlock) => {
                 anyhow::bail!("another backup of this data directory is running — `backup-now` and the server take turns")
             }
-            Err(std::fs::TryLockError::Error(e)) => Err(e).context("could not lock the data directory for a backup"),
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(e).context("could not lock the data directory for a backup")
+            }
         }
     }
 
@@ -280,14 +291,22 @@ impl Backup {
                     .context("could not create the files folder on the device")?;
                 self.state_set("device_files", &uid.to_string()).await?;
                 // What the view remembers lived in a folder that is gone.
-                sqlx::query("DELETE FROM backup_view").execute(&self.db).await?;
-                sqlx::query("DELETE FROM backup_view_dirs").execute(&self.db).await?;
+                sqlx::query("DELETE FROM backup_view")
+                    .execute(&self.db)
+                    .await?;
+                sqlx::query("DELETE FROM backup_view_dirs")
+                    .execute(&self.db)
+                    .await?;
                 uid
             }
         };
 
         self.set(move |s| s.device = Some(name.clone()));
-        Ok(sync::Folders { data, uploads, files })
+        Ok(sync::Folders {
+            data,
+            uploads,
+            files,
+        })
     }
 
     /// A remembered node, if it is still remembered and still there.
@@ -300,7 +319,12 @@ impl Backup {
         if stale {
             return Ok(None);
         }
-        let Some(uid) = self.state_get(key).await?.as_deref().and_then(sync::parse_uid) else {
+        let Some(uid) = self
+            .state_get(key)
+            .await?
+            .as_deref()
+            .and_then(sync::parse_uid)
+        else {
             return Ok(None);
         };
         // A failed lookup is not a missing node — a network error must not be

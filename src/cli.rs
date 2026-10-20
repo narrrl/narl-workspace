@@ -50,7 +50,8 @@ pub async fn proton_login(config: &Config) -> Result<()> {
             if !std::io::stdin().is_terminal() {
                 bail!("no terminal to ask for a password — set PROTON_PASSWORD, or run with `docker compose exec -it`");
             }
-            rpassword::prompt_password("Proton password: ").context("could not read the password")?
+            rpassword::prompt_password("Proton password: ")
+                .context("could not read the password")?
         }
     };
 
@@ -62,7 +63,10 @@ pub async fn proton_login(config: &Config) -> Result<()> {
     })
     .await?;
 
-    println!("Logged in. The session is stored at {}.", store.path().display());
+    println!(
+        "Logged in. The session is stored at {}.",
+        store.path().display()
+    );
     println!("Backups start with the next server start, or run `narl-workspace backup-now`.");
     Ok(())
 }
@@ -96,7 +100,10 @@ pub async fn proton_status(db: &SqlitePool, config: &Config) -> Result<()> {
         "Quiet:    {}s after the last change",
         config.backup.debounce.as_secs()
     );
-    println!("Prune:    {}", if config.backup.prune { "on" } else { "off" });
+    println!(
+        "Prune:    {}",
+        if config.backup.prune { "on" } else { "off" }
+    );
 
     let mirrored: i64 = sqlx::query_scalar("SELECT count(*) FROM backup_files")
         .fetch_one(db)
@@ -142,7 +149,9 @@ pub async fn mail_test(db: SqlitePool, config: Arc<Config>) -> Result<()> {
         .send_test()
         .await
         .context("the test mail could not be sent")?;
-    println!("Sent. If it does not arrive, the relay accepted it and something after that did not.");
+    println!(
+        "Sent. If it does not arrive, the relay accepted it and something after that did not."
+    );
     Ok(())
 }
 
@@ -162,13 +171,19 @@ pub async fn mail_status(db: &SqlitePool, config: &Config) -> Result<()> {
     println!("Timezone: {}", mail.timezone);
     match mail.reminder_at {
         Some(at) if mail.sends("reminder") => {
-            println!("Reminder: {:02}:{:02} when nothing was written", at.hour, at.minute)
+            println!(
+                "Reminder: {:02}:{:02} when nothing was written",
+                at.hour, at.minute
+            )
         }
         _ => println!("Reminder: off"),
     }
     match mail.card_due_at {
         Some(at) if mail.sends("card_due") => {
-            println!("Cards:    {:02}:{:02} for due and overdue cards", at.hour, at.minute)
+            println!(
+                "Cards:    {:02}:{:02} for due and overdue cards",
+                at.hour, at.minute
+            )
         }
         _ => println!("Cards:    off"),
     }
@@ -181,7 +196,10 @@ pub async fn mail_status(db: &SqlitePool, config: &Config) -> Result<()> {
         ),
         _ => println!("Digest:   off"),
     }
-    println!("Logins:   {}", if mail.sends("login") { "on" } else { "off" });
+    println!(
+        "Logins:   {}",
+        if mail.sends("login") { "on" } else { "off" }
+    );
 
     let row = sqlx::query(
         "SELECT count(*) AS queued,

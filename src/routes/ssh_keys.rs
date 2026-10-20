@@ -30,7 +30,10 @@ pub struct AddInput {
     pub public_key: String,
 }
 
-pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<SshKeySummary>>> {
+pub async fn list(
+    _: Session,
+    State(state): State<AppState>,
+) -> AppResult<Json<Vec<SshKeySummary>>> {
     let rows = sqlx::query(
         "SELECT id, name, fingerprint, created_at, last_used_at FROM ssh_keys ORDER BY created_at",
     )

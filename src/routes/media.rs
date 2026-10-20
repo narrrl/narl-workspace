@@ -25,8 +25,10 @@ use crate::{
 /// Media referenced from a document body always looks like `/api/media/<uuid>`,
 /// which is how a document claims ownership of the files it embeds.
 pub(crate) static MEDIA_REF: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"/api/media/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")
-        .expect("static regex is valid")
+    Regex::new(
+        r"/api/media/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+    )
+    .expect("static regex is valid")
 });
 
 /// An upload is attacker-controlled content served from our own origin, so the
@@ -279,7 +281,13 @@ pub async fn upload_into(
         // segment, because the folder is the one in the URL.
         let filename = field
             .file_name()
-            .map(|name| name.rsplit(['/', '\\']).next().unwrap_or(name).trim().to_string())
+            .map(|name| {
+                name.rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(name)
+                    .trim()
+                    .to_string()
+            })
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "upload".to_string());
         let mime = mime_of(&filename, field.content_type());
@@ -290,7 +298,17 @@ pub async fn upload_into(
             continue;
         }
 
-        match insert_file(&state.db, parent, &id, &filename, &mime, size, key.is_some()).await {
+        match insert_file(
+            &state.db,
+            parent,
+            &id,
+            &filename,
+            &mime,
+            size,
+            key.is_some(),
+        )
+        .await
+        {
             Ok(node) => created.push(node),
             Err(e) => {
                 let _ = tokio::fs::remove_file(state.config.uploads_dir().join(&id)).await;
@@ -410,7 +428,10 @@ pub async fn serve(
 /// `size` bytes. `Ok(None)` serves the whole file: no header, one that cannot
 /// be read, or several ranges — a whole file is always a valid answer.
 /// `Err` is a range that starts past the end.
-fn byte_range(header: Option<&axum::http::HeaderValue>, size: u64) -> Result<Option<(u64, u64)>, ()> {
+fn byte_range(
+    header: Option<&axum::http::HeaderValue>,
+    size: u64,
+) -> Result<Option<(u64, u64)>, ()> {
     let Some(spec) = header
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.trim().strip_prefix("bytes="))
@@ -473,7 +494,11 @@ pub async fn stream_media(
     // Re-checked on the way out, not just on the way in, so rows written before
     // the allowlist existed cannot be served as something executable either.
     let mime = sanitize_mime(&row.get::<String, _>("mime"));
-    let disposition = if is_inline(&mime) { "inline" } else { "attachment" };
+    let disposition = if is_inline(&mime) {
+        "inline"
+    } else {
+        "attachment"
+    };
 
     let key = match (encrypted, private) {
         (false, _) => None,
@@ -520,14 +545,16 @@ pub async fn stream_media(
             // browser's cache long after the vault had been shut.
             (
                 header::CACHE_CONTROL,
-                if encrypted { "no-store" } else { "private, max-age=31536000" }.to_string(),
+                if encrypted {
+                    "no-store"
+                } else {
+                    "private, max-age=31536000"
+                }
+                .to_string(),
             ),
             (
                 header::CONTENT_DISPOSITION,
-                format!(
-                    "{disposition}; filename*=UTF-8''{}",
-                    urlencode(&filename)
-                ),
+                format!("{disposition}; filename*=UTF-8''{}", urlencode(&filename)),
             ),
             // Belt and braces: never let the browser sniff past the type above,
             // and strip the ambient authority of the origin from the response.
@@ -571,8 +598,10 @@ async fn open_stream(
     let first = start / vault::CHUNK as u64;
     if first > 0 {
         opener.skip_to(first)?;
-        file.seek(std::io::SeekFrom::Start(vault::HEADER as u64 + first * vault::RECORD as u64))
-            .await?;
+        file.seek(std::io::SeekFrom::Start(
+            vault::HEADER as u64 + first * vault::RECORD as u64,
+        ))
+        .await?;
     }
     let skip = (start - first * vault::CHUNK as u64) as usize;
 
@@ -589,7 +618,10 @@ async fn open_stream(
             let piece = &plain[skip.min(plain.len())..];
             let piece = &piece[..piece.len().min(usize::try_from(left).unwrap_or(usize::MAX))];
             let left = left - piece.len() as u64;
-            Ok(Some((axum::body::Bytes::copy_from_slice(piece), (file, opener, 0, left))))
+            Ok(Some((
+                axum::body::Bytes::copy_from_slice(piece),
+                (file, opener, 0, left),
+            )))
         },
     ))
 }
@@ -646,11 +678,7 @@ pub async fn remove_upload(uploads: &std::path::Path, id: &str) {
 /// Attach every media file the body embeds to this document, and detach the
 /// ones it no longer mentions so they stop being reachable through its share
 /// link. Other documents keep whatever they embed; this rewrites one node's rows.
-pub async fn link_to_node(
-    db: &mut SqliteConnection,
-    node_id: i64,
-    body: &str,
-) -> AppResult<()> {
+pub async fn link_to_node(db: &mut SqliteConnection, node_id: i64, body: &str) -> AppResult<()> {
     let referenced: BTreeSet<String> = MEDIA_REF
         .captures_iter(body)
         .map(|c| c[1].to_lowercase())
@@ -736,7 +764,8 @@ mod tests {
 
     #[test]
     fn ranges_are_read_the_way_browsers_send_them() {
-        let range = |raw: &'static str| byte_range(Some(&axum::http::HeaderValue::from_static(raw)), 1000);
+        let range =
+            |raw: &'static str| byte_range(Some(&axum::http::HeaderValue::from_static(raw)), 1000);
         assert_eq!(byte_range(None, 1000), Ok(None));
         assert_eq!(range("bytes=0-"), Ok(Some((0, 999))));
         assert_eq!(range("bytes=100-199"), Ok(Some((100, 199))));
@@ -761,7 +790,14 @@ mod tests {
 
     #[test]
     fn keeps_types_that_cannot_execute() {
-        for mime in ["image/png", "image/jpeg", "video/mp4", "audio/ogg", "text/plain", "application/pdf"] {
+        for mime in [
+            "image/png",
+            "image/jpeg",
+            "video/mp4",
+            "audio/ogg",
+            "text/plain",
+            "application/pdf",
+        ] {
             assert_eq!(sanitize_mime(mime), mime);
         }
     }

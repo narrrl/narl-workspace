@@ -29,7 +29,11 @@ const APP_NAME: &str = "narl_workspace";
 
 fn app_version() -> String {
     let version = env!("CARGO_PKG_VERSION");
-    let channel = if version.starts_with("0.") { "alpha" } else { "stable" };
+    let channel = if version.starts_with("0.") {
+        "alpha"
+    } else {
+        "stable"
+    };
     format!("external-drive-{APP_NAME}@{version}-{channel}")
 }
 
@@ -79,7 +83,11 @@ pub async fn login(
     })?;
 
     let tokens = session.current_tokens().await;
-    store.save(&StoredSession::from_session(&session, tokens, key_passphrases))?;
+    store.save(&StoredSession::from_session(
+        &session,
+        tokens,
+        key_passphrases,
+    ))?;
     Ok(())
 }
 
@@ -204,7 +212,8 @@ mod tests {
         .unwrap();
         let store = SessionStore::new(&path);
         let stored = store.load().unwrap().unwrap();
-        let session = ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
+        let session =
+            ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
 
         let upgraded = upgrade(&store, &session, stored).await.unwrap();
         assert_eq!(upgraded.key_passphrases.len(), 1);
@@ -228,7 +237,8 @@ mod tests {
         .unwrap();
         let store = SessionStore::new(&path);
         let stored = store.load().unwrap().unwrap();
-        let session = ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
+        let session =
+            ProtonApiSession::resume(client_config(), stored.resume_parameters()).unwrap();
 
         let error = upgrade(&store, &session, stored).await.err().unwrap();
         assert!(error.to_string().contains("proton-login"), "{error}");
@@ -239,13 +249,21 @@ mod tests {
         let version = app_version();
         let (prefix, rest) = version.split_once('@').expect("name@version");
         // Lowercase letters and underscores after the fixed `external-drive-`.
-        let name = prefix.strip_prefix("external-drive-").expect("the required prefix");
+        let name = prefix
+            .strip_prefix("external-drive-")
+            .expect("the required prefix");
         assert!(!name.is_empty());
-        assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '_'), "{name}");
+        assert!(
+            name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "{name}"
+        );
 
         let (semver, channel) = rest.rsplit_once('-').expect("version-channel");
         assert!(matches!(channel, "stable" | "beta" | "alpha"), "{channel}");
         assert_eq!(semver.split('.').count(), 3, "{semver}");
-        assert!(semver.split('.').all(|part| part.parse::<u32>().is_ok()), "{semver}");
+        assert!(
+            semver.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "{semver}"
+        );
     }
 }

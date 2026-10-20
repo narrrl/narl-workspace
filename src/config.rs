@@ -74,7 +74,9 @@ fn flag(key: &str) -> Result<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
-        _ => anyhow::bail!("WORKSPACE_{key} must be 1 or 0 (true/false, yes/no, on/off), not {raw:?}"),
+        _ => anyhow::bail!(
+            "WORKSPACE_{key} must be 1 or 0 (true/false, yes/no, on/off), not {raw:?}"
+        ),
     }
 }
 
@@ -162,7 +164,10 @@ fn parse_time(key: &str, raw: &str) -> Result<Option<TimeOfDay>> {
         .split_once(':')
         .with_context(|| format!("{key} must look like 20:00, or be `off`"))?;
     let time = TimeOfDay {
-        hour: hour.trim().parse().with_context(|| format!("{key}: {hour:?} is not an hour"))?,
+        hour: hour
+            .trim()
+            .parse()
+            .with_context(|| format!("{key}: {hour:?} is not an hour"))?,
         minute: minute
             .trim()
             .parse()
@@ -265,8 +270,9 @@ impl Config {
         // arithmetic on it that must not overflow.
         let session_days = number("SESSION_DAYS", 30, 1..=3650)? as i64;
         // Up to a terabyte, in bytes.
-        let max_upload_bytes = usize::try_from(number("MAX_UPLOAD_MB", 1024, 1..=1024 * 1024)? * 1024 * 1024)
-            .context("WORKSPACE_MAX_UPLOAD_MB is more than this machine can address")?;
+        let max_upload_bytes =
+            usize::try_from(number("MAX_UPLOAD_MB", 1024, 1..=1024 * 1024)? * 1024 * 1024)
+                .context("WORKSPACE_MAX_UPLOAD_MB is more than this machine can address")?;
         // A vault that locks the moment it opens could not be used; one that
         // stays open for more than a day is not much of a vault.
         let vault_idle = Duration::from_secs(number("VAULT_IDLE_MIN", 15, 1..=24 * 60)? * 60);
@@ -397,7 +403,10 @@ mod tests {
     #[test]
     fn numbers_out_of_bounds_stop_the_start() {
         assert_eq!(number("TEST_UNSET_NUMBER", 7, 1..=10).unwrap(), 7);
-        assert_eq!(number(&with("TEST_NUMBER_OK", " 9 "), 7, 1..=10).unwrap(), 9);
+        assert_eq!(
+            number(&with("TEST_NUMBER_OK", " 9 "), 7, 1..=10).unwrap(),
+            9
+        );
         assert!(number(&with("TEST_NUMBER_ZERO", "0"), 7, 1..=10).is_err());
         assert!(number(&with("TEST_NUMBER_HUGE", "99999999999999999999"), 7, 1..=10).is_err());
         assert!(number(&with("TEST_NUMBER_NEGATIVE", "-1"), 7, 1..=10).is_err());
@@ -416,11 +425,17 @@ mod tests {
     fn a_time_of_day_is_read_as_written() {
         assert_eq!(
             parse_time("T", "20:00").unwrap(),
-            Some(TimeOfDay { hour: 20, minute: 0 })
+            Some(TimeOfDay {
+                hour: 20,
+                minute: 0
+            })
         );
         assert_eq!(
             parse_time("T", "07:45").unwrap(),
-            Some(TimeOfDay { hour: 7, minute: 45 })
+            Some(TimeOfDay {
+                hour: 7,
+                minute: 45
+            })
         );
         assert_eq!(parse_time("T", "off").unwrap(), None);
     }
@@ -436,11 +451,23 @@ mod tests {
     fn a_digest_is_a_weekday_and_a_time() {
         assert_eq!(
             parse_digest("sun 18:00").unwrap(),
-            Some((Weekday::Sun, TimeOfDay { hour: 18, minute: 0 }))
+            Some((
+                Weekday::Sun,
+                TimeOfDay {
+                    hour: 18,
+                    minute: 0
+                }
+            ))
         );
         assert_eq!(
             parse_digest("Monday 09:30").unwrap(),
-            Some((Weekday::Mon, TimeOfDay { hour: 9, minute: 30 }))
+            Some((
+                Weekday::Mon,
+                TimeOfDay {
+                    hour: 9,
+                    minute: 30
+                }
+            ))
         );
         assert_eq!(parse_digest("off").unwrap(), None);
         assert!(parse_digest("someday 18:00").is_err());

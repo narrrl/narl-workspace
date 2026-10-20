@@ -103,7 +103,9 @@ pub async fn run(db: &SqlitePool, uploads: &Path) -> anyhow::Result<Swept> {
         }
         let kind = if name.ends_with(".part") || name.starts_with(".import-") {
             &mut swept.partial
-        } else if media::canonical_id(&name).as_deref() == Some(name.as_str()) && !known.contains(&name) {
+        } else if media::canonical_id(&name).as_deref() == Some(name.as_str())
+            && !known.contains(&name)
+        {
             &mut swept.stray
         } else {
             // Not ours to judge: anything that is not a uuid or a leftover of
@@ -160,11 +162,13 @@ mod tests {
         .await
         .unwrap();
         // `kept` is linked the way a saved document links what it embeds.
-        sqlx::query("INSERT INTO node_media (node_id, media_id) SELECT id, ?1 FROM nodes WHERE slug = 'a'")
-            .bind(kept)
-            .execute(&db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO node_media (node_id, media_id) SELECT id, ?1 FROM nodes WHERE slug = 'a'",
+        )
+        .bind(kept)
+        .execute(&db)
+        .await
+        .unwrap();
 
         let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
         for name in [kept, embedded, forgotten, stray, "x.part", "notes.txt"] {
@@ -181,14 +185,23 @@ mod tests {
         std::fs::write(dir.path().join(fresh), b"x").unwrap();
 
         let swept = run(&db, dir.path()).await.unwrap();
-        assert_eq!(swept, Swept { partial: 1, stray: 2, unreferenced: 1 });
+        assert_eq!(
+            swept,
+            Swept {
+                partial: 1,
+                stray: 2,
+                unreferenced: 1
+            }
+        );
 
         let left: std::collections::BTreeSet<String> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        let expected: std::collections::BTreeSet<String> =
-            [kept, embedded, "notes.txt", fresh].iter().map(|s| s.to_string()).collect();
+        let expected: std::collections::BTreeSet<String> = [kept, embedded, "notes.txt", fresh]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(left, expected);
     }
 }
