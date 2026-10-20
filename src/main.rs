@@ -123,6 +123,7 @@ async fn main() -> Result<()> {
     sweep::spawn(db.clone(), config.uploads_dir());
 
     let epoch = auth::Epoch::load(&db, &config).await?;
+    let sessions = Arc::new(auth::Sessions::load(&db).await?);
     let vault = vault::Vault::new(db.clone(), config.vault_idle);
     vault.spawn_idle_lock();
     let state = AppState {
@@ -134,6 +135,7 @@ async fn main() -> Result<()> {
         backup,
         notify,
         epoch: Arc::new(std::sync::atomic::AtomicI64::new(epoch)),
+        sessions,
     };
 
     if let Some(sftp_bind) = config.sftp.bind {

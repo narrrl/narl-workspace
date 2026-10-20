@@ -42,7 +42,9 @@ keeps running untouched.
 `WORKSPACE_SECRET` signs the session cookie; generate one with
 `openssl rand -base64 32`. Changing it logs every device out, and so does
 changing `WORKSPACE_PASSWORD` or `:logout!`, which ends every session but
-needs no restart. A setting that is set but cannot be read — a number out of
+needs no restart. Every signed-in browser is a row on the server: `:sessions`
+lists them and `:sessions rm <n>` signs one out — a lost phone, say — without
+touching the rest, and locks the vault as well. A setting that is set but cannot be read — a number out of
 range, a switch that is neither on nor off — stops the start with the reason,
 rather than being taken for its default. The database and
 uploads live under `WORKSPACE_DATA_DIR` (`./data` by default) — that directory is
@@ -106,7 +108,7 @@ list, `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
 `:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words
 and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
-session and `:logout!` every session. The tree has its own: `:space [name]` switches (`:space! <name>`
+session, `:logout!` every session and `:sessions rm <n>` one other. The tree has its own: `:space [name]` switches (`:space! <name>`
 makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
@@ -561,6 +563,8 @@ sealed or not.
 | `GET` | `/api/health` | public: up, and the database answers — for a supervisor |
 | `POST` | `/api/login`, `/api/logout` | session; `/api/logout?everywhere=true` ends every one |
 | `GET` | `/api/me` | current user |
+| `GET` | `/api/sessions` | every signed-in browser, the one seen last first |
+| `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
 | `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create |
 | `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete (a delete takes the subtree) |

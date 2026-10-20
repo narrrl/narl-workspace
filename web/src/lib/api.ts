@@ -57,6 +57,16 @@ export interface SpaceOverview {
   recent: NodeSummary[]
 }
 
+/** A browser that is signed in. */
+export interface SignedIn {
+  id: string
+  created_at: number
+  last_seen: number
+  user_agent: string
+  /** The session asking. */
+  current: boolean
+}
+
 /** A public key allowed to mount the workspace over SFTP. */
 export interface SshKey {
   id: number
@@ -460,6 +470,9 @@ export const api = {
   readShared: (token: string, key: string) =>
     request<SharedDocument>(`/share/${encodeURIComponent(token)}/${encodeURIComponent(key)}`),
 
+  sessions: () => request<SignedIn[]>('/sessions'),
+  revokeSession: (id: string) =>
+    request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listSshKeys: () => request<SshKey[]>('/ssh-keys'),
 
   addSshKey: (name: string, public_key: string) =>

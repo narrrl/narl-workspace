@@ -1,6 +1,6 @@
 import { api, isContainer, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay, parseDue, sealedNote, type ScrollAmount } from './util'
+import { formatDay, parseDay, parseDue, relative, sealedNote, type ScrollAmount } from './util'
 
 export type { ScrollAmount }
 
@@ -100,6 +100,33 @@ const ago = (at: number | null) => {
   if (seconds < 5400) return `${Math.round(seconds / 60)}m ago`
   if (seconds < 172800) return `${Math.round(seconds / 3600)}h ago`
   return `${Math.round(seconds / 86400)}d ago`
+}
+
+/** "firefox on linux", out of a user-agent string, as far as it says. */
+function browserOf(agent: string): string {
+  const browser = /Edg\//.test(agent)
+    ? 'edge'
+    : /Firefox\//.test(agent)
+      ? 'firefox'
+      : /Chrome\//.test(agent)
+        ? 'chrome'
+        : /Safari\//.test(agent)
+          ? 'safari'
+          : /curl\//.test(agent)
+            ? 'curl'
+            : 'a browser'
+  const system = /Android/.test(agent)
+    ? 'android'
+    : /iPhone|iPad/.test(agent)
+      ? 'ios'
+      : /Mac OS X/.test(agent)
+        ? 'macos'
+        : /Windows/.test(agent)
+          ? 'windows'
+          : /Linux/.test(agent)
+            ? 'linux'
+            : ''
+  return system ? `${browser} on ${system}` : browser
 }
 
 const describeBackup = (status: BackupStatus) => {
@@ -781,6 +808,32 @@ export const commands: CommandSpec[] = [
           )
         }),
     },
+  },
+  {
+    name: 'sessions',
+    args: '[rm <n>]',
+    group: 'view',
+    help: 'every browser signed in, numbered — rm signs one of them out, and locks the vault',
+    run: (arg) =>
+      workspace.guard(async () => {
+        const trimmed = arg.trim()
+        const sessions = await api.sessions()
+        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
+          return workspace.say(
+            sessions
+              .map((s, i) => `${i + 1} ${s.current ? 'this one' : browserOf(s.user_agent)}, seen ${relative(s.last_seen)}`)
+              .join(' · '),
+          )
+        }
+        const rmMatch = /^rm\s+(\d+)$/.exec(trimmed)
+        if (!rmMatch) return workspace.say('usage: :sessions [rm <n>]', 'error')
+        const target = sessions[Number(rmMatch[1]) - 1]
+        if (!target) return workspace.say(`no session ${rmMatch[1]} — :sessions lists them`, 'error')
+        if (target.current) return workspace.say('that is this browser — :logout ends it', 'error')
+        await api.revokeSession(target.id)
+        await workspace.loadVault()
+        workspace.say(`signed out ${browserOf(target.user_agent)}, seen ${relative(target.last_seen)} — the vault is locked`)
+      }),
   },
   {
     name: 'sshkey',

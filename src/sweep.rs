@@ -60,6 +60,11 @@ impl Swept {
 pub async fn run(db: &SqlitePool, uploads: &Path) -> anyhow::Result<Swept> {
     let mut swept = Swept::default();
 
+    sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
+        .bind(crate::now())
+        .execute(db)
+        .await?;
+
     // Rows first, so the files they leave are strays by the time the
     // directory is walked, and go in the same pass.
     let cutoff = crate::now() - UNREFERENCED_DAYS * 86_400;

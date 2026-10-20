@@ -3,7 +3,8 @@ use std::sync::{atomic::AtomicI64, Arc};
 use sqlx::SqlitePool;
 
 use crate::{
-    backup::Backup, config::Config, notify::Notifier, throttle::LoginThrottle, vault::Vault,
+    auth::Sessions, backup::Backup, config::Config, notify::Notifier, throttle::LoginThrottle,
+    vault::Vault,
 };
 
 #[derive(Clone)]
@@ -23,4 +24,6 @@ pub struct AppState {
     /// Signed into every session cookie, which must carry the current value
     /// to be accepted; see [`crate::auth::Epoch`].
     pub epoch: Arc<AtomicI64>,
+    /// Every signed-in browser; a cookie is good only while its row is here.
+    pub sessions: Arc<Sessions>,
 }

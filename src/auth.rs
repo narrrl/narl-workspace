@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{collections::HashMap, convert::Infallible, sync::Mutex};
 
 use axum::{
     extract::{FromRequestParts, OptionalFromRequestParts, Request},
@@ -27,36 +27,153 @@ fn sign(secret: &[u8], payload: &str) -> String {
     B64.encode(mac.finalize().into_bytes())
 }
 
-/// A session token is `base64(expiry_unix_seconds).base64(hmac)`. There is no
-/// server-side session store: rotating `WORKSPACE_SECRET` invalidates every session.
-/// A cookie is good until it expires and for as long as the epoch it was
-/// issued under is the current one.
-pub fn issue_token(config: &Config, epoch: i64) -> String {
-    let expires = crate::now() + config.session_days * 86_400;
-    let payload = B64.encode(format!("{expires}:{epoch}"));
+/// A session token is `base64("{expires}:{epoch}:{id}").base64(hmac)`.
+/// The signature keeps anyone from making one up; the id names the
+/// [`Sessions`] row it belongs to, and a cookie is good only while that row
+/// is there, it has not expired, and the epoch it was issued under is the
+/// current one. Rotating `WORKSPACE_SECRET` still invalidates every session.
+pub fn issue_token(expires: i64, epoch: i64, id: &str, config: &Config) -> String {
+    let payload = B64.encode(format!("{expires}:{epoch}:{id}"));
     let signature = sign(&config.secret, &payload);
     format!("{payload}.{signature}")
 }
 
-pub fn verify_token(config: &Config, token: &str, epoch: i64) -> bool {
-    let Some((payload, signature)) = token.split_once('.') else {
-        return false;
-    };
+/// When a session started now runs out.
+pub fn session_expiry(config: &Config) -> i64 {
+    crate::now() + config.session_days * 86_400
+}
+
+/// The session id a token carries, if it is genuine, unexpired and of this
+/// epoch. A cookie from before sessions had ids carries none, and is refused.
+pub fn verify_token(config: &Config, token: &str, epoch: i64) -> Option<String> {
+    let (payload, signature) = token.split_once('.')?;
     let expected = sign(&config.secret, payload);
     if !bool::from(expected.as_bytes().ct_eq(signature.as_bytes())) {
-        return false;
+        return None;
     }
-    let Ok(decoded) = B64.decode(payload) else {
-        return false;
-    };
-    let decoded = String::from_utf8_lossy(&decoded);
-    // A cookie from before epochs existed carries only the expiry, and
-    // belongs to the first epoch.
-    let (expires, issued_in) = decoded.split_once(':').unwrap_or((&decoded, "0"));
-    let (Ok(expires), Ok(issued_in)) = (expires.parse::<i64>(), issued_in.parse::<i64>()) else {
-        return false;
-    };
-    expires > crate::now() && issued_in == epoch
+    let decoded = String::from_utf8(B64.decode(payload).ok()?).ok()?;
+    let mut fields = decoded.splitn(3, ':');
+    let expires = fields.next()?.parse::<i64>().ok()?;
+    let issued_in = fields.next()?.parse::<i64>().ok()?;
+    let id = fields.next().filter(|id| !id.is_empty())?;
+    (expires > crate::now() && issued_in == epoch).then(|| id.to_string())
+}
+
+/// How often a session that is in use gets its `last_seen` written down.
+/// In between, it is kept in memory only.
+const SEEN_EVERY: i64 = 300;
+
+struct Live {
+    expires_at: i64,
+    last_seen: i64,
+    written: i64,
+}
+
+/// The signed-in sessions, mirrored in memory from the `sessions` table so
+/// a request costs no query to check.
+#[derive(Default)]
+pub struct Sessions {
+    live: Mutex<HashMap<String, Live>>,
+}
+
+impl Sessions {
+    pub async fn load(db: &sqlx::SqlitePool) -> anyhow::Result<Self> {
+        let rows: Vec<(String, i64, i64)> =
+            sqlx::query_as("SELECT id, expires_at, last_seen FROM sessions WHERE expires_at > ?1")
+                .bind(crate::now())
+                .fetch_all(db)
+                .await?;
+        let live = rows
+            .into_iter()
+            .map(|(id, expires_at, last_seen)| {
+                let live = Live {
+                    expires_at,
+                    last_seen,
+                    written: last_seen,
+                };
+                (id, live)
+            })
+            .collect();
+        Ok(Self {
+            live: Mutex::new(live),
+        })
+    }
+
+    /// A new session, for a browser that just logged in.
+    pub async fn open(
+        &self,
+        db: &sqlx::SqlitePool,
+        user_agent: &str,
+        expires_at: i64,
+    ) -> anyhow::Result<String> {
+        let id = B64.encode(rand::random::<[u8; 16]>());
+        let now = crate::now();
+        let user_agent: String = user_agent.chars().take(200).collect();
+        sqlx::query(
+            "INSERT INTO sessions (id, created_at, last_seen, expires_at, user_agent)
+             VALUES (?1, ?2, ?2, ?3, ?4)",
+        )
+        .bind(&id)
+        .bind(now)
+        .bind(expires_at)
+        .bind(&user_agent)
+        .execute(db)
+        .await?;
+        let mut live = self.live.lock().expect("sessions lock");
+        live.retain(|_, session| session.expires_at > now);
+        live.insert(
+            id.clone(),
+            Live {
+                expires_at,
+                last_seen: now,
+                written: now,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Whether `id` is signed in, noting that it was just seen. `Some(true)`
+    /// asks the caller to write that down.
+    fn seen(&self, id: &str) -> Option<bool> {
+        let now = crate::now();
+        let mut live = self.live.lock().expect("sessions lock");
+        let session = live.get_mut(id).filter(|s| s.expires_at > now)?;
+        session.last_seen = now;
+        let due = now - session.written >= SEEN_EVERY;
+        if due {
+            session.written = now;
+        }
+        Some(due)
+    }
+
+    /// When `id` was last seen, fresher than the table may have it.
+    pub fn last_seen(&self, id: &str) -> Option<i64> {
+        let live = self.live.lock().expect("sessions lock");
+        live.get(id).map(|session| session.last_seen)
+    }
+
+    /// Sign one session out. Says whether there was one to sign out.
+    pub async fn end(&self, db: &sqlx::SqlitePool, id: &str) -> anyhow::Result<bool> {
+        let removed = sqlx::query("DELETE FROM sessions WHERE id = ?1")
+            .bind(id)
+            .execute(db)
+            .await?
+            .rows_affected();
+        let held = self
+            .live
+            .lock()
+            .expect("sessions lock")
+            .remove(id)
+            .is_some();
+        Ok(removed > 0 || held)
+    }
+
+    /// Sign every session out.
+    pub async fn end_all(&self, db: &sqlx::SqlitePool) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM sessions").execute(db).await?;
+        self.live.lock().expect("sessions lock").clear();
+        Ok(())
+    }
 }
 
 /// The session epoch: what every cookie must have been signed under.
@@ -82,6 +199,7 @@ impl Epoch {
             Some((epoch, previous)) if previous == hash => return Ok(epoch),
             Some((epoch, _)) => {
                 tracing::info!("the login password changed: every device is signed out");
+                sqlx::query("DELETE FROM sessions").execute(db).await?;
                 epoch + 1
             }
         };
@@ -96,8 +214,10 @@ impl Epoch {
         Ok(epoch)
     }
 
-    /// Sign every device out: the epoch moves on, and no cookie has it yet.
+    /// Sign every device out: the epoch moves on, no cookie has it yet, and
+    /// no session row is left either.
     pub async fn advance(state: &AppState) -> anyhow::Result<i64> {
+        state.sessions.end_all(&state.db).await?;
         let epoch: i64 =
             sqlx::query_scalar("UPDATE auth SET epoch = epoch + 1 WHERE id = 1 RETURNING epoch")
                 .fetch_one(&state.db)
@@ -160,7 +280,10 @@ fn cookie_value<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
 }
 
 /// Extractor that rejects the request unless a valid session cookie is present.
-pub struct Session;
+pub struct Session {
+    /// The `sessions` row the cookie belongs to.
+    pub id: String,
+}
 
 impl FromRequestParts<AppState> for Session {
     type Rejection = AppError;
@@ -172,11 +295,22 @@ impl FromRequestParts<AppState> for Session {
         let token =
             cookie_value(parts, cookie_name(&state.config)).ok_or(AppError::Unauthorized)?;
         let epoch = state.epoch.load(std::sync::atomic::Ordering::SeqCst);
-        if verify_token(&state.config, token, epoch) {
-            Ok(Session)
-        } else {
-            Err(AppError::Unauthorized)
+        let id = verify_token(&state.config, token, epoch).ok_or(AppError::Unauthorized)?;
+        let due = state.sessions.seen(&id).ok_or(AppError::Unauthorized)?;
+        if due {
+            let (db, id) = (state.db.clone(), id.clone());
+            tokio::spawn(async move {
+                let written = sqlx::query("UPDATE sessions SET last_seen = ?1 WHERE id = ?2")
+                    .bind(crate::now())
+                    .bind(&id)
+                    .execute(&db)
+                    .await;
+                if let Err(e) = written {
+                    tracing::warn!("could not note a session as seen: {e}");
+                }
+            });
         }
+        Ok(Session { id })
     }
 }
 
@@ -242,7 +376,8 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue};
 
     use super::{
-        clear_cookie, credentials_match, is_same_origin, issue_token, session_cookie, verify_token,
+        clear_cookie, credentials_match, is_same_origin, issue_token, session_cookie,
+        session_expiry, verify_token, Sessions,
     };
     use crate::config::Config;
 
@@ -250,24 +385,31 @@ mod tests {
         Config::for_tests(session_days)
     }
 
+    fn token(config: &Config, epoch: i64) -> String {
+        issue_token(session_expiry(config), epoch, "sid", config)
+    }
+
     #[test]
     fn a_fresh_token_verifies() {
         let config = config(30);
-        assert!(verify_token(&config, &issue_token(&config, 0), 0));
+        assert_eq!(
+            verify_token(&config, &token(&config, 0), 0).as_deref(),
+            Some("sid")
+        );
     }
 
     #[test]
     fn an_expired_token_does_not() {
         let config = config(-1);
-        assert!(!verify_token(&config, &issue_token(&config, 0), 0));
+        assert!(verify_token(&config, &token(&config, 0), 0).is_none());
     }
 
     #[test]
     fn rotating_the_secret_invalidates_every_session() {
-        let token = issue_token(&config(30), 0);
+        let token = token(&config(30), 0);
         let mut rotated = config(30);
         rotated.secret = b"a-different-secret-entirely".to_vec();
-        assert!(!verify_token(&rotated, &token, 0));
+        assert!(verify_token(&rotated, &token, 0).is_none());
     }
 
     #[test]
@@ -287,25 +429,25 @@ mod tests {
     #[test]
     fn a_tampered_token_does_not_verify() {
         let config = config(30);
-        let token = issue_token(&config, 0);
+        let token = token(&config, 0);
         let (payload, signature) = token.split_once('.').unwrap();
 
         // A far-future expiry the holder signed themselves.
-        let forged = base64::Engine::encode(&super::B64, "99999999999");
-        assert!(!verify_token(&config, &format!("{forged}.{signature}"), 0));
+        let forged = base64::Engine::encode(&super::B64, "99999999999:0:sid");
+        assert!(verify_token(&config, &format!("{forged}.{signature}"), 0).is_none());
 
         // The real expiry with the last byte of the signature flipped.
         let mut bytes = signature.as_bytes().to_vec();
         bytes[0] = if bytes[0] == b'A' { b'B' } else { b'A' };
         let flipped = String::from_utf8(bytes).unwrap();
-        assert!(!verify_token(&config, &format!("{payload}.{flipped}"), 0));
+        assert!(verify_token(&config, &format!("{payload}.{flipped}"), 0).is_none());
     }
 
     #[test]
     fn malformed_tokens_are_rejected_rather_than_panicking() {
         let config = config(30);
         for token in ["", ".", "no-dot", "!!!.!!!", "a.b.c", &".".repeat(100)] {
-            assert!(!verify_token(&config, token, 0), "{token:?}");
+            assert!(verify_token(&config, token, 0).is_none(), "{token:?}");
         }
     }
 
@@ -360,15 +502,72 @@ mod tests {
     #[test]
     fn a_cookie_from_an_earlier_epoch_is_refused() {
         let config = config(30);
-        let token = issue_token(&config, 3);
-        assert!(verify_token(&config, &token, 3));
-        assert!(!verify_token(&config, &token, 4));
+        let token = token(&config, 3);
+        assert!(verify_token(&config, &token, 3).is_some());
+        assert!(verify_token(&config, &token, 4).is_none());
+    }
 
-        // Issued before epochs: only the expiry, and good in the first one.
+    #[test]
+    fn a_cookie_without_a_session_id_is_refused() {
+        let config = config(30);
         let expires = crate::now() + 3600;
-        let payload = base64::Engine::encode(&super::B64, expires.to_string());
-        let legacy = format!("{payload}.{}", super::sign(&config.secret, &payload));
-        assert!(verify_token(&config, &legacy, 0));
-        assert!(!verify_token(&config, &legacy, 1));
+        // From before epochs, and from before session rows.
+        for payload in [
+            expires.to_string(),
+            format!("{expires}:0"),
+            format!("{expires}:0:"),
+        ] {
+            let payload = base64::Engine::encode(&super::B64, payload);
+            let legacy = format!("{payload}.{}", super::sign(&config.secret, &payload));
+            assert!(verify_token(&config, &legacy, 0).is_none(), "{payload}");
+        }
+    }
+
+    async fn db() -> sqlx::SqlitePool {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn one_session_ends_and_the_others_stay() {
+        let db = db().await;
+        let sessions = Sessions::default();
+        let expires = crate::now() + 3600;
+        let phone = sessions.open(&db, "phone", expires).await.unwrap();
+        let laptop = sessions.open(&db, "laptop", expires).await.unwrap();
+        assert_ne!(phone, laptop);
+        assert_eq!(sessions.seen(&phone), Some(false));
+
+        assert!(sessions.end(&db, &phone).await.unwrap());
+        assert_eq!(sessions.seen(&phone), None);
+        assert!(sessions.seen(&laptop).is_some());
+        assert!(!sessions.end(&db, &phone).await.unwrap());
+
+        // What is kept in memory is what a restart reads back.
+        let reloaded = Sessions::load(&db).await.unwrap();
+        assert_eq!(reloaded.seen(&phone), None);
+        assert!(reloaded.seen(&laptop).is_some());
+
+        sessions.end_all(&db).await.unwrap();
+        assert_eq!(sessions.seen(&laptop), None);
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn an_expired_session_is_not_signed_in() {
+        let db = db().await;
+        let sessions = Sessions::default();
+        let gone = sessions.open(&db, "old", crate::now() - 1).await.unwrap();
+        assert_eq!(sessions.seen(&gone), None);
+        assert!(Sessions::load(&db).await.unwrap().seen(&gone).is_none());
     }
 }

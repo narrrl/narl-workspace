@@ -41,6 +41,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
             post(session::login).layer(DefaultBodyLimit::max(LOGIN_LIMIT)),
         )
         .route("/logout", post(session::logout))
+        .route("/sessions", get(session::list))
+        .route("/sessions/{id}", delete(session::revoke))
         .route("/export", get(export::export))
         .route("/backup", get(backup::status).post(backup::run))
         .route("/spaces", get(nodes::spaces).post(nodes::create_space))
@@ -140,6 +142,7 @@ pub(crate) mod tests {
             login_throttle: Arc::default(),
             vault_throttle: Arc::default(),
             epoch: Arc::new(AtomicI64::new(0)),
+            sessions: Arc::default(),
             config,
             db,
         }
