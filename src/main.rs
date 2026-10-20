@@ -338,11 +338,11 @@ async fn deadline(
 /// Below the ten seconds `docker stop` waits before it sends SIGKILL.
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// A request path as it may go into the log: a share link's token and key are
-/// the whole of its secret, and the key is kept out of every log on purpose —
-/// it travels in the URL fragment so that no server ever sees it, except this
-/// one's API, which must not write it down either. Query strings, which carry
-/// search terms, are never logged at all.
+/// A request path as it may go into the log: a share link's token is half of
+/// its secret. The other half, the key, never travels in a path — it rides in
+/// the URL fragment, which no server sees, and then in the body of the read
+/// that trades it for a cookie. Query strings, which carry search terms, are
+/// never logged at all.
 fn loggable(path: &str) -> &str {
     if path.starts_with("/api/share/") {
         "/api/share/…"

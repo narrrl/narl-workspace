@@ -21,7 +21,7 @@ pub const SECURE_COOKIE_NAME: &str = "__Host-diary_session";
 
 type HmacSha256 = Hmac<Sha256>;
 
-fn sign(secret: &[u8], payload: &str) -> String {
+pub(crate) fn sign(secret: &[u8], payload: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(secret).expect("hmac accepts any key length");
     mac.update(payload.as_bytes());
     B64.encode(mac.finalize().into_bytes())

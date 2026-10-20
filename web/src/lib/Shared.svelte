@@ -19,7 +19,7 @@
   let article = $state<HTMLElement>()
   let position = $state('All')
   // Links into the private workspace come back as their text; see renderMarkdown.
-  const html = $derived(doc ? renderMarkdown(doc.body, { token, key: shareKey }) : '')
+  const html = $derived(doc ? renderMarkdown(doc.body, { token }) : '')
   const title = $derived(doc?.name.trim() ?? '')
   const words = $derived(doc ? doc.body.split(/\s+/).filter(Boolean).length : 0)
   // The outline gets a window of its own only when there is something to outline.

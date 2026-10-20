@@ -88,8 +88,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
             post(media::upload).layer(uploads).get(media::list),
         )
         .route("/media/{id}", get(media::serve).delete(media::remove))
-        .route("/share/{token}/{key}", get(share::read))
-        .route("/share/{token}/{key}/media/{id}", get(share::serve_media))
+        .route("/share/{token}", post(share::read))
+        .route("/share/{token}/media/{id}", get(share::serve_media))
         .route("/ssh-keys", get(ssh_keys::list).post(ssh_keys::add))
         .route(
             "/ssh-keys/{id}",
@@ -114,8 +114,8 @@ pub(crate) mod tests {
         "/health",
         "/login",
         "/logout",
-        "/share/{token}/{key}",
-        "/share/{token}/{key}/media/{id}",
+        "/share/{token}",
+        "/share/{token}/media/{id}",
     ];
 
     async fn state() -> AppState {
@@ -193,10 +193,7 @@ pub(crate) mod tests {
         let app = super::api_router(1024 * 1024).with_state(state().await);
 
         for (method, path) in routes {
-            let uri = path
-                .replace("{id}", "1")
-                .replace("{token}", "t")
-                .replace("{key}", "k");
+            let uri = path.replace("{id}", "1").replace("{token}", "t");
             let response = app
                 .clone()
                 .oneshot(

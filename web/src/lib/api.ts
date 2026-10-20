@@ -468,7 +468,7 @@ export const api = {
   backupNow: () => request<BackupStatus>('/backup', { method: 'POST' }),
 
   readShared: (token: string, key: string) =>
-    request<SharedDocument>(`/share/${encodeURIComponent(token)}/${encodeURIComponent(key)}`),
+    request<SharedDocument>(`/share/${encodeURIComponent(token)}`, { method: 'POST', body: body({ key }) }),
 
   sessions: () => request<SignedIn[]>('/sessions'),
   revokeSession: (id: string) =>

@@ -79,19 +79,16 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Render entry markdown to sanitised HTML. When share credentials are given,
- * media URLs are rewritten to the public route — token and key both, since that
- * route demands the same pair the entry itself did — so the page works for a
- * reader who has no session, and a link to another document, an address inside
- * the private workspace that would lead the reader to its login page, is kept
- * as its text.
+ * Render entry markdown to sanitised HTML. On a share page, media URLs are
+ * rewritten to the public route under the share's token. That route asks for
+ * the cookie reading the document with its key handed out, so the key itself
+ * never sits in a URL a proxy could log. A link to another document, an
+ * address inside the private workspace that would lead the reader to its
+ * login page, is kept as its text.
  */
-export function renderMarkdown(source: string, share?: { token: string; key: string }): string {
+export function renderMarkdown(source: string, share?: { token: string }): string {
   const md = share
-    ? source.replaceAll(
-        '/api/media/',
-        `/api/share/${encodeURIComponent(share.token)}/${encodeURIComponent(share.key)}/media/`,
-      )
+    ? source.replaceAll('/api/media/', `/api/share/${encodeURIComponent(share.token)}/media/`)
     : source
 
   const html = marked.parse(md, { async: false }) as string

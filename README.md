@@ -546,6 +546,13 @@ the path holds a URL that answers `404`. The server stores nothing but a
 SHA-256 of the key and compares in constant time, and a wrong key is answered
 exactly like an unknown token, so guessing never confirms that a token is live.
 
+The page sends the key on to the server once, in the body of the request that
+reads the entry, never in a URL. That answer gives the browser a cookie scoped
+to this one link's path, good for 12 hours, and the entry's pictures and
+videos are fetched with it — so not even this server's reverse proxy logs the
+key. A fresh key from `:link`, or `:unshare`, voids the cookies handed out
+under the old one.
+
 Because only the hash is kept, a link exists in full exactly once: in the moment
 `:share` copies it. It cannot be re-read from the entry afterwards. `:link`
 mints a fresh key for the same token — which retires the previous link, making
@@ -593,8 +600,8 @@ sealed or not.
 | `POST` | `/api/vault/unlock`, `/api/vault/lock` | open / close the vault |
 | `GET`/`POST` | `/api/ssh-keys` | the keys that may mount over SFTP / add one |
 | `DELETE` | `/api/ssh-keys/{id}` | remove a key, which ends its mounts |
-| `GET` | `/api/share/{token}/{key}` | public: read a shared document |
-| `GET` | `/api/share/{token}/{key}/media/{id}` | public: media inside a shared document |
+| `POST` | `/api/share/{token}` | public: read a shared document, body `{"key"}`; sets the share's media cookie |
+| `GET` | `/api/share/{token}/media/{id}` | public: media inside a shared document, with that cookie |
 
 ## Deploying
 
