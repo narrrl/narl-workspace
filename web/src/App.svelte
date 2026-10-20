@@ -8,6 +8,7 @@
   import DocumentPane from './lib/DocumentPane.svelte'
   import FilePane from './lib/FilePane.svelte'
   import Help from './lib/Help.svelte'
+  import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
@@ -740,7 +741,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

@@ -29,6 +29,7 @@ use proton_sdk::ids::NodeUid;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use tokio::sync::Notify;
+use zeroize::Zeroizing;
 
 use crate::config::Config;
 use session::SessionStore;
@@ -66,6 +67,21 @@ pub struct Backup {
     /// but unreadable — when that is so. The server still starts; the mirror
     /// says why it is off, every time it is asked.
     disabled: Option<String>,
+    /// A login from the workspace, waiting for its second factor or its
+    /// human check; see [`Backup::login`].
+    pending: Mutex<Option<proton::Pending>>,
+}
+
+/// What a login from the workspace needs next.
+#[derive(Debug, Serialize)]
+#[serde(tag = "next", rename_all = "lowercase")]
+pub enum LoginStep {
+    /// Logged in; the mirror starts on its own.
+    Done,
+    /// A two-factor code.
+    Totp,
+    /// Proton's human check, on the page at `url`.
+    Captcha { url: String },
 }
 
 impl Backup {
@@ -104,7 +120,98 @@ impl Backup {
                 ..Status::default()
             }),
             running: tokio::sync::Mutex::new(()),
+            pending: Mutex::new(None),
         })
+    }
+
+    /// Whether the stored session is sealed under a key kept off the data
+    /// volume, or lies there readable to whoever has a copy of it.
+    pub fn session_sealed(&self) -> bool {
+        self.store.sealed()
+    }
+
+    /// Log in to Proton from the workspace. Any login still waiting is
+    /// dropped: there is only ever one.
+    pub async fn login(&self, username: &str, password: Zeroizing<String>) -> Result<LoginStep> {
+        self.usable()?;
+        self.take_pending();
+        let outcome = proton::start(&self.store, username.trim(), password, None).await?;
+        Ok(self.step(outcome))
+    }
+
+    /// The two-factor code a waiting login asked for.
+    pub async fn login_totp(&self, code: &str) -> Result<LoginStep> {
+        self.usable()?;
+        let pending = self.waiting()?;
+        match proton::second_factor(&self.store, pending, code).await {
+            Ok(()) => Ok(self.step(None)),
+            Err((e, pending)) => {
+                *self.pending.lock().unwrap_or_else(|e| e.into_inner()) =
+                    pending.map(|pending| *pending);
+                Err(e)
+            }
+        }
+    }
+
+    /// The token Proton's human check handed back to a waiting login.
+    pub async fn login_verified(&self, token: &str) -> Result<LoginStep> {
+        self.usable()?;
+        let pending = self.waiting()?;
+        let outcome = proton::verified(&self.store, pending, token).await?;
+        Ok(self.step(outcome))
+    }
+
+    /// Forget the Proton session, ending it on Proton's side too where
+    /// Proton answers. The mirror on Drive stays where it is.
+    pub async fn logout(&self) -> Result<()> {
+        self.take_pending();
+        if let Err(e) = proton::end(&self.store).await {
+            tracing::warn!("{e:#}; the session is forgotten here all the same");
+        }
+        self.store.clear()?;
+        self.set(|s| s.configured = false);
+        tracing::info!("Proton Drive session forgotten");
+        Ok(())
+    }
+
+    fn usable(&self) -> Result<()> {
+        match &self.disabled {
+            Some(reason) => anyhow::bail!("backups are off: {reason} — fix it and restart"),
+            None => Ok(()),
+        }
+    }
+
+    fn take_pending(&self) -> Option<proton::Pending> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+
+    fn waiting(&self) -> Result<proton::Pending> {
+        match self.take_pending() {
+            Some(pending) if !pending.expired() => Ok(pending),
+            Some(_) => anyhow::bail!("that login took too long — start again with :backup login"),
+            None => anyhow::bail!("no Proton login is waiting — start one with :backup login"),
+        }
+    }
+
+    /// Keep a login that still needs something, or note one that is done.
+    fn step(&self, outcome: Option<(proton::Next, proton::Pending)>) -> LoginStep {
+        let Some((next, pending)) = outcome else {
+            tracing::info!("logged in to Proton Drive from the workspace");
+            self.set(|s| {
+                s.configured = true;
+                s.last_error = None;
+            });
+            self.signal();
+            return LoginStep::Done;
+        };
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(pending);
+        match next {
+            proton::Next::Totp => LoginStep::Totp,
+            proton::Next::Captcha(url) => LoginStep::Captcha { url },
+        }
     }
 
     pub fn status(&self) -> Status {

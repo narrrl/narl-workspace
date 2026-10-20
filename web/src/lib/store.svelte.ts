@@ -101,7 +101,7 @@ class Workspace {
   vimMode = $state('normal')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify'>('none')
 
   /*
    * What is due or in hand on every board, kept loaded all the time: the bar
@@ -212,6 +212,27 @@ class Workspace {
   get dueCounts(): { late: number; today: number } {
     const [overdue, today] = this.agendaGroups
     return { late: overdue.cards.length, today: today.cards.length }
+  }
+
+  /** Proton's human check a login waits on, while its sheet is open. */
+  verify = $state.raw<{ url: string; resolve: (token: string | null) => void } | null>(null)
+
+  /** The token Proton's check at `url` hands back, or null when abandoned. */
+  askVerification(url: string): Promise<string | null> {
+    this.verify?.resolve(null)
+    return new Promise((resolve) => {
+      let answered = false
+      this.verify = {
+        url,
+        resolve: (token) => {
+          if (answered) return
+          answered = true
+          this.verify = null
+          resolve(token)
+        },
+      }
+      this.overlay = 'verify'
+    })
   }
 
   /** A password, or null when it was waved away with Escape. */

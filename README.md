@@ -410,7 +410,22 @@ It is a third-party client: it identifies itself to Proton as
 `external-drive-narl_workspace@<version>-alpha` and says so before it asks for
 account details. It carries no Proton branding and is not supported by Proton.
 
-Set it up once, interactively, because SRP and 2FA need a human:
+Set it up once, interactively, because SRP and 2FA need a human. From the
+workspace:
+
+```text
+:backup login <proton-username>
+```
+
+It shows the disclosure above and asks before anything else, then asks for the
+password and, when the account has one, the two-factor code. If Proton wants a
+human check first, its own page opens in a sheet; solve it and the login goes
+on. An account whose only second factor is a security key cannot log in from
+here — add an authenticator app to it. `:backup logout` forgets the session
+again. The mirror starts within a minute of the login; no restart is needed.
+
+The same login runs from the server's terminal, for a check that a terminal
+can answer:
 
 ```sh
 narl-workspace proton-login                       # or, in Docker:
@@ -598,6 +613,8 @@ sealed or not.
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |
+| `POST`/`DELETE` | `/api/backup/login` | log the mirror in to Proton, body `{"username","password"}` / forget its session |
+| `POST` | `/api/backup/login/totp`, `/api/backup/login/captcha` | the two-factor code `{"code"}`, or the solved human check `{"token"}`, a waiting login asked for |
 | `GET`/`POST` | `/api/media` | list / upload (multipart) |
 | `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |

@@ -216,6 +216,18 @@ export interface BackupStatus {
   last_success_at: number | null
   last_error: string | null
   last: { uploaded: number; skipped: number; pruned: number; bytes: number } | null
+  /** What Proton asks a third-party client to say before it takes a login. */
+  disclosure?: string
+  /** Whether a stored session is sealed under a key file off the data volume. */
+  sealed_session?: boolean
+}
+
+/** What a Proton login from the workspace needs next. */
+export interface BackupLogin {
+  next: 'done' | 'totp' | 'captcha'
+  /** Proton's human-check page, for `captcha`. */
+  url?: string
+  status: BackupStatus
 }
 
 export class ApiError extends Error {
@@ -471,6 +483,16 @@ export const api = {
   backupStatus: () => request<BackupStatus>('/backup'),
 
   backupNow: () => request<BackupStatus>('/backup', { method: 'POST' }),
+
+  backupLogin: (username: string, password: string) =>
+    request<BackupLogin>('/backup/login', { method: 'POST', body: body({ username, password }) }),
+
+  backupTotp: (code: string) => request<BackupLogin>('/backup/login/totp', { method: 'POST', body: body({ code }) }),
+
+  backupCaptcha: (token: string) =>
+    request<BackupLogin>('/backup/login/captcha', { method: 'POST', body: body({ token }) }),
+
+  backupLogout: () => request<BackupStatus>('/backup/login', { method: 'DELETE' }),
 
   readShared: (token: string, key: string) =>
     request<SharedDocument>(`/share/${encodeURIComponent(token)}`, { method: 'POST', body: body({ key }) }),

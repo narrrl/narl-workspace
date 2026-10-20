@@ -45,6 +45,9 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/sessions/{id}", delete(session::revoke))
         .route("/export", get(export::export))
         .route("/backup", get(backup::status).post(backup::run))
+        .route("/backup/login", post(backup::login).delete(backup::logout))
+        .route("/backup/login/totp", post(backup::totp))
+        .route("/backup/login/captcha", post(backup::captcha))
         .route("/spaces", get(nodes::spaces).post(nodes::create_space))
         .route("/spaces/overview", get(nodes::overview))
         .route("/agenda", get(boards::agenda))
@@ -141,6 +144,7 @@ pub(crate) mod tests {
             notify: Notifier::new(db.clone(), Arc::clone(&config)).unwrap(),
             login_throttle: Arc::default(),
             vault_throttle: Arc::default(),
+            proton_throttle: Arc::default(),
             epoch: Arc::new(AtomicI64::new(0)),
             sessions: Arc::default(),
             config,

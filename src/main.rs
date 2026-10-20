@@ -132,6 +132,7 @@ async fn main() -> Result<()> {
         config: Arc::clone(&config),
         login_throttle: Arc::default(),
         vault_throttle: Arc::default(),
+        proton_throttle: Arc::default(),
         backup,
         notify,
         epoch: Arc::new(std::sync::atomic::AtomicI64::new(epoch)),
@@ -304,6 +305,8 @@ fn is_slow(method: &axum::http::Method, path: &str) -> bool {
             path == "/api/media"
                 || path == "/api/import"
                 || path == "/api/backup"
+                // A login waits on Proton's SRP and key unlocking.
+                || path.starts_with("/api/backup/login")
                 || path.ends_with("/import")
                 || path.ends_with("/files")
                 || path.ends_with("/encrypt")
@@ -383,7 +386,7 @@ fn compressible(
 /// runtime; scripts stay confined to the bundled files.
 const CSP: &str = "default-src 'self'; img-src 'self' data:; media-src 'self'; \
     style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; \
-    frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    frame-src 'self' https://verify.proton.me; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 type HeaderLayer = SetResponseHeaderLayer<HeaderValue>;
 

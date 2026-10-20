@@ -19,6 +19,8 @@ pub struct AppState {
     /// The vault password gets the same slowing-down as the login, kept apart
     /// so guessing at one does not slow the other.
     pub vault_throttle: Arc<LoginThrottle>,
+    /// Logins to Proton from the workspace, slowed apart from the rest.
+    pub proton_throttle: Arc<LoginThrottle>,
     /// Sealed files. Always present; holds no key until it is unlocked.
     pub vault: Arc<Vault>,
     /// The Proton Drive mirror. Always present; dormant until it has a session.

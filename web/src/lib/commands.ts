@@ -1,4 +1,4 @@
-import { api, isContainer, type BackupStatus } from './api'
+import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
 import { formatDay, parseDay, parseDue, relative, sealedNote, type ScrollAmount } from './util'
 
@@ -131,7 +131,7 @@ function browserOf(agent: string): string {
 
 const describeBackup = (status: BackupStatus) => {
   if (!status.configured) {
-    return workspace.say('proton drive backups are off — run `narl-workspace proton-login` on the server', 'error')
+    return workspace.say('proton drive backups are off — :backup login <proton-username> sets them up', 'error')
   }
   if (status.last_error) {
     return workspace.say(`backup failed: ${status.last_error}`, 'error')
@@ -139,6 +139,44 @@ const describeBackup = (status: BackupStatus) => {
   const where = status.device ? `${status.device} · ` : ''
   const state = status.running ? 'running now' : status.pending ? 'changes waiting' : 'up to date'
   workspace.say(`${where}${state} · last ${ago(status.last_success_at)}`)
+}
+
+/**
+ * Log the mirror in to Proton: the disclosure Proton asks for, then the
+ * password, then whatever the account asks for next — a two-factor code, or
+ * Proton's human check in a sheet of its own.
+ */
+async function protonLogin(username: string) {
+  const status = await api.backupStatus()
+  const unsealed = status.sealed_session
+    ? ''
+    : ' The session will be stored unsealed on the data volume — set WORKSPACE_SESSION_KEY_FILE to seal it.'
+  if (!(await workspace.ask(`${status.disclosure ?? ''}${unsealed} Log in as ${username}?`))) return
+  const password = await workspace.askSecret(`proton password for ${username}`)
+  if (password === null) return
+  workspace.say('logging in to proton …')
+  let answer: BackupLogin = await api.backupLogin(username, password)
+  for (let round = 0; answer.next !== 'done'; round++) {
+    if (round === 5) return workspace.say('proton keeps asking — try again later', 'error')
+    if (answer.next === 'totp') {
+      const code = await workspace.askSecret('proton two-factor code')
+      if (code === null) return workspace.say('proton login abandoned')
+      try {
+        answer = await api.backupTotp(code)
+      } catch (error) {
+        // A wrong code leaves the login waiting; ask again.
+        if (!(error instanceof ApiError) || error.status !== 400 || !/two-factor code/.test(error.message)) throw error
+        workspace.say(error.message, 'error')
+      }
+    } else {
+      const token = await workspace.askVerification(answer.url ?? '')
+      if (token === null) return workspace.say('proton login abandoned')
+      workspace.say('logging in to proton …')
+      answer = await api.backupCaptcha(token)
+    }
+  }
+  const device = answer.status.device ? ` as ${answer.status.device}` : ''
+  workspace.say(`proton drive connected${device} — the first backup follows shortly, :backup! runs one now`)
 }
 
 /** A filename that survives a download folder: `2026-09-05-first-light.md`. */
@@ -787,8 +825,21 @@ export const commands: CommandSpec[] = [
   {
     name: 'backup',
     group: 'view',
-    help: 'when the workspace was last mirrored to proton drive',
-    run: () => workspace.guard(async () => describeBackup(await api.backupStatus())),
+    args: '[login <proton-username> | logout]',
+    help: 'when the workspace was last mirrored to proton drive — login sets the mirror up, logout forgets its session',
+    run: (arg) =>
+      workspace.guard(async () => {
+        const trimmed = arg.trim()
+        if (trimmed === '') return describeBackup(await api.backupStatus())
+        const loginMatch = /^login\s+(\S+)$/.exec(trimmed)
+        if (loginMatch) return protonLogin(loginMatch[1])
+        if (trimmed === 'logout') {
+          if (!(await workspace.ask('Forget the Proton Drive session? What is mirrored stays on Drive.'))) return
+          await api.backupLogout()
+          return workspace.say('proton drive session forgotten — backups are off')
+        }
+        workspace.say('usage: :backup [login <proton-username> | logout]', 'error')
+      }),
     bang: {
       help: 'back up to proton drive now, rather than when the workspace falls quiet',
       run: () =>
@@ -803,7 +854,7 @@ export const commands: CommandSpec[] = [
           workspace.say(
             last
               ? `backed up · ${last.uploaded} file${last.uploaded === 1 ? '' : 's'} uploaded, ${last.skipped} unchanged`
-              : 'proton drive backups are off — run `narl-workspace proton-login` on the server',
+              : 'proton drive backups are off — :backup login <proton-username> sets them up',
             last ? 'info' : 'error',
           )
         }),

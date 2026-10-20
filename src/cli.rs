@@ -55,19 +55,30 @@ pub async fn proton_login(config: &Config) -> Result<()> {
         }
     };
 
-    backup::proton::login(&store, username.trim(), &password, || {
-        match env("PROTON_TOTP") {
-            Some(code) => Ok(code),
-            None => prompt("Two-factor code: "),
+    let password = zeroize::Zeroizing::new(password);
+    use backup::proton::Next;
+    match backup::proton::start(&store, username.trim(), password, None).await? {
+        None => {}
+        Some((Next::Totp, pending)) => {
+            let code = match env("PROTON_TOTP") {
+                Some(code) => code,
+                None => prompt("Two-factor code: ")?,
+            };
+            backup::proton::second_factor(&store, pending, &code)
+                .await
+                .map_err(|(e, _)| e)?;
         }
-    })
-    .await?;
+        Some((Next::Captcha(_), _)) => bail!(
+            "Proton wants a human check before this login, which a terminal cannot show — \
+             log in from the workspace instead, with `:backup login <username>`"
+        ),
+    }
 
     println!(
         "Logged in. The session is stored at {}.",
         store.path().display()
     );
-    println!("Backups start with the next server start, or run `narl-workspace backup-now`.");
+    println!("A running server starts backing up within a minute; `narl-workspace backup-now` runs one at once.");
     Ok(())
 }
 

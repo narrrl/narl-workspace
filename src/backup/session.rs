@@ -178,6 +178,11 @@ impl SessionStore {
         Ok(store)
     }
 
+    /// Whether what is stored is sealed under a key file.
+    pub fn sealed(&self) -> bool {
+        self.key.is_some()
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

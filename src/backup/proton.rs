@@ -3,14 +3,17 @@
 use anyhow::{anyhow, Context, Result};
 use proton_drive_rs::{Device, DeviceType, ProtonDriveClient};
 use proton_sdk::account::AccountClient;
+use proton_sdk::api::{HumanVerificationCredential, ResponseCode};
 use proton_sdk::config::ProtonClientConfiguration;
 use proton_sdk::error::ProtonError;
 use proton_sdk::session::ProtonApiSession;
+use zeroize::Zeroizing;
 
 use super::session::{SessionStore, StoredSession};
 
 /// What Proton asks a third-party client to tell anyone it takes credentials
-/// from. Shown by `narl-workspace proton-login` before it asks for anything.
+/// from. Shown by `narl-workspace proton-login` and `:backup login` before
+/// either asks for anything.
 pub const DISCLOSURE: &str =
     "This is a third-party application not officially supported by Proton.";
 
@@ -45,33 +48,132 @@ fn client_config() -> ProtonClientConfiguration {
     ProtonClientConfiguration::new(version).with_user_agent(agent)
 }
 
-/// Run an SRP login, complete 2FA if the account asks for one, and persist the
-/// result. `get_totp` is only called when a second factor is actually required,
-/// so accounts without one are never prompted.
-pub async fn login(
+/// How long a login may wait for its second factor or its human check. The
+/// password is held in memory for that long and no longer.
+const PENDING_FOR: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// A login half done, waiting on the person at the keyboard: for a
+/// two-factor code, with the session Proton opened for it, or for a solved
+/// human check, after which the login starts over with the proof attached.
+pub struct Pending {
+    username: String,
+    password: Zeroizing<String>,
+    session: Option<ProtonApiSession>,
+    started: std::time::Instant,
+}
+
+impl Pending {
+    pub fn expired(&self) -> bool {
+        self.started.elapsed() > PENDING_FOR
+    }
+}
+
+/// What a login needs next.
+pub enum Next {
+    /// A code from the account's authenticator app.
+    Totp,
+    /// Proton's human check, solved on the page at this address.
+    Captcha(String),
+}
+
+/// Start a login: SRP with the password, and with a solved human check when
+/// there is one. Stored and done when the account asks for nothing more;
+/// otherwise what it asks for, and the login waiting on it.
+pub async fn start(
     store: &SessionStore,
     username: &str,
-    password: &str,
-    get_totp: impl FnOnce() -> Result<String>,
-) -> Result<()> {
-    let mut session = ProtonApiSession::begin(client_config(), username, password.as_bytes())
-        .await
-        .context("Proton rejected the login")?;
+    password: Zeroizing<String>,
+    verified: Option<&HumanVerificationCredential>,
+) -> Result<Option<(Next, Pending)>> {
+    let begun =
+        ProtonApiSession::begin_verified(client_config(), username, password.as_bytes(), verified)
+            .await;
+    let pending = |session| Pending {
+        username: username.to_string(),
+        password: password.clone(),
+        session,
+        started: std::time::Instant::now(),
+    };
+    let session = match begun {
+        Ok(session) => session,
+        Err(ProtonError::Api(e)) if e.is_human_verification_required() => {
+            let Some(check) = e
+                .human_verification()
+                .filter(|check| check.supports_captcha())
+            else {
+                return Err(anyhow!(
+                    "Proton wants a human check this server cannot show — log in once at \
+                     proton.me from this network, then try again"
+                ));
+            };
+            return Ok(Some((
+                Next::Captcha(check.verification_url()),
+                pending(None),
+            )));
+        }
+        Err(ProtonError::Api(e)) if e.code == ResponseCode::IncorrectLoginCredentials => {
+            return Err(anyhow!("Proton rejected the username or password"));
+        }
+        Err(e @ ProtonError::Transport(_)) => {
+            return Err(anyhow::Error::from(e).context("could not reach Proton"))
+        }
+        Err(e) => return Err(anyhow::Error::from(e).context("Proton rejected the login")),
+    };
 
     if session.is_waiting_for_second_factor() {
-        let code = get_totp()?;
-        session
-            .apply_second_factor_code(code.trim())
-            .await
-            .context("Proton rejected the second-factor code")?;
+        if !session.second_factor_methods().totp {
+            return Err(anyhow!(
+                "this account's second factor is a security key only — add an authenticator \
+                 app to it in Proton's settings, which this server can use"
+            ));
+        }
+        return Ok(Some((Next::Totp, pending(Some(session)))));
     }
+    finish(store, &session, &password).await?;
+    Ok(None)
+}
 
+/// Answer a login's two-factor question. A wrong code gives the login back,
+/// to be asked again.
+pub async fn second_factor(
+    store: &SessionStore,
+    mut pending: Pending,
+    code: &str,
+) -> std::result::Result<(), (anyhow::Error, Option<Box<Pending>>)> {
+    let Some(session) = pending.session.as_mut() else {
+        return Err((
+            anyhow!("this login is waiting for a human check, not a code"),
+            Some(Box::new(pending)),
+        ));
+    };
+    if let Err(e) = session.apply_second_factor_code(code.trim()).await {
+        let e = anyhow::Error::from(e).context("Proton rejected the two-factor code");
+        return Err((e, Some(Box::new(pending))));
+    }
+    let session = pending.session.take().expect("checked above");
+    finish(store, &session, &pending.password)
+        .await
+        .map_err(|e| (e, None))
+}
+
+/// The login again from the start, now with a solved human check.
+pub async fn verified(
+    store: &SessionStore,
+    pending: Pending,
+    token: &str,
+) -> Result<Option<(Next, Pending)>> {
+    let proof = HumanVerificationCredential::captcha(token);
+    start(store, &pending.username, pending.password, Some(&proof)).await
+}
+
+/// Store the session of a finished login.
+async fn finish(store: &SessionStore, session: &ProtonApiSession, password: &str) -> Result<()> {
     // The passphrases are derived here and only here: this access token still
     // carries the `locked` scope the key salts need, and no refreshed one ever
     // will. Unlocking checks them against the account's keys before anything
     // is stored, so a wrong mailbox password fails now and not at the first
     // backup.
-    let client = ProtonDriveClient::new(&session, password.as_bytes().to_vec());
+    let client = ProtonDriveClient::new(session, password.as_bytes().to_vec());
     let account = client.account();
     let key_passphrases = account
         .key_passphrases()
@@ -84,10 +186,25 @@ pub async fn login(
 
     let tokens = session.current_tokens().await;
     store.save(&StoredSession::from_session(
-        &session,
+        session,
         tokens,
         key_passphrases,
     ))?;
+    Ok(())
+}
+
+/// Sign the stored session out on Proton's side as well, as far as Proton
+/// answers; the caller forgets it locally whatever comes of this.
+pub async fn end(store: &SessionStore) -> Result<()> {
+    let Some(stored) = store.load()? else {
+        return Ok(());
+    };
+    let session = ProtonApiSession::resume(client_config(), stored.resume_parameters())
+        .context("the stored Proton session could not be resumed")?;
+    session
+        .end()
+        .await
+        .context("Proton did not end the session")?;
     Ok(())
 }
 
