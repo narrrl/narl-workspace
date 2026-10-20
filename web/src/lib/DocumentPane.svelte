@@ -20,6 +20,24 @@
 
   let reader = $state<HTMLElement>()
   let article = $state<HTMLElement>()
+  let title = $state<HTMLInputElement>()
+
+  // `:name` with nothing after it, while writing: up into the title.
+  $effect(() => {
+    const field = title
+    if (!field) return
+    // A turn later: vim gives the focus back to the text once its `:` line
+    // has run, and that would land after this.
+    const focus = () =>
+      setTimeout(() => {
+        field.focus()
+        field.select()
+      })
+    hooks.focusTitle = focus
+    return () => {
+      if (hooks.focusTitle === focus) hooks.focusTitle = () => {}
+    }
+  })
 
   /*
    * j/k reach this pane through the window handler in App.svelte, which has no
@@ -138,13 +156,15 @@
   {#if workspace.editing}
     <input
       class="title"
+      bind:this={title}
       placeholder="Untitled"
       bind:value={workspace.draft.name}
       oninput={() => workspace.touch()}
       onkeydown={(event) => {
-        if (event.key === 'Enter') {
+        // The title is the line above the text: any of these goes back down.
+        if (['Enter', 'Escape', 'ArrowDown', 'Tab'].includes(event.key) && !event.shiftKey) {
           event.preventDefault()
-          document.querySelector<HTMLElement>('.cm-content')?.focus()
+          hooks.focusEditor()
         }
       }}
     />

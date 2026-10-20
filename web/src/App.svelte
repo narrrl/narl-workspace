@@ -354,7 +354,8 @@
         return true
       case 'R':
         // On an empty list there is no card to rename, so it is the list.
-        cmdline = workspace.card ? ':name ' : ':name! '
+        // The name is there to be edited, not typed again from nothing.
+        cmdline = workspace.card ? `:name ${workspace.card.title}` : `:name! ${workspace.list?.name ?? ''}`
         return true
       case 'D':
         cmdline = ':due '
@@ -574,6 +575,7 @@
       case 'l':
       case 'ArrowRight':
         event.preventDefault()
+        if (key === 'Enter' && reading && hooks.fileAction()) break
         if (workspace.open && workspace.selected?.id === workspace.open.id) focusPane('document')
         else void workspace.guard(() => workspace.openSelected())
         break
@@ -616,11 +618,15 @@
         event.preventDefault()
         void runCommand('board')
         break
-      case 'R':
-        // Renaming needs a name typed, and names are typed on the command line.
+      case 'R': {
+        // Renaming needs a name typed, and names are typed on the command
+        // line — starting from the one it has, so a typo is a fix, not a retype.
         event.preventDefault()
-        cmdline = ':name '
+        const target = workspace.target
+        const current = target && target.id === workspace.open?.id ? workspace.draft.name : (target?.name ?? '')
+        cmdline = `:name ${current.trim()}`
         break
+      }
       case 'h':
       case 'ArrowLeft':
         // Leftwards at every depth: from the document to the list, from the
@@ -640,12 +646,23 @@
         void runCommand('d')
         break
       case 's':
+        // Sharing is a key away; taking a link back from its readers asks first.
         event.preventDefault()
-        void runCommand(workspace.target?.shared ? 'unshare' : 'share')
+        void (async () => {
+          const target = workspace.target
+          if (target?.shared && !(await workspace.ask(`stop sharing "${target.name.trim() || target.slug}"? the link stops working`))) return
+          void runCommand(target?.shared ? 'unshare' : 'share')
+        })()
         break
       case 'y':
+        // A vim hand presses y to yank; here it retires the link readers have,
+        // so it asks first.
         event.preventDefault()
-        void runCommand('link')
+        void (async () => {
+          const target = workspace.target
+          if (!target?.shared) return void runCommand('link')
+          if (await workspace.ask(`new share link for "${target.name.trim() || target.slug}"? the current one stops working`)) void runCommand('link')
+        })()
         break
       case 'n':
         event.preventDefault()

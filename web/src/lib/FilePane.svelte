@@ -70,16 +70,26 @@
 
   let reader = $state<HTMLElement>()
 
-  // Same arrangement as the document pane: j/k scroll whatever is shown here.
+  let cert = $state<CertView>()
+
+  // Same arrangement as the document pane: j/k scroll whatever is shown here,
+  // and Enter does the one thing the file is waiting for — the vault's
+  // password while it is sealed, a keystore's when it has one.
   $effect(() => {
     const scroll = (amount: ScrollAmount) => {
       if (!reader) return false
       scrollPage(reader, amount)
       return true
     }
+    const act = () => {
+      if (locked) return void runCommand('unlock'), true
+      return cert?.act() ?? false
+    }
     hooks.scrollReader = scroll
+    hooks.fileAction = act
     return () => {
       if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
+      if (hooks.fileAction === act) hooks.fileAction = () => false
     }
   })
 </script>
@@ -135,7 +145,7 @@
       {#if locked}
         <p class="sealed">
           <Icon name="lock" size={16} />
-          sealed in the vault — <button onclick={() => runCommand('unlock')}>unlock</button> to open it.
+          sealed in the vault — <span class="kbd">↵</span> or <button onclick={() => runCommand('unlock')}>unlock</button> to open it.
         </p>
       {:else if kind === 'image'}
         <img src={file.url} alt={node.name} />
@@ -147,7 +157,7 @@
       {:else if kind === 'pdf'}
         <iframe class="pdf" src={file.url} title={node.name}></iframe>
       {:else if kind === 'cert'}
-        <CertView id={node.id} name={node.name} />
+        <CertView bind:this={cert} id={node.id} name={node.name} />
       {:else if text !== null}
         {#if kind === 'markdown' && !source}
           <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->

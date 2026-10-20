@@ -2,8 +2,11 @@
   /*
    * A certificate, key or keystore, as the server reads it. A password is
    * asked for only when the file needs one, and goes with that one request.
+   * It is asked for as soon as the file is opened, and again after a wrong
+   * one, so reading a keystore never needs the pointer; Enter asks again
+   * after the question was waved away.
    */
-  import { api, type CertItem, type Inspection } from './api'
+  import { api, ApiError, type CertItem, type Inspection } from './api'
   import { workspace } from './store.svelte'
   import { formatDay } from './util'
 
@@ -11,25 +14,51 @@
 
   let inspection = $state<Inspection | null>(null)
   let error = $state<string | null>(null)
+  let asking = false
 
   async function load(password?: string) {
     try {
       inspection = await api.inspect(id, password)
       error = null
     } catch (e) {
+      // A wrong password leaves what was read without one on screen.
+      if (password !== undefined && e instanceof ApiError && e.status === 400) throw e
       error = e instanceof Error ? e.message : String(e)
     }
   }
 
   $effect(() => {
-    void load()
+    void load().then(() => {
+      // Only for the file being looked at: a space switch that reopens it
+      // behind the list must not raise a question about it.
+      if (inspection?.needs_password && workspace.pane === 'document') void unlock()
+    })
   })
 
   async function unlock() {
-    const password = await workspace.askSecret(`password for ${name}`)
-    if (password === null) return
-    await load(password)
-    if (error) workspace.say(error, 'error')
+    if (asking) return
+    asking = true
+    try {
+      let question = `password for ${name}`
+      for (;;) {
+        const password = await workspace.askSecret(question)
+        if (password === null) return
+        try {
+          return await load(password)
+        } catch (e) {
+          question = `${e instanceof Error ? e.message : 'refused'} — password for ${name}`
+        }
+      }
+    } finally {
+      asking = false
+    }
+  }
+
+  /** What Enter does on the file pane: ask for the password, if one is wanted. */
+  export function act(): boolean {
+    if (!inspection?.needs_password) return false
+    void unlock()
+    return true
   }
 
   function expiry(seconds: number): string {
@@ -49,7 +78,7 @@
 {#if inspection}
   {#if inspection.needs_password}
     <p class="locked">
-      protected by a password — <button onclick={unlock}>enter it</button> to read {inspection.items.length ? 'the rest' : 'it'}.
+      protected by a password — <span class="kbd">↵</span> or <button onclick={unlock}>enter it</button> to read {inspection.items.length ? 'the rest' : 'it'}.
     </p>
   {/if}
   {#each inspection.items as item, i (i)}

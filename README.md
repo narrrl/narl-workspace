@@ -77,11 +77,11 @@ it; in the document pane it is that document. In the browse pane:
 | `j` / `k` | move down / up, or scroll the document when it has focus |
 | `gg` / `G` | first / last entry, or top / bottom of the document |
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
-| `Enter`, `l` | open the highlighted entry |
+| `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
 | `O` | a new folder here |
 | `i`, `a` | edit the open entry |
-| `R` | rename what is highlighted — a document, a folder or a file (`:name!` renames the space) |
+| `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:name!` renames the space) |
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
 | `b` | the board of this space |
@@ -92,7 +92,7 @@ it; in the document pane it is that document. In the browse pane:
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`n` clears it) |
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
-| `s` / `y` | toggle sharing / mint a new share link |
+| `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
 | `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
 | `:` | command line |
 | `Ctrl-S` | save from anywhere |
@@ -102,7 +102,8 @@ Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:w`, `:wq`, `:q!`, `:new [yyyy-mm-dd]`, `:date`, `:name`, `:share`, `:link`,
 `:upload`, `:media`, `:search`, `:backup` and
-`:set novim`. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
+`:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
+there goes back down into the text. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
 list, `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
 `:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words

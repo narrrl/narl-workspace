@@ -13,11 +13,15 @@ export const hooks = {
   /** `root`: into the workspace itself, where each directory is a space. */
   pickArchive: (_root: boolean) => {},
   focusEditor: () => {},
+  /** Filled in while a document is being written: into its title field. */
+  focusTitle: () => {},
   focusList: () => {},
   insertText: (_text: string) => {},
   /* Filled in while a document is on screen and not being edited: the reading
      pane owns the scrollback, so the list keys have somewhere to send it. */
   scrollReader: (_amount: ScrollAmount): boolean => false,
+  /* Filled in by the file pane: what Enter does there, false when nothing. */
+  fileAction: (): boolean => false,
   /** How many space cards the overview fits in a row, for j/k to step by. */
   overviewColumns: (): number => 1,
   openOverview: () => {},
@@ -582,8 +586,9 @@ export const commands: CommandSpec[] = [
     aliases: ['title', 'rename'],
     args: '<text>',
     group: 'editing',
-    help: 'rename what is under the cursor — document, folder, or card on a board',
+    help: 'rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title',
     run: async (arg) => {
+      if (!arg.trim() && workspace.editing && workspace.pane === 'document') return hooks.focusTitle()
       if (workspace.view === 'board') {
         if (!arg.trim()) return workspace.say('usage: :name <text>', 'error')
         return workspace.guard(() => workspace.patchCard({ title: arg.trim() }))
