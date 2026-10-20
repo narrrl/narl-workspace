@@ -4,10 +4,14 @@
   import Icon from './Icon.svelte'
   import { renderMarkdown } from './markdown'
   import { looksLikeText, parseTable, previewKind, separatorOf } from './preview'
-  import { workspace } from './store.svelte'
+  import { workspace, type Tile } from './store.svelte'
   import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage } from './util'
 
-  const node = $derived(workspace.open!)
+  /** The tile this pane draws; the keys only reach it while it has focus. */
+  const { tile }: { tile: Tile } = $props()
+
+  const focused = $derived(workspace.tile === tile)
+  const node = $derived(tile.open!)
   const file = $derived(node.file!)
   /* A sealed file cannot be fetched while the vault is shut. */
   const locked = $derived(file.encrypted && !workspace.vault?.unlocked)
@@ -76,6 +80,7 @@
   // and Enter does the one thing the file is waiting for — the vault's
   // password while it is sealed, a keystore's when it has one.
   $effect(() => {
+    if (!focused) return
     const scroll = (amount: ScrollAmount) => {
       if (!reader) return false
       scrollPage(reader, amount)
@@ -108,7 +113,7 @@
   $effect(() => {
     const scroller = reader
     const root = article
-    if (!scroller || !root) return
+    if (!scroller || !root || !focused) return
     const jump = (direction: 1 | -1) => jumpHeading(scroller, headingsIn(root), direction)
     const list = () => readerHeadings(scroller, root)
     hooks.jumpHeading = jump

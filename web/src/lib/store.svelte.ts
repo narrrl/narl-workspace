@@ -24,6 +24,56 @@ export type Flash = { text: string; kind: 'info' | 'error' } | null
 /** Where a space was left: the folder, the open document, the row, the pane. */
 type Spot = { parentId: number; openId: number | null; cursor: number; pane: Pane }
 
+export type Draft = { name: string; body: string; created_at: number }
+
+let tiles = 0
+
+/**
+ * One document on screen, and everything that belongs to it rather than to
+ * the workspace: what it shows, the draft being written, whether that is
+ * saved, and the timer that will save it.
+ */
+export class Tile {
+  readonly id = ++tiles
+  open = $state<WorkspaceNode | null>(null)
+  draft = $state<Draft>({ name: '', body: '', created_at: 0 })
+  editing = $state(false)
+  /** Set when the editor should open in insert mode rather than normal mode. */
+  enterInsert = $state(false)
+  dirty = $state(false)
+  /** The editor's vim mode, for the status line while this tile has focus. */
+  vimMode = $state('normal')
+  /*
+   * Set when a card's document was opened from the board, so closing the
+   * document goes back to the board — on the same card — rather than leaving
+   * you in a tree you never asked for.
+   */
+  returnTo = $state<'board' | null>(null)
+  /*
+   * The document `o` just made. If it is left with neither a name nor a word
+   * in it, it is removed on the way out rather than left as an empty row.
+   */
+  fresh: number | null = null
+  /** Pending debounced write, if the draft has changed since the last save. */
+  autosave: ReturnType<typeof setTimeout> | null = null
+  /** Saves that failed for want of a server wait this long before trying again. */
+  retryDelay = 0
+
+  stopAutosave() {
+    if (this.autosave) clearTimeout(this.autosave)
+    this.autosave = null
+  }
+
+  /** Put the tile back to showing nothing. Where it goes back to stays. */
+  clear() {
+    this.stopAutosave()
+    this.open = null
+    this.editing = false
+    this.dirty = false
+    this.fresh = null
+  }
+}
+
 /**
  * The whole application state. It is deliberately one object: the keyboard
  * layer needs to see everything at once to decide what a key means.
@@ -47,12 +97,65 @@ class Workspace {
   cursor = $state(0)
   query = $state('')
 
-  open = $state<WorkspaceNode | null>(null)
-  draft = $state({ name: '', body: '', created_at: 0 })
-  editing = $state(false)
-  /** Set when the editor should open in insert mode rather than normal mode. */
-  enterInsert = $state(false)
-  dirty = $state(false)
+  /*
+   * The documents on screen. There is always at least one tile, empty when
+   * nothing is open; the names below (`open`, `draft`, `editing` …) are the
+   * focused tile's, so most of the app reads one document as it always did.
+   */
+  tiles = $state<Tile[]>([new Tile()])
+  focused = $state(0)
+
+  get tile(): Tile {
+    return this.tiles[this.focused] ?? this.tiles[0]
+  }
+
+  get open() {
+    return this.tile.open
+  }
+  set open(node: WorkspaceNode | null) {
+    this.tile.open = node
+  }
+  get draft() {
+    return this.tile.draft
+  }
+  set draft(draft: Draft) {
+    this.tile.draft = draft
+  }
+  get editing() {
+    return this.tile.editing
+  }
+  set editing(editing: boolean) {
+    this.tile.editing = editing
+  }
+  get enterInsert() {
+    return this.tile.enterInsert
+  }
+  set enterInsert(insert: boolean) {
+    this.tile.enterInsert = insert
+  }
+  get dirty() {
+    return this.tile.dirty
+  }
+  set dirty(dirty: boolean) {
+    this.tile.dirty = dirty
+  }
+  get returnTo() {
+    return this.tile.returnTo
+  }
+  set returnTo(to: 'board' | null) {
+    this.tile.returnTo = to
+  }
+  get vimMode() {
+    return this.tile.vimMode
+  }
+  set vimMode(mode: string) {
+    this.tile.vimMode = mode
+  }
+
+  /** Every tile showing `id`. */
+  tilesWith(id: number): Tile[] {
+    return this.tiles.filter((tile) => tile.open?.id === id)
+  }
 
   /** The board of the current space, loaded only while it is being looked at. */
   view = $state<View>('tree')
@@ -82,13 +185,6 @@ class Workspace {
   /** `z` on the board: show done cards older than a week too. */
   showOldDone = $state(false)
   /*
-   * Set when a card's document was opened from the board, so closing the
-   * document goes back to the board — on the same card — rather than leaving
-   * you in a tree you never asked for.
-   */
-  returnTo = $state<'board' | null>(null)
-
-  /*
    * The nodes picked up by `m`, waiting for the `p` that drops them into
    * whatever folder the list is showing then. A move is two keystrokes apart
    * in time because the destination is somewhere else in the tree — there is
@@ -98,7 +194,6 @@ class Workspace {
   marked = $state.raw<NodeSummary[]>([])
 
   pane = $state<Pane>('list')
-  vimMode = $state('normal')
   flash = $state<Flash>(null)
 
   overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline'>('none')
@@ -115,12 +210,6 @@ class Workspace {
 
   /** A search across every space rather than the one being browsed — Ctrl-P. */
   globalSearch = $state(false)
-
-  /*
-   * The document `o` just made. If it is left with neither a name nor a word
-   * in it, it is removed on the way out rather than left as an empty row.
-   */
-  #fresh: number | null = null
 
   /*
    * A `[y/N]` question in the command line's place, instead of the browser's
@@ -154,14 +243,8 @@ class Workspace {
   /** What the login screen has to say: why it is showing, if not for a first visit. */
   notice = $state('')
 
-  /** Saves that failed for want of a server wait this long before trying again. */
-  #retryDelay = 0
-
   /** Mirror vim yanks and deletes into the system clipboard, like `set clipboard=unnamed`. */
   clipboard = $state(localStorage.getItem('diary:clipboard') !== 'off')
-
-  /** Pending debounced write, if the draft has changed since the last save. */
-  #autosave: ReturnType<typeof setTimeout> | null = null
 
   get selected(): NodeSummary | undefined {
     return this.nodes[this.cursor]
@@ -301,7 +384,7 @@ class Workspace {
       failed > 0 || shared > 0 ? 'error' : undefined,
     )
     await this.refresh()
-    if (this.open?.kind === 'file') this.open = await api.getNode(this.open.id)
+    for (const tile of this.tiles) if (tile.open?.kind === 'file') tile.open = await api.getNode(tile.open.id)
   }
 
   ask(text: string): Promise<boolean> {
@@ -341,17 +424,17 @@ class Workspace {
   }
 
   /** Call whenever the draft changes. Replaces a bare `dirty = true`. */
-  touch() {
-    this.dirty = true
-    this.stash()
-    if (this.#autosave) clearTimeout(this.#autosave)
-    this.#autosave = setTimeout(() => void this.#writeBack(), Workspace.AUTOSAVE_MS)
+  touch(tile = this.tile) {
+    tile.dirty = true
+    this.stash(tile)
+    tile.stopAutosave()
+    tile.autosave = setTimeout(() => void this.#writeBack(tile), Workspace.AUTOSAVE_MS)
   }
 
-  stash() {
-    if (!this.open) return
+  stash(tile = this.tile) {
+    if (!tile.open) return
     try {
-      localStorage.setItem(this.#stashKey(this.open.id), JSON.stringify(this.draft))
+      localStorage.setItem(this.#stashKey(tile.open.id), JSON.stringify(tile.draft))
     } catch {
       /* a full or disabled localStorage must not stop the typing */
     }
@@ -365,7 +448,7 @@ class Workspace {
     }
   }
 
-  #readStash(id: number): typeof this.draft | null {
+  #readStash(id: number): Draft | null {
     try {
       const raw = localStorage.getItem(this.#stashKey(id))
       if (!raw) return null
@@ -377,29 +460,31 @@ class Workspace {
     }
   }
 
-  async #writeBack() {
-    this.#autosave = null
-    if (!this.open || !this.dirty) return
+  async #writeBack(tile: Tile) {
+    tile.autosave = null
+    if (!tile.open || !tile.dirty) return
     try {
-      await this.save({ quiet: true })
-      if (this.#retryDelay > 0) this.say('saved — the server is back')
-      this.#retryDelay = 0
+      await this.save({ quiet: true, tile })
+      if (tile.retryDelay > 0) this.say('saved — the server is back')
+      tile.retryDelay = 0
     } catch (error) {
       if (!unreachable(error)) return this.guard(() => Promise.reject(error))
       // Nothing is lost — the draft is in localStorage — but it is not on the
       // server either, so it is tried again, less often the longer it fails.
-      this.#retryDelay = Math.min(Math.max(this.#retryDelay * 2, 2000), 60_000)
-      this.say(`not saved: the server cannot be reached — kept here, trying again in ${this.#retryDelay / 1000}s`, 'error')
-      this.#autosave = setTimeout(() => void this.#writeBack(), this.#retryDelay)
+      tile.retryDelay = Math.min(Math.max(tile.retryDelay * 2, 2000), 60_000)
+      this.say(`not saved: the server cannot be reached — kept here, trying again in ${tile.retryDelay / 1000}s`, 'error')
+      tile.autosave = setTimeout(() => void this.#writeBack(tile), tile.retryDelay)
     }
   }
 
   /** Back online: what is waiting goes now rather than at the next retry. */
   #watchConnection() {
     window.addEventListener('online', () => {
-      if (!this.dirty) return
-      if (this.#autosave) clearTimeout(this.#autosave)
-      void this.#writeBack()
+      for (const tile of this.tiles) {
+        if (!tile.dirty) continue
+        tile.stopAutosave()
+        void this.#writeBack(tile)
+      }
     })
     window.addEventListener('offline', () => {
       this.say('offline — what is typed is kept here, and saved once the server answers', 'error')
@@ -407,37 +492,32 @@ class Workspace {
   }
 
   /**
-   * Write out a pending draft before doing something that would replace it.
-   * Without this, clicking another document in the list discarded unsaved work
-   * without a word.
+   * Write out every pending draft before doing something that would replace
+   * one. Without this, clicking another document in the list discarded
+   * unsaved work without a word.
    */
   async flush() {
-    if (this.#autosave) {
-      clearTimeout(this.#autosave)
-      this.#autosave = null
-    }
-    if (await this.abandonIfBlank()) return
-    if (this.open && this.dirty) await this.guard(() => this.save({ quiet: true }))
+    for (const tile of this.tiles) await this.flushTile(tile)
+  }
+
+  /** The same for one tile only, as it is about to show something else. */
+  async flushTile(tile = this.tile) {
+    tile.stopAutosave()
+    if (await this.abandonIfBlank(tile)) return
+    if (tile.open && tile.dirty) await this.guard(() => this.save({ quiet: true, tile }))
   }
 
   /**
    * Drop the document `o` made if nothing was ever put in it. True when it
    * went, so the caller knows there is nothing open any more.
    */
-  async abandonIfBlank(): Promise<boolean> {
-    const open = this.open
-    if (!open || open.id !== this.#fresh) return false
-    if (this.draft.name.trim() || this.draft.body.trim()) return false
-    this.#fresh = null
-    if (this.#autosave) {
-      clearTimeout(this.#autosave)
-      this.#autosave = null
-    }
+  async abandonIfBlank(tile = this.tile): Promise<boolean> {
+    const open = tile.open
+    if (!open || open.id !== tile.fresh) return false
+    if (tile.draft.name.trim() || tile.draft.body.trim()) return false
+    tile.clear()
     this.dropStash(open.id)
-    this.open = null
-    this.editing = false
-    this.dirty = false
-    this.pane = 'list'
+    if (tile === this.tile) this.pane = 'list'
     try {
       await api.deleteNode(open.id)
     } catch {
@@ -482,7 +562,9 @@ class Workspace {
     // the draft included, so pick up where it stopped rather than start over.
     if (this.spaces.length > 0) {
       await this.refresh()
-      if (this.open && this.dirty) await this.guard(() => this.save({ quiet: true }))
+      for (const tile of this.tiles) {
+        if (tile.open && tile.dirty) await this.guard(() => this.save({ quiet: true, tile }))
+      }
       return
     }
     await this.loadSpaces(Workspace.addressedPath())
@@ -497,8 +579,7 @@ class Workspace {
     this.vault = null
     this.spaces = []
     this.nodes = []
-    this.open = null
-    this.editing = false
+    for (const tile of this.tiles) tile.clear()
   }
 
   /*
@@ -569,9 +650,8 @@ class Workspace {
       const from = this.spaces.findIndex((s) => s.id === this.spaceId)
       const to = this.spaces.findIndex((s) => s.id === id)
       this.switchDirection = to >= from ? 1 : -1
+      this.tile.clear()
       this.returnTo = null
-      this.open = null
-      this.editing = false
       this.pane = 'list'
     }
     this.spaceId = id
@@ -676,7 +756,7 @@ class Workspace {
   }
 
   async openNode(id: number, edit = false, underBoard = false) {
-    if (this.open?.id !== id) await this.flush()
+    if (this.open?.id !== id) await this.flushTile()
 
     const node = await api.getNode(id)
     // What is asked for from the board — `:12`, `T`, a search — is shown, not
@@ -737,7 +817,7 @@ class Workspace {
     this.globalSearch = false
     await this.refresh()
     await this.openNode(node.id, true)
-    this.#fresh = node.id
+    this.tile.fresh = node.id
     this.enterInsert = true
     this.say(`new document ${this.here}/${node.slug}`)
   }
@@ -764,22 +844,22 @@ class Workspace {
    * since it was opened here — another tab, the phone, the SFTP mount —
    * unless `force`, which is `:w!`.
    */
-  async save({ quiet = false, force = false } = {}) {
-    if (!this.open) return
+  async save({ quiet = false, force = false, tile = this.tile } = {}) {
+    if (!tile.open) return
     // Snapshot what goes over the wire: an autosave races the typing that
     // triggered it, and anything typed since must stay marked unsaved.
-    const sent = { ...this.draft, name: this.draft.name.trim() }
-    const saved = await api.updateNode(this.open.id, {
+    const sent = { ...tile.draft, name: tile.draft.name.trim() }
+    const saved = await api.updateNode(tile.open.id, {
       ...sent,
-      base_updated_at: force ? undefined : this.open.updated_at,
+      base_updated_at: force ? undefined : tile.open.updated_at,
     })
 
-    this.open = saved
-    this.dirty =
-      this.draft.body !== sent.body ||
-      this.draft.name.trim() !== sent.name ||
-      this.draft.created_at !== sent.created_at
-    if (this.dirty) this.touch()
+    tile.open = saved
+    tile.dirty =
+      tile.draft.body !== sent.body ||
+      tile.draft.name.trim() !== sent.name ||
+      tile.draft.created_at !== sent.created_at
+    if (tile.dirty) this.touch(tile)
     else this.dropStash(saved.id)
     // The response carries the same excerpt the list query builds, so the row
     // can usually be patched in place rather than re-reading the whole list.
@@ -803,19 +883,13 @@ class Workspace {
   }
 
   async deleteNode(id: number) {
-    if (this.#autosave) {
-      clearTimeout(this.#autosave)
-      this.#autosave = null
-    }
+    const showing = this.tilesWith(id)
+    for (const tile of showing) tile.stopAutosave()
     this.dropStash(id)
-    const node = this.open?.id === id ? this.open : this.nodes.find((n) => n.id === id)
+    const node = showing[0]?.open ?? this.nodes.find((n) => n.id === id)
     const { removed } = await api.deleteNode(id)
-    if (this.open?.id === id) {
-      this.open = null
-      this.editing = false
-      this.dirty = false
-      this.pane = 'list'
-    }
+    for (const tile of showing) tile.clear()
+    if (showing.includes(this.tile)) this.pane = 'list'
     this.marked = this.marked.filter((n) => n.id !== id)
     await this.refresh()
     const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
@@ -836,9 +910,9 @@ class Workspace {
       body: current.body,
       created_at: current.created_at,
     })
-    if (this.open?.id === id) {
-      this.open = saved
-      this.draft.name = saved.name
+    for (const tile of this.tilesWith(id)) {
+      tile.open = saved
+      tile.draft.name = saved.name
     }
     if (this.path.some((crumb) => crumb.id === id)) this.path = saved.path
     if (saved.kind === 'space') this.spaces = await api.listSpaces()
@@ -853,8 +927,7 @@ class Workspace {
    */
   async deleteSpace(id: number) {
     const { removed } = await api.deleteNode(id)
-    this.open = null
-    this.editing = false
+    for (const tile of this.tiles) tile.clear()
     this.rawBoard = null
     this.view = 'tree'
     this.spaces = await api.listSpaces()
@@ -888,12 +961,12 @@ class Workspace {
    */
   async moveNodes(nodes: NodeSummary[], parent: number, where = 'here') {
     if (nodes.length === 0) return this.say('nothing marked — press m on a row first', 'error')
-    if (this.open && nodes.some((n) => n.id === this.open?.id)) {
-      await this.flush()
-      this.open = null
-      this.editing = false
-      this.pane = 'list'
+    const leaving = this.tiles.filter((tile) => nodes.some((n) => n.id === tile.open?.id))
+    for (const tile of leaving) {
+      await this.flushTile(tile)
+      tile.clear()
     }
+    if (leaving.includes(this.tile)) this.pane = 'list'
     const { moved, unchanged } = await api.moveNodes(
       nodes.map((n) => n.id),
       parent,
@@ -1244,9 +1317,8 @@ class Workspace {
 
   /** Back to the board a card's document was opened from. */
   async returnToBoard() {
+    this.tile.clear()
     this.returnTo = null
-    this.open = null
-    this.editing = false
     this.pane = 'list'
     await this.reloadBoard()
     this.view = 'board'
@@ -1276,7 +1348,7 @@ class Workspace {
       const { url, sealed } = await this.mintShareLink(id)
       this.say(`shared → ${url} (copied)${sealedNote(sealed)}`, sealed > 0 ? 'error' : undefined)
     }
-    if (this.open?.id === id) this.open = await api.getNode(id)
+    for (const tile of this.tilesWith(id)) tile.open = await api.getNode(id)
     await this.refresh()
   }
 

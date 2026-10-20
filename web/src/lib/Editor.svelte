@@ -1,6 +1,126 @@
 <script lang="ts" module>
-  /* The vim register controller is global, so it is wrapped once per page. */
-  let clipboardMirrored = false
+  import { EditorView } from '@codemirror/view'
+  import { Vim, getCM, vim } from '@replit/codemirror-vim'
+  import { commands, followLink, runCommand } from './commands'
+  import { linkAt, sourceHeadings } from './util'
+  import { workspace as ws } from './store.svelte'
+
+  /*
+   * Vim's actions, ex commands and registers are global: one definition
+   * serves every editor on the page. Each action is handed the editor the key
+   * was pressed in, so with several documents open it acts on that one.
+   */
+  let vimBound = false
+
+  /** What vim hands an action: CodeMirror 5's face over the editor. */
+  type Adapter = { cm6: EditorView }
+
+  /** Route every `:command` typed inside the editor through the shared handler. */
+  function bridgeExCommands() {
+    for (const spec of commands) {
+      const names = [spec.name, ...(spec.aliases ?? [])]
+      for (const name of names) {
+        Vim.defineEx(name, name, (_cm: unknown, params: { argString?: string }) => {
+          const arg = (params.argString ?? '').trim()
+          // vim parses `:q!` as command `q` with the bang left in the arguments,
+          // so put it back on the name before handing the line over.
+          const bang = arg.startsWith('!')
+          void runCommand(`${spec.name}${bang ? '!' : ''} ${bang ? arg.slice(1).trim() : arg}`)
+        })
+      }
+    }
+  }
+
+  /**
+   * `set clipboard=unnamed`, in effect: every yank or delete that lands in the
+   * unnamed register is copied out to the system clipboard too. An explicit
+   * register (`"ay`) is left alone, and `"+p` still pastes the clipboard back.
+   */
+  function mirrorUnnamedRegisterToClipboard() {
+    const registers = Vim.getRegisterController?.()
+    if (!registers) return
+    const push = registers.pushText.bind(registers)
+    registers.pushText = (name, operator, text, linewise, blockwise) => {
+      push(name, operator, text, linewise, blockwise)
+      if (!name && text && ws.clipboard) void ws.copy(text)
+    }
+  }
+
+  /**
+   * `?` is vim's search-backwards, but the workspace advertises it as the help key
+   * everywhere else, so it opens the reference here too. `/` still searches.
+   */
+  function bindHelpKey() {
+    Vim.defineAction('workspaceHelp', () => void runCommand('help'))
+    for (const context of ['normal', 'visual'] as const) {
+      Vim.mapCommand('?', 'action', 'workspaceHelp', {}, { context })
+    }
+  }
+
+  function gotoLine(view: EditorView, number: number) {
+    const line = view.state.doc.line(number)
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 24 }),
+    })
+    view.focus()
+  }
+
+  /*
+   * vim's `]]` and `[[` walk sections, which in a markdown file are the
+   * headings — the same jump the reader makes, where the text is. `gO` lists
+   * them, as it does in vim's own help files.
+   */
+  function bindHeadingKeys() {
+    const step = (view: EditorView, direction: 1 | -1) => {
+      const at = view.state.doc.lineAt(view.state.selection.main.head).number
+      const lines = sourceHeadings(view.state.doc.toString()).map((heading) => heading.line)
+      let target: number | undefined
+      for (const line of lines) {
+        if (direction > 0 && line > at) {
+          target = line
+          break
+        }
+        if (direction < 0 && line < at) target = line
+      }
+      gotoLine(view, target ?? (direction > 0 ? view.state.doc.lines : 1))
+    }
+    Vim.defineAction('workspaceNextHeading', (cm) => step((cm as unknown as Adapter).cm6, 1))
+    Vim.defineAction('workspacePrevHeading', (cm) => step((cm as unknown as Adapter).cm6, -1))
+    Vim.defineAction('workspaceOutline', () => void runCommand('outline'))
+    Vim.mapCommand(']]', 'action', 'workspaceNextHeading', {}, { context: 'normal' })
+    Vim.mapCommand('[[', 'action', 'workspacePrevHeading', {}, { context: 'normal' })
+    Vim.mapCommand('gO', 'action', 'workspaceOutline', {}, { context: 'normal' })
+  }
+
+  /*
+   * `gf` follows the link under the cursor — a workspace link opens that
+   * document, saving this one first, anything else gets a tab — and `gx`
+   * opens it in a tab whatever it is, as vim hands it to the browser.
+   */
+  function bindLinkKeys() {
+    const follow = (view: EditorView, tab: boolean) => {
+      const head = view.state.selection.main.head
+      const line = view.state.doc.lineAt(head)
+      const href = linkAt(line.text, head - line.from)
+      if (!href) return ws.say('no link under the cursor', 'error')
+      followLink(href, tab)
+    }
+    Vim.defineAction('workspaceFollowLink', (cm) => follow((cm as unknown as Adapter).cm6, false))
+    Vim.defineAction('workspaceOpenLink', (cm) => follow((cm as unknown as Adapter).cm6, true))
+    Vim.mapCommand('gf', 'action', 'workspaceFollowLink', {}, { context: 'normal' })
+    Vim.mapCommand('gx', 'action', 'workspaceOpenLink', {}, { context: 'normal' })
+  }
+
+  function bindVim() {
+    if (vimBound) return
+    vimBound = true
+    bridgeExCommands()
+    bindHelpKey()
+    bindHeadingKeys()
+    bindLinkKeys()
+    mirrorUnnamedRegisterToClipboard()
+  }
 </script>
 
 <script lang="ts">
@@ -9,7 +129,6 @@
   import { HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
   import { EditorState } from '@codemirror/state'
   import {
-    EditorView,
     drawSelection,
     dropCursor,
     highlightActiveLine,
@@ -17,12 +136,13 @@
     placeholder,
   } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
-  import { Vim, getCM, vim } from '@replit/codemirror-vim'
   import { onDestroy, onMount } from 'svelte'
-  import { commands, followLink, hooks, runCommand } from './commands'
+  import { hooks } from './commands'
   import { embedSnippet } from './markdown'
-  import { linkAt, sourceHeadings } from './util'
-  import { workspace } from './store.svelte'
+  import { workspace, type Tile } from './store.svelte'
+
+  /** The tile this editor writes in, which need not be the one with focus. */
+  const { tile }: { tile: Tile } = $props()
 
   let host = $state<HTMLDivElement>()
   let view: EditorView | undefined
@@ -83,50 +203,6 @@
     { dark: true },
   )
 
-  /** Route every `:command` typed inside the editor through the shared handler. */
-  function bridgeExCommands() {
-    for (const spec of commands) {
-      const names = [spec.name, ...(spec.aliases ?? [])]
-      for (const name of names) {
-        Vim.defineEx(name, name, (_cm: unknown, params: { argString?: string }) => {
-          const arg = (params.argString ?? '').trim()
-          // vim parses `:q!` as command `q` with the bang left in the arguments,
-          // so put it back on the name before handing the line over.
-          const bang = arg.startsWith('!')
-          void runCommand(`${spec.name}${bang ? '!' : ''} ${bang ? arg.slice(1).trim() : arg}`)
-        })
-      }
-    }
-  }
-
-  /**
-   * `set clipboard=unnamed`, in effect: every yank or delete that lands in the
-   * unnamed register is copied out to the system clipboard too. An explicit
-   * register (`"ay`) is left alone, and `"+p` still pastes the clipboard back.
-   */
-  function mirrorUnnamedRegisterToClipboard() {
-    if (clipboardMirrored) return
-    const registers = Vim.getRegisterController?.()
-    if (!registers) return
-    clipboardMirrored = true
-    const push = registers.pushText.bind(registers)
-    registers.pushText = (name, operator, text, linewise, blockwise) => {
-      push(name, operator, text, linewise, blockwise)
-      if (!name && text && workspace.clipboard) void workspace.copy(text)
-    }
-  }
-
-  /**
-   * `?` is vim's search-backwards, but the workspace advertises it as the help key
-   * everywhere else, so it opens the reference here too. `/` still searches.
-   */
-  function bindHelpKey() {
-    Vim.defineAction('workspaceHelp', () => void runCommand('help'))
-    for (const context of ['normal', 'visual'] as const) {
-      Vim.mapCommand('?', 'action', 'workspaceHelp', {}, { context })
-    }
-  }
-
   /** The `#` lines being written, as `gO` lists them, and the one the cursor is under. */
   function editorHeadings() {
     if (!view) return { headings: [], current: 0 }
@@ -137,66 +213,8 @@
     found.forEach((heading, i) => {
       if (heading.line <= at) current = i
     })
-    const headings = found.map(({ text, level, line }) => ({ text, level, go: () => gotoLine(line) }))
+    const headings = found.map(({ text, level, line }) => ({ text, level, go: () => gotoLine(editor, line) }))
     return { headings, current }
-  }
-
-  function gotoLine(number: number) {
-    if (!view) return
-    const line = view.state.doc.line(number)
-    view.dispatch({
-      selection: { anchor: line.from },
-      effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 24 }),
-    })
-    view.focus()
-  }
-
-  /*
-   * vim's `]]` and `[[` walk sections, which in a markdown file are the
-   * headings — the same jump the reader makes, where the text is. `gO` lists
-   * them, as it does in vim's own help files.
-   */
-  function bindHeadingKeys() {
-    const step = (direction: 1 | -1) => {
-      if (!view) return
-      const at = view.state.doc.lineAt(view.state.selection.main.head).number
-      const lines = sourceHeadings(view.state.doc.toString()).map((heading) => heading.line)
-      let target: number | undefined
-      for (const line of lines) {
-        if (direction > 0 && line > at) {
-          target = line
-          break
-        }
-        if (direction < 0 && line < at) target = line
-      }
-      gotoLine(target ?? (direction > 0 ? view.state.doc.lines : 1))
-    }
-    Vim.defineAction('workspaceNextHeading', () => step(1))
-    Vim.defineAction('workspacePrevHeading', () => step(-1))
-    Vim.defineAction('workspaceOutline', () => void runCommand('outline'))
-    Vim.mapCommand(']]', 'action', 'workspaceNextHeading', {}, { context: 'normal' })
-    Vim.mapCommand('[[', 'action', 'workspacePrevHeading', {}, { context: 'normal' })
-    Vim.mapCommand('gO', 'action', 'workspaceOutline', {}, { context: 'normal' })
-  }
-
-  /*
-   * `gf` follows the link under the cursor — a workspace link opens that
-   * document, saving this one first, anything else gets a tab — and `gx`
-   * opens it in a tab whatever it is, as vim hands it to the browser.
-   */
-  function bindLinkKeys() {
-    const follow = (tab: boolean) => {
-      if (!view) return
-      const head = view.state.selection.main.head
-      const line = view.state.doc.lineAt(head)
-      const href = linkAt(line.text, head - line.from)
-      if (!href) return workspace.say('no link under the cursor', 'error')
-      followLink(href, tab)
-    }
-    Vim.defineAction('workspaceFollowLink', () => follow(false))
-    Vim.defineAction('workspaceOpenLink', () => follow(true))
-    Vim.mapCommand('gf', 'action', 'workspaceFollowLink', {}, { context: 'normal' })
-    Vim.mapCommand('gx', 'action', 'workspaceOpenLink', {}, { context: 'normal' })
   }
 
   /**
@@ -226,11 +244,7 @@
   }
 
   onMount(() => {
-    bridgeExCommands()
-    bindHelpKey()
-    bindHeadingKeys()
-    bindLinkKeys()
-    mirrorUnnamedRegisterToClipboard()
+    bindVim()
 
     const extensions = [
       ...(workspace.vimEnabled ? [vim({ status: false })] : []),
@@ -249,7 +263,7 @@
         {
           key: 'Mod-s',
           preventDefault: true,
-          run: () => (void workspace.guard(() => workspace.save()), true),
+          run: () => (void workspace.guard(() => workspace.save({ tile })), true),
         },
         ...defaultKeymap,
         ...historyKeymap,
@@ -257,8 +271,8 @@
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
-          workspace.draft.body = update.state.doc.toString()
-          workspace.touch()
+          tile.draft.body = update.state.doc.toString()
+          workspace.touch(tile)
         }
       }),
       EditorView.domEventHandlers({
@@ -280,14 +294,11 @@
     ]
 
     view = new EditorView({
-      state: EditorState.create({ doc: workspace.draft.body, extensions }),
+      state: EditorState.create({ doc: tile.draft.body, extensions }),
       parent: host!,
     })
 
-    hooks.focusEditor = focus
-    hooks.insertText = insertAtCursor
-    hooks.headings = editorHeadings
-    view.focus()
+    if (workspace.tile === tile) view.focus()
 
     const cm = workspace.vimEnabled ? getCM(view) : null
     if (cm) {
@@ -296,28 +307,39 @@
         on?: (event: string, handler: (e: { mode: string }) => void) => void
       }
       emitter.on?.('vim-mode-change', (event) => {
-        workspace.vimMode = event.mode
+        tile.vimMode = event.mode
       })
 
       // A fresh entry starts in insert mode; an existing one starts in normal
       // mode, the way opening a file in vim does.
-      if (workspace.enterInsert) {
-        workspace.enterInsert = false
+      if (tile.enterInsert) {
+        tile.enterInsert = false
         Vim.handleKey(cm, 'i', 'workspace')
       }
+    }
+  })
+
+  /*
+   * The keys reach whichever editor is in the focused tile: that one fills
+   * the hooks, and the rest stand by until their tile is focused.
+   */
+  $effect(() => {
+    if (workspace.tile !== tile) return
+    hooks.focusEditor = focus
+    hooks.insertText = insertAtCursor
+    hooks.headings = editorHeadings
+    // Only clear the hooks if no other editor has taken them already.
+    return () => {
+      if (hooks.focusEditor === focus) hooks.focusEditor = () => {}
+      if (hooks.insertText === insertAtCursor) hooks.insertText = () => {}
+      if (hooks.headings === editorHeadings) hooks.headings = () => ({ headings: [], current: 0 })
     }
   })
 
   onDestroy(() => {
     view?.destroy()
     view = undefined
-    // Only clear the hooks if no newer editor has taken them already.
-    if (hooks.focusEditor === focus) {
-      hooks.focusEditor = () => {}
-      hooks.insertText = () => {}
-      if (hooks.headings === editorHeadings) hooks.headings = () => ({ headings: [], current: 0 })
-      workspace.vimMode = 'normal'
-    }
+    tile.vimMode = 'normal'
   })
 </script>
 

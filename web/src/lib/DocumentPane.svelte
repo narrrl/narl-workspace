@@ -2,7 +2,7 @@
   import { followLink, hooks, runCommand, type ScrollAmount } from './commands'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
-  import { workspace } from './store.svelte'
+  import { workspace, type Tile } from './store.svelte'
   import Icon from './Icon.svelte'
   import {
     formatStamp,
@@ -15,10 +15,14 @@
     scrollPage,
   } from './util'
 
-  const doc = $derived(workspace.open!)
-  const html = $derived(renderMarkdown(workspace.editing ? workspace.draft.body : doc.body))
+  /** The tile this pane draws; the keys only reach it while it has focus. */
+  const { tile }: { tile: Tile } = $props()
+
+  const focused = $derived(workspace.tile === tile)
+  const doc = $derived(tile.open!)
+  const html = $derived(renderMarkdown(tile.editing ? tile.draft.body : doc.body))
   const words = $derived(
-    (workspace.editing ? workspace.draft.body : doc.body).split(/\s+/).filter(Boolean).length,
+    (tile.editing ? tile.draft.body : doc.body).split(/\s+/).filter(Boolean).length,
   )
   /*
    * Only the token half of a share link is recoverable — the key lives in the
@@ -34,7 +38,7 @@
   // `:name` with nothing after it, while writing: up into the title.
   $effect(() => {
     const field = title
-    if (!field) return
+    if (!field || !focused) return
     // A turn later: vim gives the focus back to the text once its `:` line
     // has run, and that would land after this.
     const focus = () =>
@@ -56,6 +60,7 @@
   $effect(() => {
     // A space switch remounts this pane, and the old one's cleanup can run
     // after the new one has set the hook — so it only clears its own.
+    if (!focused) return
     const scroll = (amount: ScrollAmount) => {
       if (!reader) return false
       scrollPage(reader, amount)
@@ -71,7 +76,7 @@
   $effect(() => {
     const scroller = reader
     const root = article
-    if (!scroller || !root) return
+    if (!scroller || !root || !focused) return
     const jump = (direction: 1 | -1) => jumpHeading(scroller, headingsIn(root), direction)
     const list = () => readerHeadings(scroller, root)
     // The outline in the margin is links too, so `F` reaches it as well.
@@ -139,15 +144,15 @@
       <button class="back" aria-label="back to the list" onclick={() => runCommand('q')}>
         <Icon name="back" size={16} />
       </button>
-      <span class="marker" class:live={workspace.editing}></span>
+      <span class="marker" class:live={tile.editing}></span>
       <span class="path">{workspace.here}/{doc.slug}</span>
-      {#if workspace.dirty}<span class="dirty">modified</span>{/if}
+      {#if tile.dirty}<span class="dirty">modified</span>{/if}
     </div>
 
     <div class="row">
       <dl class="meta">
         <dt>written</dt>
-        <dd>{formatStamp(workspace.draft.created_at)} {formatWeekday(workspace.draft.created_at)}</dd>
+        <dd>{formatStamp(tile.draft.created_at)} {formatWeekday(tile.draft.created_at)}</dd>
         <dt>edited</dt>
         <dd>{relative(doc.updated_at)}</dd>
         <dt>words</dt>
@@ -155,7 +160,7 @@
       </dl>
 
       <div class="actions">
-        {#if workspace.editing}
+        {#if tile.editing}
           <button onclick={() => runCommand('w')}>:w</button>
           <button onclick={() => runCommand('upload')}>attach</button>
           <button onclick={() => runCommand('wq')}>done</button>
@@ -180,13 +185,13 @@
     </div>
   {/if}
 
-  {#if workspace.editing}
+  {#if tile.editing}
     <input
       class="title"
       bind:this={title}
       placeholder="Untitled"
-      bind:value={workspace.draft.name}
-      oninput={() => workspace.touch()}
+      bind:value={tile.draft.name}
+      oninput={() => workspace.touch(tile)}
       onkeydown={(event) => {
         // The title is the line above the text: any of these goes back down.
         if (['Enter', 'Escape', 'ArrowDown', 'Tab'].includes(event.key) && !event.shiftKey) {
@@ -201,7 +206,7 @@
           <div class="loading label">loading editor<span class="cursor">_</span></div>
         {:then module}
           {@const Editor = module.default}
-          <Editor />
+          <Editor {tile} />
         {/await}
       {/key}
     </div>

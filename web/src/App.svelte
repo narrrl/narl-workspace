@@ -145,7 +145,7 @@
 
   // Guard against losing a half-written entry to a stray refresh.
   $effect(() => {
-    if (!workspace.dirty) return
+    if (!workspace.tiles.some((tile) => tile.dirty)) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
@@ -851,9 +851,9 @@
             onpointerdown={() => workspace.open && (workspace.pane = 'document')}
           >
             {#if workspace.open?.kind === 'file'}
-              <FilePane />
+              <FilePane tile={workspace.tile} />
             {:else if workspace.open}
-              <DocumentPane />
+              <DocumentPane tile={workspace.tile} />
             {:else}
               <div class="placeholder">
                 <div class="standby resolve">
