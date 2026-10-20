@@ -75,7 +75,7 @@ it; in the document pane it is that document. In the browse pane:
 | `f` | fullscreen the focused pane |
 | `Alt-h` / `Alt-l` | focus the list / the document, from the editor too |
 | `j` / `k` | move down / up, or scroll the document when it has focus |
-| `gg` / `G` | first / last entry, or top / bottom of the document |
+| `gg` / `G` | first / last entry, or top / bottom of the document; a first `g`, `d`, `]` or `[` shows in the status line for a second while it waits for the second key |
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
@@ -94,8 +94,9 @@ it; in the document pane it is that document. In the browse pane:
 | `c` | capture a card into this space's inbox without leaving where you are |
 | `Esc`, `q` | close the document |
 | `h` | up one level in the tree |
-| `/` | full-text search in this space (`n` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
+| `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
+| `n` / `N` | the next / previous search result, opened beside the results; past the last it starts again at the first |
 | `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
 | `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
 | `:` | command line — `Tab` / `Shift-Tab` cycle the matching commands, then the argument (folders for `:cd` and `:mv`, spaces for `:space`, options for `:set` …); `↑` / `↓` recall the lines run before that start as this one does |

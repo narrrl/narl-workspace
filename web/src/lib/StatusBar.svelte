@@ -3,6 +3,9 @@
   import { workspace } from './store.svelte'
   import { isTouchDevice } from './util'
 
+  /** A key waiting for its second half, like vim's `showcmd`. */
+  const { pending = '' }: { pending?: string } = $props()
+
   const mode = $derived(
     workspace.editing ? (workspace.vimEnabled ? workspace.vimMode.toUpperCase() : 'EDIT') : 'BROWSE',
   )
@@ -28,6 +31,7 @@
 
   <span class="msg" class:alarm={workspace.flash?.kind === 'error'}>{workspace.flash?.text ?? ''}</span>
 
+  {#if pending}<span class="pending" aria-live="polite">{pending}</span>{/if}
   {#if workspace.fullscreen}<span class="flag">full</span>{/if}
   {#if workspace.vault?.unlocked}<span class="flag vault" title="the vault is open — :lock closes it">vault open</span>{/if}
   {#if lines !== null}<span class="readout">{lines}<span class="unit">L</span></span>{/if}
@@ -46,6 +50,7 @@
   .dirty { color: var(--light); }
   .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
   .msg.alarm { color: var(--alarm); }
+  .pending { flex: none; color: var(--light); font-family: var(--font-mono); }
   .flag { color: var(--light); letter-spacing: 0.18em; text-transform: uppercase; }
 
   .tools { display: none; }
@@ -57,7 +62,7 @@
    */
   @media (max-width: 767px) {
     .status { padding: 0 6px; gap: 6px; overflow: visible; }
-    .hint, .file, .readout, .flag { display: none; }
+    .hint, .file, .readout, .flag, .pending { display: none; }
     .mode:not(.editing) { display: none; }
     .tools { display: flex; flex: 1; height: 100%; }
 

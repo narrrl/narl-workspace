@@ -44,6 +44,7 @@
   let importRoot = false
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
+  /** The first half of `gg`, `dd`, `]]` …, shown until the second comes. */
   let pending = $state('')
   /** `F`: the pane whose links and buttons are wearing hints right now. */
   let hintRoot = $state<HTMLElement | null>(null)
@@ -132,6 +133,13 @@
     const vault = workspace.vault
     if (!vault?.unlocked || vault.locks_in === null) return
     const timer = setTimeout(() => void workspace.loadVault(), (vault.locks_in + 2) * 1000)
+    return () => clearTimeout(timer)
+  })
+
+  // A first half left alone is forgotten, as vim's `timeoutlen` does.
+  $effect(() => {
+    if (!pending) return
+    const timer = setTimeout(() => (pending = ''), 1000)
     return () => clearTimeout(timer)
   })
 
@@ -775,8 +783,11 @@
         })()
         break
       case 'n':
+      case 'N':
+        // Through the results, as vim's `n` goes through the matches; the
+        // search itself stays until `:noh`.
         event.preventDefault()
-        if (workspace.query) void workspace.guard(() => workspace.search(''))
+        void workspace.guard(() => workspace.nextResult(key === 'n' ? 1 : -1))
         break
       case '/':
         event.preventDefault()
@@ -864,7 +875,7 @@
       {/key}
     </main>
 
-    <StatusBar />
+    <StatusBar {pending} />
 
     {#if cmdline !== null}
       <CommandLine initial={cmdline} global={cmdGlobal} close={() => ((cmdline = null), (cmdGlobal = false))} />

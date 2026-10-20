@@ -652,6 +652,24 @@ class Workspace {
     await this.refresh()
   }
 
+  /**
+   * `n` / `N`: the next or previous search result after the cursor, opened
+   * beside the results so the next `n` goes on from there. A folder is only
+   * highlighted: going into it would end the search. Past the last result it
+   * starts again at the first, as vim's `wrapscan` does.
+   */
+  async nextResult(delta: 1 | -1) {
+    if (!this.query) return this.say('no search — / starts one', 'error')
+    const count = this.nodes.length
+    if (count === 0) return this.say(`no results for "${this.query}"`, 'error')
+    const next = this.cursor + delta
+    if (next >= count) this.say('search hit BOTTOM, continuing at TOP')
+    else if (next < 0) this.say('search hit TOP, continuing at BOTTOM')
+    this.cursor = (next + count) % count
+    const node = this.nodes[this.cursor]
+    if (!isContainer(node)) await this.openNode(node.id)
+  }
+
   move(delta: number) {
     if (this.nodes.length === 0) return
     this.cursor = Math.min(Math.max(this.cursor + delta, 0), this.nodes.length - 1)
