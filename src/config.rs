@@ -4,6 +4,10 @@ use anyhow::{Context, Result};
 use chrono::Weekday;
 use chrono_tz::Tz;
 
+/// The placeholders `.env.example` ships with, refused when left in place.
+const EXAMPLE_SECRET: &str = "replace-with-32-random-characters";
+const EXAMPLE_PASSWORD: &str = "change-me";
+
 /// Runtime configuration. Everything comes from the environment (`.env` is
 /// loaded on startup), because this is a deliberately single-user application.
 #[derive(Clone)]
@@ -251,12 +255,19 @@ impl Config {
         if secret.len() < 16 {
             anyhow::bail!("WORKSPACE_SECRET must be at least 16 characters");
         }
-
-        if password == "change-me" {
-            tracing::warn!(
-                "WORKSPACE_PASSWORD is still the example value from .env.example — \
-                 anyone who can reach this server can read the workspace"
+        // The examples are public: with the secret anyone can sign a session
+        // cookie, with the password anyone can log in.
+        if secret == EXAMPLE_SECRET.as_bytes() {
+            anyhow::bail!(
+                "WORKSPACE_SECRET is still the example from .env.example — \
+                 set it to something random: openssl rand -base64 32"
             );
+        }
+        if secret.len() < 32 {
+            tracing::warn!("WORKSPACE_SECRET is shorter than 32 characters; a longer one is safer");
+        }
+        if password == EXAMPLE_PASSWORD {
+            anyhow::bail!("WORKSPACE_PASSWORD is still the example from .env.example — change it");
         }
 
         let bind = var("BIND")

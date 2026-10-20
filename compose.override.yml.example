@@ -7,6 +7,9 @@ services:
     # Requires WORKSPACE_SFTP_BIND=0.0.0.0:2222 in .env to actually listen.
     ports: !override
       - "127.0.0.1:2222:2222"
+    # Traefik serves it over HTTPS, so the cookie can insist on it.
+    environment:
+      WORKSPACE_SECURE_COOKIE: "1"
     networks:
       - narl
       - internal_net

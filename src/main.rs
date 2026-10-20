@@ -234,12 +234,21 @@ async fn snapshot_before_migrating(
 
 async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -> Result<()> {
     let app = Router::new()
-        .nest("/api", routes::api_router(max_upload))
+        // What the API answers is private and changes; only what says
+        // otherwise — the media routes — is kept by a cache.
+        .nest(
+            "/api",
+            routes::api_router(max_upload).layer(SetResponseHeaderLayer::if_not_present(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            )),
+        )
         .fallback(static_files::handler)
         .layer(axum::middleware::from_fn(auth::same_origin))
         .layer(axum::middleware::from_fn(deadline))
         .layer(CompressionLayer::new().compress_when(compressible))
         .layer(security_headers())
+        .layer(strict_transport(state.config.secure_cookie))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
@@ -378,7 +387,15 @@ type HeaderLayer = SetResponseHeaderLayer<HeaderValue>;
 /// Headers every response carries. `if_not_present` throughout, so a handler
 /// that has already said something stricter about itself — the media routes and
 /// their sandbox CSP — keeps its own answer.
-fn security_headers() -> (HeaderLayer, HeaderLayer, HeaderLayer, HeaderLayer) {
+fn security_headers() -> (
+    HeaderLayer,
+    HeaderLayer,
+    HeaderLayer,
+    HeaderLayer,
+    HeaderLayer,
+    HeaderLayer,
+    HeaderLayer,
+) {
     let header = |name: header::HeaderName, value: &'static str| {
         SetResponseHeaderLayer::if_not_present(name, HeaderValue::from_static(value))
     };
@@ -390,6 +407,33 @@ fn security_headers() -> (HeaderLayer, HeaderLayer, HeaderLayer, HeaderLayer) {
         header(header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         header(header::X_FRAME_OPTIONS, "DENY"),
         header(header::CONTENT_SECURITY_POLICY, CSP),
+        // No other site's window keeps a handle on this one, nor embeds what
+        // it serves.
+        header(
+            header::HeaderName::from_static("cross-origin-opener-policy"),
+            "same-origin",
+        ),
+        header(
+            header::HeaderName::from_static("cross-origin-resource-policy"),
+            "same-origin",
+        ),
+        header(
+            header::HeaderName::from_static("permissions-policy"),
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        ),
+    )
+}
+
+/// Over HTTPS, the browser is told to come back over nothing else for a year,
+/// so a mistyped `http://` never carries the cookie in the clear.
+fn strict_transport(
+    secure: bool,
+) -> SetResponseHeaderLayer<impl Fn(&axum::response::Response) -> Option<HeaderValue> + Clone> {
+    SetResponseHeaderLayer::if_not_present(
+        header::STRICT_TRANSPORT_SECURITY,
+        move |_: &axum::response::Response| {
+            secure.then(|| HeaderValue::from_static("max-age=31536000"))
+        },
     )
 }
 

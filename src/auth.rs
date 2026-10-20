@@ -17,6 +17,7 @@ use crate::{config::Config, error::AppError, state::AppState};
 // Kept from before the rename: the name is never seen, and changing it would
 // sign every browser out to no purpose.
 pub const COOKIE_NAME: &str = "diary_session";
+pub const SECURE_COOKIE_NAME: &str = "__Host-diary_session";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -108,21 +109,42 @@ impl Epoch {
     }
 }
 
+/// Both sides are compared as MACs of the same length, so the time it takes
+/// says nothing about how long the real password is either.
 pub fn credentials_match(config: &Config, username: &str, password: &str) -> bool {
-    let user_ok = username.as_bytes().ct_eq(config.username.as_bytes());
-    let pass_ok = password.as_bytes().ct_eq(config.password.as_bytes());
+    let digest = |value: &str| {
+        let mut mac =
+            HmacSha256::new_from_slice(&config.secret).expect("hmac accepts any key length");
+        mac.update(value.as_bytes());
+        mac.finalize().into_bytes()
+    };
+    let user_ok = digest(username).ct_eq(&digest(&config.username));
+    let pass_ok = digest(password).ct_eq(&digest(&config.password));
     bool::from(user_ok & pass_ok)
+}
+
+/// Over HTTPS the cookie takes the `__Host-` prefix: the browser then keeps
+/// it to this exact host, sent only over a secure connection, and no sibling
+/// subdomain can plant one of the same name.
+pub fn cookie_name(config: &Config) -> &'static str {
+    if config.secure_cookie {
+        SECURE_COOKIE_NAME
+    } else {
+        COOKIE_NAME
+    }
 }
 
 pub fn session_cookie(config: &Config, token: &str) -> String {
     let max_age = config.session_days * 86_400;
+    let name = cookie_name(config);
     let secure = if config.secure_cookie { "; Secure" } else { "" };
-    format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
+    format!("{name}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
 pub fn clear_cookie(config: &Config) -> String {
+    let name = cookie_name(config);
     let secure = if config.secure_cookie { "; Secure" } else { "" };
-    format!("{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}")
+    format!("{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}")
 }
 
 fn cookie_value<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
@@ -147,7 +169,8 @@ impl FromRequestParts<AppState> for Session {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = cookie_value(parts, COOKIE_NAME).ok_or(AppError::Unauthorized)?;
+        let token =
+            cookie_value(parts, cookie_name(&state.config)).ok_or(AppError::Unauthorized)?;
         let epoch = state.epoch.load(std::sync::atomic::Ordering::SeqCst);
         if verify_token(&state.config, token, epoch) {
             Ok(Session)
@@ -218,7 +241,9 @@ fn is_same_origin(headers: &HeaderMap) -> bool {
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
 
-    use super::{credentials_match, is_same_origin, issue_token, verify_token};
+    use super::{
+        clear_cookie, credentials_match, is_same_origin, issue_token, session_cookie, verify_token,
+    };
     use crate::config::Config;
 
     fn config(session_days: i64) -> Config {
@@ -243,6 +268,20 @@ mod tests {
         let mut rotated = config(30);
         rotated.secret = b"a-different-secret-entirely".to_vec();
         assert!(!verify_token(&rotated, &token, 0));
+    }
+
+    #[test]
+    fn over_https_the_cookie_is_kept_to_the_host() {
+        let mut config = config(30);
+        assert!(session_cookie(&config, "t").starts_with("diary_session=t;"));
+        config.secure_cookie = true;
+        let cookie = session_cookie(&config, "t");
+        assert!(cookie.starts_with("__Host-diary_session=t;"), "{cookie}");
+        // The prefix holds only with Secure, Path=/ and no Domain.
+        assert!(
+            cookie.contains("; Secure") && cookie.contains("Path=/") && !cookie.contains("Domain")
+        );
+        assert!(clear_cookie(&config).starts_with("__Host-diary_session=;"));
     }
 
     #[test]

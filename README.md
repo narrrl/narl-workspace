@@ -582,11 +582,20 @@ sealed or not.
 
 Put a TLS-terminating reverse proxy in front of it, point it at `WORKSPACE_BIND`,
 and set `WORKSPACE_SECURE_COOKIE=1`. Nothing else is needed: no database server, no
-runtime dependencies, no build tools on the host.
+runtime dependencies, no build tools on the host. The server will not start
+while `WORKSPACE_SECRET` or `WORKSPACE_PASSWORD` is still the example from
+`.env.example`: with the example secret anyone could sign themselves a session.
+
+With `WORKSPACE_SECURE_COOKIE=1` the session cookie is `Secure` and named
+`__Host-diary_session`, so the browser keeps it to this host and HTTPS, and every
+response carries `Strict-Transport-Security` for a year. Turning it on logs
+everyone out once.
 
 The app sends its own `Content-Security-Policy`, `Referrer-Policy: no-referrer`,
-`X-Content-Type-Options` and `X-Frame-Options`; a proxy that adds its own should
-not weaken them. `no-referrer` matters in particular, because a share token
+`X-Content-Type-Options`, `X-Frame-Options`, `Cross-Origin-Opener-Policy`,
+`Cross-Origin-Resource-Policy` and a `Permissions-Policy` that turns off camera,
+microphone and location; API answers are `Cache-Control: no-store` unless they
+say otherwise. A proxy that adds its own should not weaken them. `no-referrer` matters in particular, because a share token
 lives in the URL and would otherwise leak to any site a shared entry links to.
 Share links minted before the key existed are revoked by migration `0005`;
 re-run `:share` on those entries to publish them again.
@@ -630,5 +639,5 @@ volume under a new name and find an empty one.
 By default the port is published on `127.0.0.1:4242` only. To serve it through
 traefik instead, copy `compose.override.yml.example` to `compose.override.yml`
 and adjust the host — it joins the external `narl` network, drops the published
-port, and routes to container port 4242. Set `WORKSPACE_SECURE_COOKIE=1` in `.env`
-once it is served over HTTPS.
+port, routes to container port 4242, and sets `WORKSPACE_SECURE_COOKIE=1`, since
+traefik serves it over HTTPS.
