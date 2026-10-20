@@ -130,6 +130,7 @@
           <span class="title">
             {label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}
             {#if workspace.query && node.location}<span class="where">{node.location}</span>{/if}
+            {#if workspace.query && node.in_text}<span class="hit" title="found in the file's text">{node.excerpt}</span>{/if}
           </span>
           {#if workspace.isMarked(node.id)}<span class="badge" title="marked — p drops what is marked in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
@@ -259,6 +260,16 @@
   /* Where a search match sits, so two of the same name can be told apart. */
   .where { margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
   .row.active .where { color: var(--ink); }
+  /* A file found by its text, not its name: the words it was found by, below. */
+  .hit {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .row.active .hit { color: var(--ink); }
   .aside { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .badge { flex: none; font-size: 11px; font-weight: 700; color: var(--light-dim); }
   .shared {

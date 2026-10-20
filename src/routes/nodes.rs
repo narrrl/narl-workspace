@@ -78,6 +78,10 @@ pub struct NodeSummary {
     /// matches with the same name can be told apart.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
+    /// Search results only: a file found by what it says rather than by its
+    /// name, with the words around the match as its excerpt.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub in_text: bool,
 }
 
 #[derive(Serialize)]
@@ -374,6 +378,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         sealed: row.get("sealed"),
         file,
         location: None,
+        in_text: false,
     }
 }
 
@@ -509,7 +514,11 @@ pub async fn list(
     let rows = match search.and_then(fts_query) {
         // A search reaches through the whole tree, optionally confined to one
         // space: the recursive term collects that space, or every space, and
-        // everything under it — which leaves the trash out.
+        // everything under it — which leaves the trash out. It asks both
+        // indexes, names and documents in one and the text of files in the
+        // other, and a node found in both is listed once, at its better rank.
+        // The two ranks are BM25 over different tables, so their order is
+        // approximate, which is good enough for a short list.
         Some(query) => {
             sqlx::query(&format!(
                 "WITH RECURSIVE sub (id) AS (
@@ -517,14 +526,25 @@ pub async fn list(
                      WHERE id = ?4 OR (?4 IS NULL AND parent_id IS NULL AND kind = 'space')
                      UNION ALL
                      SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+                 ),
+                 hits (id, rank, snippet) AS (
+                     SELECT rowid, rank, NULL FROM nodes_fts WHERE nodes_fts MATCH ?1
+                     UNION ALL
+                     SELECT rowid, rank, snippet(files_fts, 0, '', '', '…', 16)
+                     FROM files_fts WHERE files_fts MATCH ?1
+                 ),
+                 best AS (
+                     SELECT id, MIN(rank) AS rank, MAX(snippet) AS snippet
+                     FROM hits GROUP BY id
                  )
-                 SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
-                 FROM nodes_fts
-                 JOIN nodes n ON n.id = nodes_fts.rowid
-                 WHERE nodes_fts MATCH ?1
-                   AND n.kind <> 'space'
+                 SELECT {SUMMARY_COLUMNS},
+                        COALESCE(best.snippet, substr(n.body, 1, {HEAD_CHARS})) AS head,
+                        best.snippet IS NOT NULL AS in_text
+                 FROM best
+                 JOIN nodes n ON n.id = best.id
+                 WHERE n.kind <> 'space'
                    AND n.id IN (SELECT id FROM sub)
-                 ORDER BY rank
+                 ORDER BY best.rank
                  LIMIT ?2 OFFSET ?3"
             ))
             .bind(query)
@@ -557,7 +577,10 @@ pub async fn list(
         .iter()
         .map(|row| {
             let head: String = row.try_get("head").unwrap_or_default();
-            row_to_summary(row, &head)
+            NodeSummary {
+                in_text: row.try_get("in_text").unwrap_or(false),
+                ..row_to_summary(row, &head)
+            }
         })
         .collect();
     if searching {

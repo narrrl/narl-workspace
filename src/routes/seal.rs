@@ -34,7 +34,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{media::MEDIA_REF, nodes},
+    routes::{file_text, media::MEDIA_REF, nodes},
     state::AppState,
     vault,
 };
@@ -248,6 +248,10 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     }
 
     if files > 0 {
+        // Sealing dropped the text with the old bytes; opened, it is read again.
+        if !seal {
+            file_text::refresh(&state.db, &state.config.uploads_dir()).await;
+        }
         state.backup.signal();
     }
     // Asked about one file, the reason it failed is the answer.

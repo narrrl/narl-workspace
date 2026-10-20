@@ -151,6 +151,16 @@ async fn main() -> Result<()> {
         Ok(linking) => tracing::info!("indexed the links of {linking} documents"),
         Err(e) => tracing::warn!("could not index the links between documents: {e:?}"),
     }
+    // The text of files is read off the disk, which may take a while on a
+    // first start, so the server does not wait for it.
+    let (db, uploads) = (state.db.clone(), config.uploads_dir());
+    tokio::spawn(async move {
+        match routes::file_text::catch_up(&db, &uploads).await {
+            Ok(0) => {}
+            Ok(read) => tracing::info!("read {read} files for search"),
+            Err(e) => tracing::warn!("could not index files for search: {e:?}"),
+        }
+    });
 
     if let Some(sftp_bind) = config.sftp.bind {
         let sftp_state = state.clone();

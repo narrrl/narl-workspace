@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{nodes, seal},
+    routes::{file_text, nodes, seal},
     state::AppState,
     vault,
 };
@@ -331,6 +331,7 @@ pub async fn upload_into(
     if created.is_empty() {
         return Err(AppError::BadRequest("no files in upload".into()));
     }
+    file_text::refresh(&state.db, &state.config.uploads_dir()).await;
     state.backup.signal();
 
     let mut out = Vec::with_capacity(created.len());

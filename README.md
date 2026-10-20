@@ -7,6 +7,7 @@ one binary. It was called `narl-diary` until it grew everything but the diary.
 - **Rust + axum** backend, **SQLite** storage, **Svelte 5** frontend.
 - Spaces (`diary`, `work`, `uni`, …) with folders nested to any depth inside them.
 - Markdown documents with full-text search across a whole space (SQLite FTS5),
+  reaching into the text files in the tree too,
   and math in them set by KaTeX: `$x^2$` inline, `$$…$$` or a ```` ```math ````
   block on its own.
 - Import a folder — or a zip of one — as a tree of documents, links and all.
@@ -451,6 +452,21 @@ arrives, never held in memory, so the only ceiling is `WORKSPACE_MAX_UPLOAD_MB`
 (1024 by default) — which is per request, so a proxy in front needs a body
 limit at least that large too.
 
+### Searching inside files
+
+`/` and `Ctrl-P` find a file by what it says as well as by its name: the text
+of every file that is text — by its type, or by its first 8 KiB reading as
+UTF-8 without a NUL — is indexed, up to its first 256 KiB, the same part the
+viewer shows. A file found that way lists the words around the match under its
+name. The text is read when a file arrives, by upload, import or the SFTP
+mount, again when its bytes change, and at start for any file still without
+it. PDFs, office documents and images are not read.
+
+A sealed file is never indexed. Sealing one drops its text in the same step,
+a file in a sealed folder never gets any, and the database refuses it if
+something tries; otherwise the plaintext would sit in `diary.db` and its
+mirror beside the sealed bytes. Decrypting a file reads it again.
+
 The SFTP mount shows files beside the documents, under their own names — a
 later file that shares one is told apart by its id, `slides (42).pdf` — and
 anything copied in that is not a `.md` becomes a file in the tree, streamed to
@@ -783,7 +799,7 @@ sealed or not.
 | `GET` | `/api/sessions` | every signed-in browser, the one seen last first |
 | `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
-| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create, from a template with `template_id` |
+| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`; a file matched by its text has `in_text` and the words around the match as `excerpt`) / create, from a template with `template_id` |
 | `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete into the trash, subtree and all — or for good, for something already in it |
 | `GET`/`DELETE` | `/api/trash` | what was deleted, the last first / empty it |
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |

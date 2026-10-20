@@ -23,7 +23,7 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     routes::{
-        boards, links,
+        boards, file_text, links,
         manifest::{self, Manifest, NodeMeta},
         media,
         nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
@@ -559,6 +559,7 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
     }
 
     let report = result?;
+    file_text::refresh(&state.db, &state.config.uploads_dir()).await;
     state.backup.signal();
     Ok(report)
 }

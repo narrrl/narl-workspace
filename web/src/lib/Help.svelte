@@ -39,7 +39,7 @@
     ['b', "open this space's board"],
     ['c', "capture a card into this space's inbox, without leaving here"],
     ['Esc · q', 'close the document, and its tile when there are several'],
-    ['/', 'full-text search, inside the current space — Tab or Ctrl-N/P walk the results, Enter opens one'],
+    ['/', 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one'],
     ['n / N', 'next / previous search result, opened beside the results — :noh clears the search'],
     ['s', 'toggle sharing for the document — asks before taking it back'],
     ['y', 'mint a new share link and copy it — asks, the old one stops working'],

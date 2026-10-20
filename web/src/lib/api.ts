@@ -36,6 +36,8 @@ export interface NodeSummary {
   file: FileInfo | null
   /** Search results only: where the match sits, `work/notes`. */
   location?: string
+  /** Search results only: a file found by what it says; `excerpt` is the words around the match. */
+  in_text?: boolean
 }
 
 /** One step of a node's path, the space first and the node itself last. */

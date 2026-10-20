@@ -35,7 +35,7 @@ use crate::{
         Backup,
     },
     error::{AppError, AppResult},
-    routes::{links, media, nodes, revisions, seal, trash},
+    routes::{file_text, links, media, nodes, revisions, seal, trash},
     state::AppState,
     vault,
 };
@@ -985,6 +985,7 @@ impl SpaceFs {
             let _ = tokio::fs::remove_file(self.uploads.join(&media_id)).await;
             return Err(StatusCode::Failure);
         }
+        file_text::refresh(&self.db, &self.uploads).await;
         self.changed();
         Ok(())
     }

@@ -3,6 +3,7 @@ pub mod boards;
 pub mod capture;
 pub mod diary;
 pub mod export;
+pub mod file_text;
 pub mod import;
 pub mod inspect;
 pub mod links;
