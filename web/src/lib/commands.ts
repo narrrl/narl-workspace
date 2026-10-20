@@ -24,6 +24,9 @@ export const hooks = {
   hintRoot: (): HTMLElement | null => null,
   /* Filled in by the file pane: what Enter does there, false when nothing. */
   fileAction: (): boolean => false,
+  /* `:source`: a markdown file between rendered and raw; false when the pane
+     shows no markdown. */
+  toggleSource: (): boolean => false,
   /* `]]` / `[[` in whatever is being read; false when it has no headings. */
   jumpHeading: (_direction: 1 | -1): boolean => false,
   /* `gO`: the headings of what is on screen, read or being written, and the
@@ -761,6 +764,33 @@ export const commands: CommandSpec[] = [
     },
   },
   {
+    name: 'download',
+    aliases: ['dl'],
+    group: 'sharing',
+    help: 'download the file under the cursor, or the open one — the open document goes as :export writes it',
+    run: () =>
+      workspace.guard(async () => {
+        const node = workspace.target
+        if (!node) return workspace.say('nothing selected', 'error')
+        if (node.kind === 'document' && node.id === workspace.open?.id) return runCommand('export')
+        if (!node.file) return workspace.say(`a ${node.kind} is no file — :export! downloads everything`, 'error')
+        if (node.file.encrypted && !(await workspace.ensureUnlocked())) return
+        const anchor = document.createElement('a')
+        anchor.href = node.file.url
+        anchor.download = node.name
+        anchor.click()
+        workspace.say(`downloading ${node.name}`)
+      }),
+  },
+  {
+    name: 'source',
+    group: 'documents',
+    help: 'show an open markdown file as written, or rendered again',
+    run: () => {
+      if (!hooks.toggleSource()) workspace.say('only an open markdown file has a source to show', 'error')
+    },
+  },
+  {
     name: 'upload',
     aliases: ['up'],
     group: 'editing',
@@ -777,9 +807,10 @@ export const commands: CommandSpec[] = [
   {
     name: 'media',
     group: 'editing',
-    help: 'browse everything you have uploaded',
+    help: 'browse everything you have uploaded — j/k, i inserts it while writing, y copies its address, x deletes',
     run: () => workspace.guard(async () => {
       await workspace.loadMedia()
+      workspace.mediaCursor = 0
       workspace.overlay = 'media'
     }),
   },

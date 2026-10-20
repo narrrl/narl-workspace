@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { hooks, runCommand } from './lib/commands'
+  import { followLink, hooks, runCommand } from './lib/commands'
   import { embedSnippet } from './lib/markdown'
   import Agenda from './lib/Agenda.svelte'
   import Bar from './lib/Bar.svelte'
@@ -13,7 +13,7 @@
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
-  import MediaBrowser from './lib/MediaBrowser.svelte'
+  import MediaBrowser, { copyMedia, insertMedia, removeMedia } from './lib/MediaBrowser.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
   import SecretPrompt from './lib/SecretPrompt.svelte'
@@ -329,6 +329,48 @@
     }
   }
 
+  /** The media list's keys: j/k down the files, i inserts, y copies, x deletes. */
+  function mediaKey(event: KeyboardEvent): boolean {
+    const files = workspace.media
+    const last = Math.max(files.length - 1, 0)
+    const file = files[workspace.mediaCursor]
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        workspace.mediaCursor = Math.min(workspace.mediaCursor + 1, last)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.mediaCursor = Math.max(workspace.mediaCursor - 1, 0)
+        return true
+      case 'G':
+        workspace.mediaCursor = last
+        return true
+      case 'Enter':
+      case 'i':
+        if (file) insertMedia(file)
+        return true
+      case 'y':
+        if (file) void copyMedia(file)
+        return true
+      case 'x':
+        if (file) void removeMedia(file)
+        return true
+      default:
+        return false
+    }
+  }
+
+  /** `gx`: the file as the browser shows it, in a tab of its own. */
+  function openInTab() {
+    const file = workspace.target?.file
+    if (!file) return workspace.say('gx opens a file — put the cursor on one', 'error')
+    // A tab opened after the vault's question would be stopped as a popup, so
+    // a sealed file asks for the vault to be opened first instead.
+    if (file.encrypted && !workspace.vault?.unlocked) return workspace.say('sealed — :unlock first, then gx', 'error')
+    followLink(file.url, true)
+  }
+
   /** Alt+h / Alt+l: focus moves between the panes, out of the editor too. */
   function focusPane(pane: 'list' | 'document') {
     if (pane === 'document' && !workspace.open) return
@@ -444,6 +486,12 @@
     }
     if (workspace.overlay === 'agenda' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (agendaKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
+    if (workspace.overlay === 'media' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (mediaKey(event)) {
         event.preventDefault()
         return
       }
@@ -584,6 +632,11 @@
     if (previous === 'g' && key === 'O') {
       event.preventDefault()
       void runCommand('outline')
+      return
+    }
+    if (previous === 'g' && key === 'x') {
+      event.preventDefault()
+      openInTab()
       return
     }
     if (previous === 'd' && key === 'd') {

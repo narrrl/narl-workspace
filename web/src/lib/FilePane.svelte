@@ -86,13 +86,20 @@
       return cert?.act() ?? false
     }
     const hints = () => reader ?? null
+    const flip = () => {
+      if (kind !== 'markdown' || text === null) return false
+      source = !source
+      return true
+    }
     hooks.scrollReader = scroll
     hooks.fileAction = act
     hooks.hintRoot = hints
+    hooks.toggleSource = flip
     return () => {
       if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
       if (hooks.fileAction === act) hooks.fileAction = () => false
       if (hooks.hintRoot === hints) hooks.hintRoot = () => null
+      if (hooks.toggleSource === flip) hooks.toggleSource = () => false
     }
   })
 

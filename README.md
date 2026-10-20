@@ -79,6 +79,7 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
+| `gx` | open the file under the cursor in a tab of its own |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
@@ -247,6 +248,10 @@ or a crash leaves in `uploads/`. That runs at start and once a day. A file in
 the tree is never one of them: it is deleted from its folder, not from
 `:media`.
 
+`:media` lists every upload: `j`/`k` walk it, `i` or `Enter` embeds the
+highlighted one at the cursor while writing, `y` copies its address and `x`
+deletes it, asking first.
+
 ## Files
 
 A file is a node like a document, only with bytes instead of text: it sits in
@@ -257,7 +262,7 @@ place:
 - PDFs, in the browser's own viewer;
 - text and source code of any kind, recognised by its name or, failing that, by
   its first few kilobytes, with line numbers and the first 256 KiB of it;
-- markdown, rendered, with `source` to see it as written;
+- markdown, rendered, with `source` (or `:source`) to see it as written;
 - CSV and TSV, as a table of the first 500 rows;
 - certificates, keys and keystores — `.pem`, `.crt`, `.cer`, `.der`, `.csr`,
   `.key`, `.p8`, `.p12`, `.pfx` — read on the server: subject, issuer,
@@ -266,7 +271,8 @@ place:
   it for that one look and is never stored. Nothing of a private key is ever
   sent back but its algorithm and size.
 
-Anything else is a download. `:name`
+Anything else is a download: `:download` (`:dl`) fetches the file under the
+cursor, and `gx` opens one in a tab of its own as the browser shows it. `:name`
 renames it, and the download is called whatever it is called now; `:mv`, `m`
 and `p` move it; `x` deletes it. `:upload` picks files for the folder being
 browsed, or drop them onto the list. Each upload is written to disk as it

@@ -133,6 +133,7 @@ class Workspace {
   /** The vault, as last heard from the server; null until asked. */
   vault = $state<VaultStatus | null>(null)
   media = $state<MediaFile[]>([])
+  mediaCursor = $state(0)
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
