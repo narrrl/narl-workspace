@@ -311,6 +311,42 @@ impl Config {
     }
 }
 
+#[cfg(test)]
+impl Config {
+    /// A configuration with nothing switched on, for tests.
+    pub fn for_tests(session_days: i64) -> Self {
+        Self {
+            username: "narl".into(),
+            password: "hunter2".into(),
+            secret: b"a-secret-of-at-least-16-bytes".to_vec(),
+            bind: "127.0.0.1:0".parse().unwrap(),
+            data_dir: ".".into(),
+            session_days,
+            max_upload_bytes: 1,
+            secure_cookie: false,
+            vault_idle: std::time::Duration::from_secs(60),
+            backup: BackupConfig {
+                device_name: "narl-diary".into(),
+                interval: None,
+                debounce: std::time::Duration::from_secs(0),
+                prune: false,
+                session_key_file: None,
+            },
+            mail: MailConfig {
+                url: None,
+                from: String::new(),
+                to: String::new(),
+                timezone: chrono_tz::UTC,
+                reminder_at: None,
+                card_due_at: None,
+                digest_at: None,
+                kinds: Vec::new(),
+            },
+            sftp: SftpConfig { bind: None },
+        }
+    }
+}
+
 impl MailConfig {
     fn from_env() -> Result<Self> {
         let url = var("SMTP_URL");

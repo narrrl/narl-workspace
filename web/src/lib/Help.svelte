@@ -41,6 +41,7 @@
     ['rule', 'the first list is the inbox, the last list is done'],
     ['h / l', 'to the list left / right'],
     ['j / k', 'down / up the cards'],
+    ['gg / G', 'first / last card of the list'],
     ['J / K', 'move the card down / up its list'],
     ['H / L', 'move the card to the list left / right'],
     ['Space', 'into the done list, or back out to the inbox'],
@@ -49,8 +50,17 @@
     ['D', 'due date: fri, tm, +3d, 10-31 …'],
     ['R', 'rename the card, or the list when it is empty'],
     ['z', 'show done cards older than a week'],
+    ['r', 'read the board again, for changes made elsewhere'],
     ['x · dd', 'delete the card (asks y/N)'],
     ['q · Esc', 'back to the tree'],
+  ]
+
+  const agendaKeys: [string, string][] = [
+    ['j / k', 'down / up the cards'],
+    ['Enter', 'to the card, on its own board'],
+    ['Space', 'done, where it stands'],
+    ['T', "today's diary entry"],
+    ['t · q · Esc', 'close the agenda'],
   ]
 
   const titles: Record<Group, string> = {
@@ -93,6 +103,16 @@
       <h2>board keys</h2>
       <dl>
         {#each boardKeys as [key, description] (key)}
+          <dt>{key}</dt>
+          <dd>{description}</dd>
+        {/each}
+      </dl>
+    </section>
+
+    <section class="keys">
+      <h2>agenda keys</h2>
+      <dl>
+        {#each agendaKeys as [key, description] (key)}
           <dt>{key}</dt>
           <dd>{description}</dd>
         {/each}

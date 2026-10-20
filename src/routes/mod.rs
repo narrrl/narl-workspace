@@ -89,3 +89,117 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/ssh-keys/{id}", delete(ssh_keys::remove))
         .layer(DefaultBodyLimit::max(JSON_LIMIT))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicI64, Arc};
+
+    use axum::{body::Body, http::Request};
+    use regex::Regex;
+    use tower::ServiceExt;
+
+    use crate::{backup::Backup, config::Config, notify::Notifier, state::AppState, vault::Vault};
+
+    /// The routes that answer someone who has not logged in: to log in, to
+    /// say the server is up, and the share links, which carry their own key.
+    const PUBLIC: &[&str] = &[
+        "/health",
+        "/login",
+        "/logout",
+        "/share/{token}/{key}",
+        "/share/{token}/{key}/media/{id}",
+    ];
+
+    async fn state() -> AppState {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let config = Arc::new(Config::for_tests(30));
+        AppState {
+            vault: Vault::new(db.clone(), config.vault_idle),
+            backup: Backup::unavailable(db.clone(), Arc::clone(&config), "tests".into()),
+            notify: Notifier::new(db.clone(), Arc::clone(&config)).unwrap(),
+            login_throttle: Arc::default(),
+            vault_throttle: Arc::default(),
+            epoch: Arc::new(AtomicI64::new(0)),
+            config,
+            db,
+        }
+    }
+
+    /// Every route this file registers, read from the file itself, so a
+    /// route added later is covered without anyone remembering to.
+    fn routes() -> Vec<(String, String)> {
+        let path = Regex::new(r#"^\s*"([^"]+)""#).unwrap();
+        let method = Regex::new(r"\b(get|post|put|delete)\(").unwrap();
+        let source = include_str!("mod.rs");
+        let source = &source[..source.find("#[cfg(test)]").unwrap()];
+        let mut found = Vec::new();
+        // `.route(...)` up to its matching bracket, however rustfmt wrapped it.
+        for (at, _) in source.match_indices(".route(") {
+            let rest = &source[at + ".route(".len()..];
+            let mut depth = 1;
+            let close = rest
+                .char_indices()
+                .find(|&(_, c)| {
+                    depth += match c {
+                        '(' => 1,
+                        ')' => -1,
+                        _ => 0,
+                    };
+                    depth == 0
+                })
+                .map(|(i, _)| i)
+                .unwrap();
+            let call = &rest[..close];
+            let Some(caps) = path.captures(call) else {
+                continue;
+            };
+            for m in method.captures_iter(call) {
+                found.push((m[1].to_uppercase(), caps[1].to_string()));
+            }
+        }
+        found
+    }
+
+    #[tokio::test]
+    async fn every_route_but_the_public_ones_wants_a_session() {
+        let routes = routes();
+        assert!(
+            routes.len() > 40,
+            "the route table was not read: {routes:?}"
+        );
+        let app = super::api_router(1024 * 1024).with_state(state().await);
+
+        for (method, path) in routes {
+            let uri = path
+                .replace("{id}", "1")
+                .replace("{token}", "t")
+                .replace("{key}", "k");
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method.as_str())
+                        .uri(&uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            if PUBLIC.contains(&path.as_str()) {
+                assert_ne!(status, 401, "{method} {path} is public and answered 401");
+            } else {
+                assert_eq!(
+                    status, 401,
+                    "{method} {path} answered {status} without a session"
+                );
+            }
+        }
+    }
+}

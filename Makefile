@@ -9,13 +9,14 @@ dev-web:
 
 # Everything, as one self-contained release binary at target/release/narl-workspace.
 build:
-	cd web && bun install && bun run build
+	cd web && bun install --frozen-lockfile && bun run build
 	cargo build --release
 
 run: build
 	./target/release/narl-workspace
 
 check:
+	cargo fmt --check
 	cargo clippy --all-targets -- -D warnings
 	cargo test
 	cd web && bun run check

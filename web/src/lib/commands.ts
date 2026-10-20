@@ -387,7 +387,6 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'today',
-    aliases: ['t'],
     group: 'documents',
     help: "open today's diary entry, starting one if there is none yet",
     run: async () => {

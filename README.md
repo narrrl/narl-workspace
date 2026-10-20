@@ -63,18 +63,26 @@ it; in the document pane it is that document. In the browse pane:
 
 | key | action |
 | --- | --- |
-| `j` / `k` | move down / up |
-| `gg` / `G` | first / last entry |
+| `1` … `9`, `0` | switch to that space |
+| `Shift-1` … `9` | send the marked or selected node to that space |
+| `Tab`, `Shift-Tab` | next / previous space |
+| `w` | overview of every space; `hjkl` then `Enter` |
+| `f` | fullscreen the focused pane |
+| `Alt-h` / `Alt-l` | focus the list / the document, from the editor too |
+| `j` / `k` | move down / up, or scroll the document when it has focus |
+| `gg` / `G` | first / last entry, or top / bottom of the document |
+| `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `Enter`, `l` | open the highlighted entry |
 | `o` | a new document here, straight into insert mode |
 | `O` | a new folder here |
 | `i`, `a` | edit the open entry |
-| `R` | rename what is highlighted — document, folder or space |
+| `R` | rename what is highlighted — a document, a folder or a file (`:name!` renames the space) |
+| `m` / `p` | pick a node up, then drop it into the folder you walk to |
 | `b` | the board of this space |
 | `t` | the agenda: what is late, due this week, or in hand, on every board |
 | `T` | today's diary entry, started if there is none |
 | `c` | capture a card into this space's inbox without leaving where you are |
-| `Esc`, `q` | back out to the document |
+| `Esc`, `q` | close the document |
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`n` clears it) |
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
@@ -88,7 +96,13 @@ Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:w`, `:wq`, `:q!`, `:new [yyyy-mm-dd]`, `:date`, `:name`, `:share`, `:link`,
 `:upload`, `:media`, `:search`, `:backup` and
-`:set novim`. The tree has its own: `:space [name]` switches (`:space! <name>`
+`:set novim`. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
+opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
+list, `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
+`:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words
+and lines, `:search!` searches every space, `:set clipboard` / `:set
+noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
+session and `:logout!` every session. The tree has its own: `:space [name]` switches (`:space! <name>`
 makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
@@ -108,12 +122,35 @@ has today's entry, an upload into the folder, a search across every space,
 and on the board the card moves, renames and deletes; the agenda has a done
 button per card.
 
+## The SFTP mount
+
+The workspace can be mounted as a filesystem over SFTP, so an editor or a file
+manager on another machine works on it directly. It is off until
+`WORKSPACE_SFTP_BIND` is set (`127.0.0.1:2222`, or `0.0.0.0:2222` inside a
+container, with the port published in `compose.override.yml`). Only public
+keys get in, and only the ones registered from inside the workspace:
+
+```text
+:sshkey add laptop ssh-ed25519 AAAA… you@laptop
+:sshkey              lists them, with their fingerprints
+:sshkey rm laptop    and this one is out, mounted or not
+```
+
+```sh
+sshfs -p 2222 me@your-host:/ ~/workspace     # the user name is ignored
+```
+
+The root holds the spaces, `mkdir` there makes one, and anywhere else a
+folder. A document is `<slug>.md`, read as `# Title` followed by its body, and a
+leading heading written back renames it. The server's host key is made on first
+start as `sftp_host_key` in the data directory.
+
 ## Boards
 
-`b`, the `board` button above the list, or `:board` swaps the tree for the board
+`b`, the board door on the rail, or `:board` swaps the tree for the board
 of the space being browsed, and swaps it back. Every space has one except the
 diary — a journal has no backlog — and `:set board` / `:set noboard` changes
-that for the space you are in (the `+board` button above the list does the
+that for the space you are in (the dimmed board door on the rail does the
 same). A new board starts with `backlog`, `doing` and `done`, and the columns mean
 something by where they stand rather than by their names: the first is the
 inbox new cards land in, the last is done. A card is finished exactly when it
@@ -492,7 +529,14 @@ sealed or not.
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |
 | `GET`/`POST` | `/api/media` | list / upload (multipart) |
-| `GET`/`DELETE` | `/api/media/{id}` | serve / delete a file |
+| `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
+| `GET` | `/api/spaces/overview` | every space with what was last written in it |
+| `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
+| `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or every file under a folder, or take it out |
+| `GET`/`POST`/`PUT` | `/api/vault` | status / set the password once / change it |
+| `POST` | `/api/vault/unlock`, `/api/vault/lock` | open / close the vault |
+| `GET`/`POST` | `/api/ssh-keys` | the keys that may mount over SFTP / add one |
+| `DELETE` | `/api/ssh-keys/{id}` | remove a key, which ends its mounts |
 | `GET` | `/api/share/{token}/{key}` | public: read a shared document |
 | `GET` | `/api/share/{token}/{key}/media/{id}` | public: media inside a shared document |
 
