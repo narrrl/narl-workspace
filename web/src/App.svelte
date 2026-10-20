@@ -307,6 +307,17 @@
       case ' ':
         if (card) void workspace.guard(() => workspace.finishCard(card))
         return true
+      case 'D':
+        // The agenda stays up behind the line, so `:due` knows which card.
+        if (card) {
+          cmdGlobal = false
+          cmdline = ':due '
+        }
+        return true
+      case 'H':
+      case 'L':
+        if (card) void workspace.guard(() => workspace.sendAgendaCard(card, event.key === 'H' ? -1 : 1))
+        return true
       case 'T':
         workspace.overlay = 'none'
         void runCommand('today')
@@ -526,25 +537,27 @@
       return
     }
 
-    if (workspace.overlay === 'overview' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    // The command line over an overlay — `D` in the agenda — keeps its keys.
+    const listening = cmdline === null && !isTypingTarget(event.target)
+    if (workspace.overlay === 'overview' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (overviewKey(event)) {
         event.preventDefault()
         return
       }
     }
-    if (workspace.overlay === 'agenda' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (workspace.overlay === 'agenda' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (agendaKey(event)) {
         event.preventDefault()
         return
       }
     }
-    if (workspace.overlay === 'media' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (workspace.overlay === 'media' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (mediaKey(event)) {
         event.preventDefault()
         return
       }
     }
-    if (workspace.overlay === 'outline' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (workspace.overlay === 'outline' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (outlineKey(event)) {
         event.preventDefault()
         return
@@ -567,7 +580,7 @@
       }
     }
 
-    if (workspace.overlay !== 'none') {
+    if (workspace.overlay !== 'none' && listening) {
       if (event.key === 'q' || event.key === '?') {
         event.preventDefault()
         workspace.overlay = 'none'

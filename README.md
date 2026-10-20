@@ -230,7 +230,8 @@ file is refused.
 due within the week, or sitting in a column between the inbox and done — the
 work already in hand — and says whether the diary has an entry for today. `j`/`k`
 walk it, `Enter` goes to the card on its own board, `Space` finishes it where
-it stands, and `T` writes today's entry. The bar shows `late` and `today` counts
+it stands, `D` sets its due date (`:due` on the line), `H` / `L` send it to
+the list left / right on its board, and `T` writes today's entry. The bar shows `late` and `today` counts
 whenever either is above zero, and the agenda opens by itself once a day when
 something is late or due, so nothing has to be remembered to be looked at.
 

@@ -87,6 +87,10 @@
     <span class="gap"></span>
     <span class="kbd">␣</span> done
     <span class="gap"></span>
+    <span class="kbd">D</span> due
+    <span class="gap"></span>
+    <span class="kbd">H</span><span class="kbd">L</span> list
+    <span class="gap"></span>
     <span class="kbd">T</span> diary
     <span class="gap"></span>
     <span class="kbd">t</span><span class="kbd">esc</span> close

@@ -1160,6 +1160,35 @@ class Workspace {
     this.say(`done: ${card.title}`)
   }
 
+  /** `:due` with the agenda up: the highlighted card's date, on its own board. */
+  async dueAgendaCard(due_at: number | null) {
+    const card = this.agendaCards[this.agendaCursor]
+    if (!card) return this.say('no card highlighted', 'error')
+    await api.updateCard(card.id, { due_at })
+    await this.loadAgenda()
+    // It may have changed group; the cursor goes with it.
+    const at = this.agendaCards.findIndex((c) => c.id === card.id)
+    if (at >= 0) this.agendaCursor = at
+    if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
+  }
+
+  /**
+   * `H` / `L` in the agenda: the card to the list left or right of the one it
+   * is in, without going to the board — `L` on the last list but one is done.
+   */
+  async sendAgendaCard(card: AgendaCard, delta: number) {
+    const lists = (await api.board(card.space_id)).lists
+    const from = lists.findIndex((list) => list.id === card.list_id)
+    const target = lists[from + delta]
+    if (from < 0 || !target) return this.say(`${card.title} is already in the ${delta < 0 ? 'first' : 'last'} list`, 'error')
+    await api.moveCard(card.id, target.id, target.cards.length)
+    await this.loadAgenda()
+    const at = this.agendaCards.findIndex((c) => c.id === card.id)
+    if (at >= 0) this.agendaCursor = at
+    if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
+    this.say(from + delta === lists.length - 1 ? `done: ${card.title}` : `"${card.title}" → ${target.name}`)
+  }
+
   async loadOverview() {
     this.overview = await api.overview()
   }

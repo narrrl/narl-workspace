@@ -70,6 +70,8 @@
     ['j / k', 'down / up the cards'],
     ['Enter', 'to the card, on its own board'],
     ['Space', 'done, where it stands'],
+    ['D', 'due date: fri, tm, +3d … — :due on the line'],
+    ['H / L', 'to the list left / right on its board'],
     ['T', "today's diary entry"],
     ['t · q · Esc', 'close the agenda'],
   ]

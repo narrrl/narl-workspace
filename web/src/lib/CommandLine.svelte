@@ -241,7 +241,8 @@
     left: calc(var(--frame) + 12px);
     right: calc(var(--rail-w) + 12px);
     bottom: calc(var(--status-h) - 1px);
-    z-index: 20;
+    /* Above the overlays, so `D` in the agenda can ask for a date. */
+    z-index: 35;
     display: flex;
     flex-direction: column;
     background: color-mix(in oklab, var(--hull) 97%, transparent);

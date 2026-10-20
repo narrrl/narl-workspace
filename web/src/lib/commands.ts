@@ -425,17 +425,18 @@ export const commands: CommandSpec[] = [
     name: 'due',
     args: '<when|->',
     group: 'board',
-    help: 'due date of the card: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
+    help: 'due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
     complete: () => ['today', 'tm', 'fri', '+3d'],
     run: async (arg) => {
-      if (workspace.view !== 'board') return workspace.say('no board open — :board', 'error')
+      const agenda = workspace.overlay === 'agenda'
+      if (workspace.view !== 'board' && !agenda) return workspace.say('no board open — :board', 'error')
+      const set = (due_at: number | null) =>
+        agenda ? workspace.dueAgendaCard(due_at) : workspace.patchCard({ due_at })
       const target = arg.trim()
-      if (target === '-' || target === '') {
-        return workspace.guard(() => workspace.patchCard({ due_at: null }))
-      }
+      if (target === '-' || target === '') return workspace.guard(() => set(null))
       const at = parseDue(target)
       if (at === null) return workspace.say(`not a date: ${target} — try fri, +3d or 2026-09-30`, 'error')
-      await workspace.guard(() => workspace.patchCard({ due_at: at }))
+      await workspace.guard(() => set(at))
       workspace.say(`due ${formatDay(at)}`)
     },
   },
