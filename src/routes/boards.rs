@@ -22,6 +22,7 @@ use axum::{
 };
 use std::collections::HashMap;
 
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
@@ -31,6 +32,7 @@ use crate::{
     routes::{
         manifest::ListMeta,
         nodes::{DOCUMENT, SPACE},
+        repeat::Repeat,
     },
     state::AppState,
 };
@@ -66,6 +68,8 @@ pub struct Card {
     pub node_name: Option<String>,
     pub due_at: Option<i64>,
     pub done_at: Option<i64>,
+    /// The rule it comes back by once finished, as `Repeat::name` writes it.
+    pub repeat: Option<String>,
     pub position: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -101,7 +105,18 @@ pub struct CardPatch {
     pub node_id: Option<Option<i64>>,
     #[serde(default, deserialize_with = "double_option")]
     pub due_at: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub repeat: Option<Option<String>>,
     pub done: Option<bool>,
+}
+
+/// What a move or an edit answers with: the card, and the one it left in the
+/// inbox when it was a repeating card that has just been finished.
+#[derive(Serialize)]
+pub struct Moved {
+    #[serde(flatten)]
+    pub card: Card,
+    pub again: Option<Card>,
 }
 
 fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -190,7 +205,7 @@ async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard
              FROM board_lists GROUP BY space_id
          )
          SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.position, c.created_at, c.updated_at,
+                c.repeat, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name,
                 s.id AS space_id, s.slug AS space_slug, l.name AS list_name,
                 l.position = b.first AS is_first
@@ -263,6 +278,7 @@ fn row_to_card(row: &sqlx::sqlite::SqliteRow) -> Card {
         node_name: row.get("node_name"),
         due_at: row.get("due_at"),
         done_at: row.get("done_at"),
+        repeat: row.get("repeat"),
         position: row.get("position"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
@@ -429,9 +445,9 @@ pub(crate) async fn restore(
         .await?;
         for card in &list.cards {
             sqlx::query(
-                "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, position,
-                                    created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, repeat,
+                                    position, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
             .bind(id)
             .bind(card.document.as_ref().and_then(|path| documents.get(path)))
@@ -439,6 +455,14 @@ pub(crate) async fn restore(
             .bind(&card.body)
             .bind(card.due_at)
             .bind(card.done_at)
+            // A rule this build cannot read is dropped rather than kept as
+            // text nothing would ever act on.
+            .bind(
+                card.repeat
+                    .as_deref()
+                    .and_then(Repeat::parse)
+                    .map(Repeat::name),
+            )
             .bind(position)
             .bind(card.created_at)
             .bind(card.updated_at)
@@ -493,7 +517,7 @@ async fn load(state: &AppState, space_id: i64, space_name: String) -> AppResult<
     // is small, and the round trips are what would be felt.
     let card_rows = sqlx::query(
         "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.position, c.created_at, c.updated_at,
+                c.repeat, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
          FROM cards c
          JOIN board_lists l ON l.id = c.list_id
@@ -738,7 +762,7 @@ pub async fn update_card(
     State(state): State<AppState>,
     Path(card_id): Path<i64>,
     Json(patch): Json<CardPatch>,
-) -> AppResult<Json<Card>> {
+) -> AppResult<Json<Moved>> {
     let current = card(&state.db, card_id).await?;
     let now = crate::now();
 
@@ -752,12 +776,51 @@ pub async fn update_card(
     if let Some(node_id) = patch.node_id {
         linkable(&state.db, node_id).await?;
     }
+    let repeat = match patch.repeat {
+        Some(Some(rule)) => Some(
+            Repeat::parse(&rule)
+                .ok_or_else(|| {
+                    AppError::BadRequest(format!(
+                        "not a rule: {} — try daily, weekly, monthly, yearly or +2w",
+                        rule.trim()
+                    ))
+                })?
+                .name(),
+        ),
+        Some(None) => None,
+        None => current.repeat.clone(),
+    };
 
     let mut tx = crate::db::begin_write(&state.db).await?;
+    sqlx::query(
+        "UPDATE cards SET title = ?1, body = ?2, node_id = ?3, due_at = ?4, repeat = ?5,
+                          updated_at = ?6
+         WHERE id = ?7",
+    )
+    .bind(&title)
+    .bind(patch.body.as_ref().unwrap_or(&current.body))
+    .bind(patch.node_id.unwrap_or(current.node_id))
+    .bind(patch.due_at.unwrap_or(current.due_at))
+    .bind(&repeat)
+    .bind(now)
+    .bind(card_id)
+    .execute(&mut *tx)
+    .await?;
+    // The move below sees the card as it is now, so a card given its rule
+    // and finished in one request comes back by that rule.
+    let current = Card {
+        title,
+        body: patch.body.unwrap_or(current.body),
+        node_id: patch.node_id.unwrap_or(current.node_id),
+        due_at: patch.due_at.unwrap_or(current.due_at),
+        repeat,
+        ..current
+    };
 
     // `done` is where the card stands, not a flag beside it: finishing a card
     // moves it into the last list, reopening one moves it back to the first,
     // and the stamp follows from the move as it does for any other.
+    let mut again = None;
     if let Some(done) = patch.done.filter(|&done| done != current.done_at.is_some()) {
         let space_id = list_space(&state.db, current.list_id).await?;
         let lists: Vec<i64> = sqlx::query_scalar(
@@ -775,25 +838,21 @@ pub async fn update_card(
             ));
         }
         let to = if done { last } else { first };
-        relocate(&mut tx, &current, to, last, None, now).await?;
+        again = relocate(
+            &mut tx,
+            &current,
+            to,
+            last,
+            None,
+            state.config.mail.timezone,
+            now,
+        )
+        .await?;
     }
-
-    sqlx::query(
-        "UPDATE cards SET title = ?1, body = ?2, node_id = ?3, due_at = ?4, updated_at = ?5
-         WHERE id = ?6",
-    )
-    .bind(&title)
-    .bind(patch.body.unwrap_or(current.body))
-    .bind(patch.node_id.unwrap_or(current.node_id))
-    .bind(patch.due_at.unwrap_or(current.due_at))
-    .bind(now)
-    .bind(card_id)
-    .execute(&mut *tx)
-    .await?;
     tx.commit().await?;
 
     state.backup.signal();
-    card(&state.db, card_id).await.map(Json)
+    moved(&state.db, card_id, again).await.map(Json)
 }
 
 pub async fn remove_card(
@@ -822,7 +881,7 @@ pub async fn move_card(
     State(state): State<AppState>,
     Path(card_id): Path<i64>,
     Json(input): Json<MoveInput>,
-) -> AppResult<Json<Card>> {
+) -> AppResult<Json<Moved>> {
     let current = card(&state.db, card_id).await?;
     let from = list_space(&state.db, current.list_id).await?;
     let to = list_space(&state.db, input.list_id).await?;
@@ -839,25 +898,51 @@ pub async fn move_card(
     let last = last_list(&mut *tx, to)
         .await?
         .map_or(input.list_id, |(id, _)| id);
-    relocate(&mut tx, &current, input.list_id, last, input.position, now).await?;
+    let tz = state.config.mail.timezone;
+    let again = relocate(
+        &mut tx,
+        &current,
+        input.list_id,
+        last,
+        input.position,
+        tz,
+        now,
+    )
+    .await?;
     tx.commit().await?;
 
     state.backup.signal();
-    card(&state.db, card_id).await.map(Json)
+    moved(&state.db, card_id, again).await.map(Json)
+}
+
+async fn moved(db: &SqlitePool, id: i64, again: Option<i64>) -> AppResult<Moved> {
+    Ok(Moved {
+        card: card(db, id).await?,
+        again: match again {
+            Some(again) => Some(card(db, again).await?),
+            None => None,
+        },
+    })
 }
 
 /// Put a card on `to` at `position` (the end, if none), stamping or clearing
-/// its done time by where it lands, and close the ranks of both lists.
+/// its done time by where it lands, and close the ranks of both lists. A
+/// repeating card that this finishes comes back: the id is of its copy.
 async fn relocate(
     db: &mut SqliteConnection,
     current: &Card,
     to: i64,
     last: i64,
     position: Option<i64>,
+    tz: Tz,
     now: i64,
-) -> AppResult<()> {
+) -> AppResult<Option<i64>> {
     let card_id = current.id;
     let done_at = done_after_move(current.list_id, to, last, current.done_at, now);
+    let again = match current.done_at.is_none() && done_at.is_some() {
+        true => come_back(&mut *db, current, tz, now).await?,
+        false => None,
+    };
 
     sqlx::query("UPDATE cards SET list_id = ?1, done_at = ?2, updated_at = ?3 WHERE id = ?4")
         .bind(to)
@@ -898,13 +983,65 @@ async fn relocate(
                 .await?;
         }
     }
-    Ok(())
+    Ok(again)
+}
+
+/// The next one of a repeating card that has just been finished, at the
+/// bottom of its board's inbox: the same title, notes, document and rule,
+/// due on the rule's next date from today on. A card without a date counts
+/// from the moment it was finished. The finished card gives its rule up, so
+/// taking it out of done and finishing it again leaves no second copy.
+async fn come_back(
+    db: &mut SqliteConnection,
+    card: &Card,
+    tz: Tz,
+    now: i64,
+) -> AppResult<Option<i64>> {
+    let Some(rule) = card.repeat.as_deref().and_then(Repeat::parse) else {
+        return Ok(None);
+    };
+    let today = crate::notify::day_bounds(tz, crate::notify::local_day(tz, now)).0;
+    let Some(due_at) = rule.next(tz, card.due_at.unwrap_or(now), today) else {
+        return Ok(None);
+    };
+
+    let inbox: i64 = sqlx::query_scalar(
+        "SELECT id FROM board_lists
+         WHERE space_id = (SELECT space_id FROM board_lists WHERE id = ?1)
+         ORDER BY position, id LIMIT 1",
+    )
+    .bind(card.list_id)
+    .fetch_one(&mut *db)
+    .await?;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO cards (list_id, node_id, title, body, due_at, repeat, position,
+                            created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+                 (SELECT COALESCE(MAX(position), -1) + 1 FROM cards WHERE list_id = ?1),
+                 ?7, ?7)
+         RETURNING id",
+    )
+    .bind(inbox)
+    .bind(card.node_id)
+    .bind(&card.title)
+    .bind(&card.body)
+    .bind(due_at)
+    .bind(rule.name())
+    .bind(now)
+    .fetch_one(&mut *db)
+    .await?;
+
+    sqlx::query("UPDATE cards SET repeat = NULL WHERE id = ?1")
+        .bind(card.id)
+        .execute(&mut *db)
+        .await?;
+    Ok(Some(id))
 }
 
 async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
     let row = sqlx::query(
         "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.position, c.created_at, c.updated_at,
+                c.repeat, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
          FROM cards c WHERE c.id = ?1",
     )
@@ -918,7 +1055,178 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::{agenda_cards, card, done_after_move, relocate, reordered, settle};
+    use super::{agenda_cards, card, done_after_move, relocate, reordered, restore, settle};
+    use crate::routes::manifest::{CardMeta, ListMeta};
+    use std::collections::HashMap;
+
+    /// A space with a board of `inbox`, `doing`, `done` on a fresh database.
+    async fn board() -> (sqlx::SqlitePool, i64, Vec<i64>) {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let space: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, body, has_board, created_at, updated_at)
+             VALUES (NULL, 'space', 'job', 'job', '', 1, 0, 0) RETURNING id",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let mut lists = Vec::new();
+        for (position, name) in ["inbox", "doing", "done"].iter().enumerate() {
+            let id: i64 = sqlx::query_scalar(
+                "INSERT INTO board_lists (space_id, name, position, created_at)
+                 VALUES (?1, ?2, ?3, 0) RETURNING id",
+            )
+            .bind(space)
+            .bind(name)
+            .bind(position as i64)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+            lists.push(id);
+        }
+        (db, space, lists)
+    }
+
+    async fn finish(db: &sqlx::SqlitePool, id: i64, to: i64, last: i64, now: i64) -> Option<i64> {
+        let current = card(db, id).await.unwrap();
+        let mut conn = db.acquire().await.unwrap();
+        relocate(&mut conn, &current, to, last, None, chrono_tz::UTC, now)
+            .await
+            .unwrap()
+    }
+
+    /// Finishing a weekly card leaves next week's in the inbox, once: the
+    /// finished one gives its rule up, so reopening it and finishing it again
+    /// makes nothing new.
+    #[tokio::test]
+    async fn a_repeating_card_comes_back_once() {
+        let (db, _, lists) = board().await;
+        let (inbox, doing, done) = (lists[0], lists[1], lists[2]);
+        let day = 86400;
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO cards (list_id, title, body, due_at, repeat, position, created_at, updated_at)
+             VALUES (?1, 'water the plants', 'the big one too', ?2, 'weekly', 0, 0, 0) RETURNING id",
+        )
+        .bind(doing)
+        .bind(10 * day + 12 * 3600)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+
+        // Finished on day 11, a day late: back on day 17, a week after it was due.
+        let again = finish(&db, id, done, done, 11 * day).await.expect("a copy");
+        let copy = card(&db, again).await.unwrap();
+        assert_eq!(copy.list_id, inbox);
+        assert_eq!(copy.title, "water the plants");
+        assert_eq!(copy.body, "the big one too");
+        assert_eq!(copy.due_at, Some(17 * day + 12 * 3600));
+        assert_eq!(copy.repeat.as_deref(), Some("weekly"));
+        assert_eq!(copy.done_at, None);
+        assert_eq!(card(&db, id).await.unwrap().repeat, None);
+
+        assert_eq!(finish(&db, id, inbox, done, 12 * day).await, None);
+        assert_eq!(finish(&db, id, done, done, 12 * day).await, None);
+        let cards: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(cards, 2);
+
+        // Weeks late, it comes back on the first of its days from today on.
+        assert_eq!(
+            card(&db, finish(&db, again, done, done, 40 * day).await.unwrap())
+                .await
+                .unwrap()
+                .due_at,
+            Some(45 * day + 12 * 3600)
+        );
+    }
+
+    /// A card without a rule, or one moved between open lists, stays one card.
+    #[tokio::test]
+    async fn only_finishing_a_repeating_card_makes_a_copy() {
+        let (db, _, lists) = board().await;
+        let (inbox, doing, done) = (lists[0], lists[1], lists[2]);
+        let insert = |repeat: Option<&'static str>| {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO cards (list_id, title, due_at, repeat, position, created_at, updated_at)
+                     VALUES (?1, 'c', 0, ?2, 0, 0, 0) RETURNING id",
+                )
+                .bind(inbox)
+                .bind(repeat)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+        let plain = insert(None).await;
+        assert_eq!(finish(&db, plain, done, done, 100).await, None);
+        let weekly = insert(Some("weekly")).await;
+        assert_eq!(finish(&db, weekly, doing, done, 100).await, None);
+        assert_eq!(
+            card(&db, weekly).await.unwrap().repeat.as_deref(),
+            Some("weekly")
+        );
+    }
+
+    /// An export carries the rule, and an import puts it back — a rule it
+    /// cannot read is dropped rather than stored.
+    #[tokio::test]
+    async fn an_import_keeps_the_rule() {
+        let (db, space, lists) = board().await;
+        let meta = |title: &str, repeat: Option<&str>| CardMeta {
+            title: title.into(),
+            body: String::new(),
+            due_at: Some(0),
+            done_at: None,
+            repeat: repeat.map(String::from),
+            created_at: 0,
+            updated_at: 0,
+            document: None,
+        };
+        let manifest = vec![ListMeta {
+            name: "inbox".into(),
+            cards: vec![
+                meta("rent", Some("+1m")),
+                meta("odd", Some("sometimes")),
+                meta("once", None),
+            ],
+        }];
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(json.contains(r#""repeat":"+1m""#));
+        assert_eq!(
+            json.matches("repeat").count(),
+            2,
+            "absent when there is none"
+        );
+        let manifest: Vec<ListMeta> = serde_json::from_str(&json).unwrap();
+
+        let mut conn = db.acquire().await.unwrap();
+        restore(&mut conn, space, &manifest, &HashMap::new())
+            .await
+            .unwrap();
+        drop(conn);
+        let rules: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT title, repeat FROM cards WHERE list_id = ?1 ORDER BY position")
+                .bind(lists[0])
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(
+            rules,
+            vec![
+                ("rent".into(), Some("monthly".into())),
+                ("odd".into(), None),
+                ("once".into(), None)
+            ]
+        );
+    }
 
     /// The agenda asks for what is due soon or in hand, and never for what is
     /// finished, parked in the inbox without a date, or due far off.
@@ -1036,7 +1344,7 @@ mod tests {
 
         let current = card(&db, id).await.unwrap();
         let mut conn = db.acquire().await.unwrap();
-        relocate(&mut conn, &current, done, done, None, 100)
+        relocate(&mut conn, &current, done, done, None, chrono_tz::UTC, 100)
             .await
             .unwrap();
         drop(conn);

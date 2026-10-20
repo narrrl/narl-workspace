@@ -45,6 +45,7 @@
           { icon: 'check', label: 'Done, or back to the inbox', keys: ['Space'], run: () => workspace.guard(() => workspace.toggleDone()), dim: !card },
           { icon: 'right', label: 'Send the card right', keys: ['L'], run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
           { icon: 'calendar', label: 'Due date', keys: ['D'], run: () => hooks.openCommandLine(':due '), dim: !card },
+          { icon: 'repeat', label: 'Repeat once done', keys: [':repeat'], run: () => hooks.openCommandLine(':repeat '), dim: !card },
           { icon: 'doc', label: "The card's notes", keys: ['Enter'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
         ],
         [

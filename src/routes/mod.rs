@@ -9,6 +9,7 @@ pub mod links;
 pub mod manifest;
 pub mod media;
 pub mod nodes;
+pub mod repeat;
 pub mod revisions;
 pub mod seal;
 pub mod session;

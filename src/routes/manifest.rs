@@ -71,6 +71,11 @@ pub struct CardMeta {
     pub due_at: Option<i64>,
     #[serde(default)]
     pub done_at: Option<i64>,
+    /// The rule a card comes back by, `weekly` or `+2w`. Added without a
+    /// bump of `FORMAT`: an older build ignores the field and imports the card
+    /// as one that does not repeat, which loses the rule but misreads nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// The archive path of the document that holds the card's notes.

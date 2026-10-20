@@ -466,13 +466,31 @@ export const commands: CommandSpec[] = [
       const agenda = workspace.overlay === 'agenda'
       if (workspace.view !== 'board' && !agenda) return workspace.say('no board open — :board', 'error')
       const set = (due_at: number | null) =>
-        agenda ? workspace.dueAgendaCard(due_at) : workspace.patchCard({ due_at })
+        agenda ? workspace.patchAgendaCard({ due_at }) : workspace.patchCard({ due_at })
       const target = arg.trim()
       if (target === '-' || target === '') return workspace.guard(() => set(null))
       const at = parseDue(target)
       if (at === null) return workspace.say(`not a date: ${target} — try fri, +3d or 2026-09-30`, 'error')
       await workspace.guard(() => set(at))
       workspace.say(`due ${formatDay(at)}`)
+    },
+  },
+  {
+    name: 'repeat',
+    args: '<rule|->',
+    group: 'board',
+    help: 'once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it',
+    complete: () => ['daily', 'weekly', 'monthly', 'yearly', '+2w', '-'],
+    run: async (arg) => {
+      const agenda = workspace.overlay === 'agenda'
+      if (workspace.view !== 'board' && !agenda) return workspace.say('no board open — :board', 'error')
+      const rule = arg.trim()
+      const repeat = rule === '-' || rule === '' ? null : rule
+      await workspace.guard(async () => {
+        const card = await (agenda ? workspace.patchAgendaCard({ repeat }) : workspace.patchCard({ repeat }))
+        // The server's spelling of the rule: `+14d` is kept as `+2w`.
+        if (card) workspace.say(card.repeat === null ? 'repeats no more' : `repeats ${card.repeat} once done`)
+      })
     },
   },
   {

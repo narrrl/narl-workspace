@@ -79,6 +79,7 @@
     ['Enter', 'to the card, on its own board — or to the entry'],
     ['Space', 'done, where it stands'],
     ['D', 'due date: fri, tm, +3d … — :due on the line'],
+    [':', 'the line, with the agenda kept up — :repeat weekly acts on the card'],
     ['H / L', 'to the list left / right on its board'],
     ['T', "today's diary entry"],
     ['t · q · Esc', 'close the agenda'],

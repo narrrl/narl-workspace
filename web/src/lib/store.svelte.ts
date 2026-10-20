@@ -12,6 +12,7 @@ import {
   type DiaryEntry,
   type WorkspaceNode,
   type MediaFile,
+  type Moved,
   type NodeSummary,
   type Revision,
   type RevisionSummary,
@@ -19,7 +20,7 @@ import {
   type TrashItem,
   type VaultStatus,
 } from './api'
-import { formatBytes, formatDay, formatStamp, isTouchDevice, parseDay, sealedNote, type Heading } from './util'
+import { formatBytes, formatDay, formatStamp, formatWeekday, isTouchDevice, parseDay, sealedNote, type Heading } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -40,6 +41,12 @@ type Spot = {
 }
 
 export type Draft = { name: string; body: string; created_at: number }
+
+/** `done: x`, and when a repeating card comes back. */
+function doneSaid(moved: Moved): string {
+  const again = moved.again?.due_at
+  return again == null ? `done: ${moved.title}` : `done: ${moved.title} — again ${formatWeekday(again)} ${formatDay(again)}`
+}
 
 let tiles = 0
 
@@ -1369,22 +1376,23 @@ class Workspace {
   async finishCard(card: AgendaCard) {
     const done = (await api.board(card.space_id)).lists.at(-1)
     if (!done) return
-    await api.moveCard(card.id, done.id, done.cards.length)
+    const moved = await api.moveCard(card.id, done.id, done.cards.length)
     await this.loadAgenda()
     if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
-    this.say(`done: ${card.title}`)
+    this.say(doneSaid(moved))
   }
 
-  /** `:due` with the agenda up: the highlighted card's date, on its own board. */
-  async dueAgendaCard(due_at: number | null) {
+  /** `:due` or `:repeat` with the agenda up: the highlighted card, on its own board. */
+  async patchAgendaCard(patch: Parameters<typeof api.updateCard>[1]) {
     const card = this.agendaCards[this.agendaCursor]
     if (!card) return this.say('no card highlighted', 'error')
-    await api.updateCard(card.id, { due_at })
+    const updated = await api.updateCard(card.id, patch)
     await this.loadAgenda()
     // It may have changed group; the cursor goes with it.
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
     if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
+    return updated
   }
 
   /**
@@ -1396,12 +1404,12 @@ class Workspace {
     const from = lists.findIndex((list) => list.id === card.list_id)
     const target = lists[from + delta]
     if (from < 0 || !target) return this.say(`${card.title} is already in the ${delta < 0 ? 'first' : 'last'} list`, 'error')
-    await api.moveCard(card.id, target.id, target.cards.length)
+    const moved = await api.moveCard(card.id, target.id, target.cards.length)
     await this.loadAgenda()
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
     if (this.view === 'board' && this.spaceId === card.space_id) await this.reloadBoard()
-    this.say(from + delta === lists.length - 1 ? `done: ${card.title}` : `"${card.title}" → ${target.name}`)
+    this.say(from + delta === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
   }
 
   async loadOverview() {
@@ -1563,9 +1571,9 @@ class Workspace {
     const lists = this.board?.lists ?? []
     const target = lists[index]
     if (!card || !target || index === this.listCursor) return
-    await api.moveCard(card.id, target.id, target.cards.length)
+    const moved = await api.moveCard(card.id, target.id, target.cards.length)
     await this.reloadBoard(this.spaceId, card.id)
-    this.say(index === lists.length - 1 ? `done: ${card.title}` : `"${card.title}" → ${target.name}`)
+    this.say(index === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
   }
 
   /**
@@ -1595,8 +1603,9 @@ class Workspace {
   async patchCard(patch: Parameters<typeof api.updateCard>[1]) {
     const card = this.card
     if (!card) return this.say('no card selected', 'error')
-    await api.updateCard(card.id, patch)
+    const updated = await api.updateCard(card.id, patch)
     await this.reloadBoard(this.spaceId, card.id)
+    return updated
   }
 
   /** Space: into the done list, or back out of it to the inbox. */

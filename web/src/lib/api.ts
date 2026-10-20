@@ -166,9 +166,16 @@ export interface Card {
   node_name: string | null
   due_at: number | null
   done_at: number | null
+  /** `daily`, `weekly`, `monthly`, `yearly`, `+3d`, `+2w`, `+6m` — or none. */
+  repeat: string | null
   position: number
   created_at: number
   updated_at: number
+}
+
+/** A card after a move or an edit, and the copy a repeating card it finished left in the inbox. */
+export interface Moved extends Card {
+  again: Card | null
 }
 
 /** An open card as the agenda lists it, with the board it lives on. */
@@ -551,14 +558,15 @@ export const api = {
       body?: string
       node_id?: number | null
       due_at?: number | null
+      repeat?: string | null
       done?: boolean
     },
-  ) => request<Card>(`/cards/${id}`, { method: 'PUT', body: body(patch) }),
+  ) => request<Moved>(`/cards/${id}`, { method: 'PUT', body: body(patch) }),
 
   deleteCard: (id: number) => request<{ ok: true }>(`/cards/${id}`, { method: 'DELETE' }),
 
   moveCard: (id: number, list_id: number, position?: number) =>
-    request<Card>(`/cards/${id}/move`, { method: 'POST', body: body({ list_id, position }) }),
+    request<Moved>(`/cards/${id}/move`, { method: 'POST', body: body({ list_id, position }) }),
 
   listMedia: () => pages((limit, offset) => request<MediaFile[]>(`/media?limit=${limit}&offset=${offset}`)),
 

@@ -85,10 +85,13 @@
                   <span class="tick" class:ticked={card.done_at !== null}></span>
                   <span class="text">{card.title}</span>
                 </span>
-                {#if card.due_at !== null || card.node_id !== null}
+                {#if card.due_at !== null || card.node_id !== null || card.repeat !== null}
                   <span class="meta">
                     {#if card.due_at !== null}
                       <span class={urgency(card)}>due {formatDay(card.due_at)}</span>
+                    {/if}
+                    {#if card.repeat !== null}
+                      <span title="comes back in the inbox once done">↻ {card.repeat}</span>
                     {/if}
                     {#if card.node_id !== null}
                       <span class="doc">→ {card.node_name ?? `#${card.node_id}`}</span>

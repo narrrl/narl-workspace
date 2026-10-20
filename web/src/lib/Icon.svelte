@@ -39,6 +39,7 @@
     down: ['M12 5v14', 'M6 13l6 6 6-6'],
     drop: ['M12 4v11', 'M7 10l5 5 5-5', 'M5 20h14'],
     rename: ['M4 20h4L19 9l-4-4L4 16z', 'M13 7l4 4'],
+    repeat: ['M17 3l3 3-3 3', 'M4 11V9a3 3 0 0 1 3-3h13', 'M7 21l-3-3 3-3', 'M20 13v2a3 3 0 0 1-3 3H4'],
     trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
   } satisfies Record<string, string[]>

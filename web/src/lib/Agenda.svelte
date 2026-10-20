@@ -68,6 +68,9 @@
             >
               <span class="text">{card.title}</span>
               <span class="where">{card.space_slug}/{card.list_name}</span>
+              {#if card.repeat !== null}
+                <span class="due" title="comes back in the inbox once done">↻ {card.repeat}</span>
+              {/if}
               {#if card.due_at !== null}
                 <span class="due">{formatWeekday(card.due_at)} {formatDay(card.due_at).slice(5)}</span>
               {/if}

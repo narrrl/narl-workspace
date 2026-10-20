@@ -137,7 +137,7 @@ into the folder being browsed, and so does dropping them on the list. `:name <te
 the cursor — a document, a folder, or a card on a board — and `:name!` renames
 the space itself. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
-`:due <when|->`, `:done` and `:list <name>` (`:list!` deletes one).
+`:due <when|->`, `:repeat <rule|->`, `:done` and `:list <name>` (`:list!` deletes one).
 
 On a touch device modal editing is off by default (`:set vim` turns it on) and
 the same actions are buttons: the `⋯` on a row — or a long press — opens what
@@ -233,13 +233,30 @@ deleting the document leaves the card standing, because the work is still open
 once its notes are gone. Only a document can be a card's notes; a folder or a
 file is refused.
 
+### Cards that come back
+
+`:repeat weekly` (or the rail's ↻ button) makes a card come back once it is
+done. The rules are `daily`, `weekly`, `monthly`, `yearly`, and every `+3d`,
+`+2w`, `+6m` or `+1y`; `:repeat -` stops it. Finishing the card, on the board
+or in the agenda, leaves a copy at the bottom of the inbox with the same title,
+notes, document and rule, due on the next date, and the status line says when.
+The next date counts on from the old due date, in `WORKSPACE_TIMEZONE`, so a
+card due at noon stays due at noon across a change of the clocks. A card due on
+the 31st comes back on the last day of a shorter month and on the 31st again
+where there is one. A card finished late skips the dates that have passed and
+comes back on the first one from today on; a card without a due date counts from
+the moment it was finished. The finished card gives up its rule, so reopening it
+and finishing it again makes no second copy. The board and the agenda show the
+rule as `↻ weekly` beside the date.
+
 ## The agenda
 
 `t` (or `:agenda`) gathers every unfinished card from every board that is late,
 due within the week, or sitting in a column between the inbox and done — the
 work already in hand — and says whether the diary has an entry for today. `j`/`k`
 walk it, `Enter` goes to the card on its own board, `Space` finishes it where
-it stands, `D` sets its due date (`:due` on the line), `H` / `L` send it to
+it stands, `D` sets its due date (`:due` on the line), `:` opens the line with
+the agenda kept up so `:repeat` acts on the card, `H` / `L` send it to
 the list left / right on its board, and `T` writes today's entry. The bar shows `late` and `today` counts
 whenever either is above zero, and the agenda opens by itself once a day when
 something is late or due, so nothing has to be remembered to be looked at.
@@ -362,7 +379,9 @@ other embedded file in `media/`, under their real names, and relative links
 between documents, folders and files, so the archive reads in any markdown
 viewer without this application. What plain files have no place for — when
 each entry was written, names as they were typed, which space is the diary,
-every board with its cards — goes into one `.workspace.json` beside them.
+every board with its cards and their repeat rules — goes into one
+`.workspace.json` beside them. An older build reads a newer file's cards
+without their rules rather than refusing it.
 
 The diary is the diary by role, not by name: rename it and the reminder and
 the agenda still know which space it is, and it cannot be deleted — empty it
@@ -780,8 +799,8 @@ sealed or not.
 | `POST` | `/api/spaces/{id}/lists` | add a list |
 | `PUT`/`DELETE` | `/api/lists/{id}` | rename / delete a list and its cards |
 | `POST` | `/api/lists/{id}/cards` | add a card |
-| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, done, link) / delete |
-| `POST` | `/api/cards/{id}/move` | to another list and place in it |
+| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, done, link) / delete; finishing a repeating card answers its copy as `again` |
+| `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |

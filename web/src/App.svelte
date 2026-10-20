@@ -327,6 +327,11 @@
           cmdline = ':due '
         }
         return true
+      case ':':
+        // And so does `:repeat`, and any other command that asks for it.
+        cmdGlobal = false
+        cmdline = ':'
+        return true
       case 'H':
       case 'L':
         if (card) void workspace.guard(() => workspace.sendAgendaCard(card, event.key === 'H' ? -1 : 1))
