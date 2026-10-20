@@ -22,6 +22,8 @@ export const hooks = {
   overviewColumns: (): number => 1,
   openOverview: () => {},
   openCommandLine: (_initial: string) => {},
+  /** Ctrl-P: a search across every space. */
+  openGlobalSearch: () => {},
 }
 
 /** Help groups the command list under these headings, in this order. */
@@ -121,7 +123,10 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'save the open document',
     run: () => workspace.guard(() => workspace.save()),
-    bang: { help: 'same as :w — the bang is accepted out of habit', run: () => workspace.guard(() => workspace.save()) },
+    bang: {
+      help: 'save even over a newer version saved somewhere else since this one was opened',
+      run: () => workspace.guard(() => workspace.save({ force: true })),
+    },
   },
   {
     name: 'wq',
@@ -134,9 +139,9 @@ export const commands: CommandSpec[] = [
       hooks.focusList()
     },
     bang: {
-      help: 'same as :wq — the bang is accepted out of habit',
+      help: 'save over a newer version, as :w! does, and leave the editor',
       run: async () => {
-        await workspace.guard(() => workspace.save())
+        await workspace.guard(() => workspace.save({ force: true }))
         workspace.editing = false
         hooks.focusList()
       },
@@ -335,8 +340,14 @@ export const commands: CommandSpec[] = [
       const target = arg.trim()
       if (!target) return workspace.say('usage: :mv <folder|..>', 'error')
 
-      const destination =
-        target === '..' ? workspace.path.at(-2)?.id : findFolder(target)?.id
+      // `..` is up from where the node is, which in a search result is not
+      // the folder being browsed.
+      const up = async () => {
+        if (node.parent_id === null) return undefined
+        const parent = await api.getNode(node.parent_id)
+        return parent.kind === 'space' ? undefined : (parent.parent_id ?? undefined)
+      }
+      const destination = target === '..' ? await up() : findFolder(target)?.id
       if (destination === undefined) return workspace.say(`no such folder: ${target}`, 'error')
       if (destination === node.id) return workspace.say('a folder cannot hold itself', 'error')
       await workspace.guard(() => workspace.moveNode(node.id, destination))

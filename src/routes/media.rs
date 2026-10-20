@@ -367,15 +367,31 @@ pub(crate) async fn insert_file(
     Ok(id)
 }
 
-pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<Media>>> {
+#[derive(Deserialize)]
+pub struct ListQuery {
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+/// A page of the media list, newest first; the client asks for pages until
+/// one comes back short.
+pub async fn list(
+    _: Session,
+    State(state): State<AppState>,
+    Query(page): Query<ListQuery>,
+) -> AppResult<Json<Vec<Media>>> {
     let rows = sqlx::query(
         "SELECT m.id, m.filename, m.mime, m.size, m.created_at, m.encrypted,
                 (SELECT f.id FROM nodes f WHERE f.media_id = m.id) AS file_node,
                 (SELECT group_concat(nm.node_id)
                  FROM node_media nm JOIN nodes d ON d.id = nm.node_id
                  WHERE nm.media_id = m.id AND d.kind <> 'file') AS node_ids
-         FROM media m ORDER BY m.created_at DESC LIMIT 500",
+         FROM media m ORDER BY m.created_at DESC, m.id LIMIT ?1 OFFSET ?2",
     )
+    .bind(page.limit.unwrap_or(500).clamp(1, 2000))
+    .bind(page.offset.unwrap_or(0).max(0))
     .fetch_all(&state.db)
     .await?;
     Ok(Json(rows.iter().map(row_to_media).collect()))

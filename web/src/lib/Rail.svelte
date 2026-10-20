@@ -25,7 +25,7 @@
 
   const groups = $derived.by((): Door[][] => {
     const cmd: Door = { icon: 'prompt', label: 'Command line', keys: [':'], run: () => hooks.openCommandLine(':') }
-    const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help'), desk: true }
+    const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help') }
 
     if (workspace.view === 'board') {
       // The card verbs are doors too, so a phone — which has no H, L or
@@ -34,7 +34,7 @@
       return [
         [
           { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
-          { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list '), desk: true },
+          { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
           { icon: 'list', label: 'Back to the tree', keys: ['b', 'q'], run: () => runCommand('board'), on: true },
         ],
         [
@@ -43,6 +43,22 @@
           { icon: 'right', label: 'Send the card right', keys: ['L'], run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
           { icon: 'calendar', label: 'Due date', keys: ['D'], run: () => hooks.openCommandLine(':due '), dim: !card },
           { icon: 'doc', label: "The card's notes", keys: ['Enter'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
+        ],
+        [
+          { icon: 'up', label: 'Card up its list', keys: ['K'], run: () => workspace.guard(() => workspace.nudgeCard(-1)), dim: !card },
+          { icon: 'down', label: 'Card down its list', keys: ['J'], run: () => workspace.guard(() => workspace.nudgeCard(1)), dim: !card },
+          {
+            icon: 'rename',
+            label: card ? 'Rename the card' : 'Rename the list',
+            keys: ['R'],
+            run: () => hooks.openCommandLine(card ? ':name ' : ':name! '),
+          },
+          {
+            icon: 'trash',
+            label: card ? 'Delete the card' : 'Delete the list',
+            keys: card ? ['x'] : [':list!'],
+            run: () => runCommand(card ? 'delete' : 'list!'),
+          },
         ],
         [cmd, help],
       ]
@@ -59,7 +75,14 @@
       ],
       [
         { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => runCommand('agenda') },
+        { icon: 'today', label: "Today's diary entry", keys: ['T'], run: () => runCommand('today') },
         { icon: 'capture', label: 'Capture a card to the inbox', keys: ['c'], run: () => hooks.openCommandLine(':card ') },
+      ],
+      [
+        { icon: 'upload', label: 'Upload files into this folder', keys: [':upload'], run: () => hooks.pickTreeFiles(false) },
+        ...(workspace.marked
+          ? [{ icon: 'drop' as const, label: `Drop ${workspace.marked.name.trim() || workspace.marked.slug} here`, keys: ['p'], run: () => workspace.guard(() => workspace.drop()), on: true }]
+          : []),
       ],
       [
         { icon: 'grid', label: 'Every space', keys: ['w'], run: () => hooks.openOverview() },
@@ -72,6 +95,7 @@
           desk: true,
         },
         { icon: 'search', label: 'Search this space', keys: ['/'], run: () => hooks.openCommandLine('/') },
+        { icon: 'search-all', label: 'Search every space', keys: ['Ctrl-P'], run: () => hooks.openGlobalSearch() },
       ],
       [cmd, help],
     ]
@@ -230,6 +254,9 @@
     flex-direction: row;
     justify-content: space-around;
   }
+  /* More doors than a narrow phone is wide: the row scrolls rather than squeezes. */
+  .dock { overflow-x: auto; scrollbar-width: none; }
+  .dock .door { flex: none; }
   .dock .door { width: 44px; height: 40px; border-radius: var(--radius-s); }
   .dock .door::before { display: none; }
   .dock .door:active { background: var(--surface-alt); }

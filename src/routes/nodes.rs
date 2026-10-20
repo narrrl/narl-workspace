@@ -63,6 +63,10 @@ pub struct NodeSummary {
     pub share_token: Option<String>,
     /// Files only.
     pub file: Option<FileInfo>,
+    /// Search results only: where the match sits, `work/notes`, so two
+    /// matches with the same name can be told apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -140,6 +144,12 @@ pub struct UpdateInput {
     /// Spaces only, and only when it is sent at all.
     #[serde(default)]
     pub has_board: Option<bool>,
+    /// The `updated_at` the writer last saw. When the node has been saved
+    /// since — from another tab, another device, the SFTP mount — the write
+    /// is refused rather than silently undoing that save. Left out, the
+    /// write goes through whatever happened in between.
+    #[serde(default)]
+    pub base_updated_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -315,6 +325,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         shared: share_token.is_some(),
         share_token,
         file,
+        location: None,
     }
 }
 
@@ -366,7 +377,7 @@ pub async fn recent_documents(db: &SqlitePool, root: i64, limit: i64) -> AppResu
          )
          SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
          FROM nodes n
-         WHERE n.kind = 'document' AND n.id IN (SELECT id FROM sub)
+         WHERE n.kind IN ('document', 'file') AND n.id IN (SELECT id FROM sub)
          ORDER BY n.updated_at DESC, n.id DESC
          LIMIT ?2"
     ))
@@ -434,6 +445,7 @@ pub async fn list(
     let offset = params.offset.unwrap_or(0).max(0);
     let search = params.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
 
+    let searching = search.and_then(fts_query).is_some();
     let rows = match search.and_then(fts_query) {
         // A search reaches through the whole tree, optionally confined to one
         // space: the recursive term collects that space and everything under it.
@@ -479,14 +491,21 @@ pub async fn list(
         }
     };
 
-    Ok(Json(
-        rows.iter()
-            .map(|row| {
-                let head: String = row.try_get("head").unwrap_or_default();
-                row_to_summary(row, &head)
-            })
-            .collect(),
-    ))
+    let mut found: Vec<NodeSummary> = rows
+        .iter()
+        .map(|row| {
+            let head: String = row.try_get("head").unwrap_or_default();
+            row_to_summary(row, &head)
+        })
+        .collect();
+    if searching {
+        for node in &mut found {
+            let path = path_of(&state.db, node.id).await?;
+            let parents = &path[..path.len().saturating_sub(1)];
+            node.location = Some(parents.iter().map(|c| c.slug.as_str()).collect::<Vec<_>>().join("/"));
+        }
+    }
+    Ok(Json(found))
 }
 
 pub async fn get(
@@ -576,11 +595,17 @@ pub async fn update(
     // here is still free when it is written, and a file's name and its
     // download name never disagree.
     let mut tx = crate::db::begin_write(&state.db).await?;
-    let row = sqlx::query("SELECT parent_id, kind, name, slug FROM nodes WHERE id = ?1")
+    let row = sqlx::query("SELECT parent_id, kind, name, slug, updated_at FROM nodes WHERE id = ?1")
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    if input.base_updated_at.is_some_and(|base| row.get::<i64, _>("updated_at") > base) {
+        return Err(AppError::Conflict(
+            "changed somewhere else since it was opened — :e! takes that version, :w! writes over it".into(),
+        ));
+    }
 
     let parent_id: Option<i64> = row.get("parent_id");
     let kind: String = row.get("kind");

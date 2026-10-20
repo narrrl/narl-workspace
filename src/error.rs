@@ -14,6 +14,8 @@ pub enum AppError {
     TooManyRequests(i64),
     /// The file is sealed and the vault is closed.
     Locked,
+    /// Written over something newer than the writer had seen.
+    Conflict(String),
     Internal(anyhow::Error),
 }
 
@@ -25,6 +27,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized".to_string()),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
+            AppError::Conflict(m) => (StatusCode::CONFLICT, m),
             AppError::Locked => (
                 StatusCode::LOCKED,
                 "the vault is locked — :unlock opens it".to_string(),

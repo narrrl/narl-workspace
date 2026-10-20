@@ -5,7 +5,7 @@
    * in it as two windows, the band along the bottom. No rail — a reader has
    * no tools — but the reading keys work: j/k, gg/G, Ctrl-d/u.
    */
-  import { api, type SharedDocument } from './api'
+  import { api, unreachable, type SharedDocument } from './api'
   import Clock from './Clock.svelte'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
@@ -18,7 +18,18 @@
   let scroller = $state<HTMLElement>()
   let article = $state<HTMLElement>()
   let position = $state('All')
-  const html = $derived(doc ? renderMarkdown(doc.body, { token, key: shareKey }) : '')
+  /*
+   * A link to another document is an address inside the private workspace,
+   * and leads a reader to its login page. Those links are kept as their text.
+   */
+  const html = $derived(
+    doc
+      ? renderMarkdown(doc.body, { token, key: shareKey }).replace(
+          /<a href="\/n\/[^"]*"[^>]*>(.*?)<\/a>/g,
+          '<span class="private-link" title="a page of the private workspace">$1</span>',
+        )
+      : '',
+  )
   const title = $derived(doc?.name.trim() ?? '')
   const words = $derived(doc ? doc.body.split(/\s+/).filter(Boolean).length : 0)
   // The outline gets a window of its own only when there is something to outline.
@@ -35,7 +46,11 @@
         doc = data
         document.title = data.name.trim() || `~/workspace ${formatStamp(data.created_at)}`
       })
-      .catch(() => (error = 'this link is not valid, or the document is no longer shared.'))
+      .catch((e) =>
+        (error = unreachable(e)
+          ? 'the server cannot be reached — try again in a moment.'
+          : 'this link is not valid, or the document is no longer shared.'),
+      )
   })
 
   /** Where the view is, the way vim's ruler says it: Top, Bot, All or a percentage. */

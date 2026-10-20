@@ -2,7 +2,7 @@
   import { isContainer, type NodeSummary } from './api'
   import Icon from './Icon.svelte'
   import { workspace } from './store.svelte'
-  import { formatBytes, formatDay, formatTime, formatWeekday } from './util'
+  import { formatBytes, formatDay, formatTime, formatWeekday, isTouchDevice } from './util'
 
   let list = $state<HTMLUListElement>()
   /** Files are being dragged over the list, which takes them into this folder. */
@@ -41,6 +41,15 @@
     workspace.cursor = index
     void workspace.guard(() => workspace.openSelected())
   }
+
+  /* A tap opens a row, so on a phone the other verbs need a door of their own. */
+  function actions(index: number) {
+    workspace.cursor = index
+    workspace.overlay = 'actions'
+  }
+
+  /* Inside a folder, a phone has no h key and no crumbs on the bar: this is the way up. */
+  const nested = $derived(isTouchDevice && !workspace.query && workspace.path.length > 1)
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -72,6 +81,15 @@
   {/if}
 
   <ul bind:this={list}>
+    {#if nested}
+      <li>
+        <button class="row up" onclick={() => workspace.guard(() => workspace.up())}>
+          <span class="dot"></span>
+          <span class="title">..<span class="slash">/</span></span>
+          <span class="aside">up</span>
+        </button>
+      </li>
+    {/if}
     {#each workspace.nodes as node, index (node.id)}
       {@const previous = workspace.nodes[index - 1]}
       <!-- Day headings only make sense in a list that is a journal: documents,
@@ -81,21 +99,33 @@
           <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>
       {/if}
-      <li>
+      <li class="item">
         <button
           class="row"
+          oncontextmenu={(event) => {
+            event.preventDefault()
+            actions(index)
+          }}
           class:active={index === workspace.cursor}
           class:open={workspace.open?.id === node.id}
           data-index={index}
           onclick={() => pick(index)}
         >
           <span class="dot"></span>
-          <span class="title">{label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}</span>
+          <span class="title">
+            {label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}
+            {#if workspace.query && node.location}<span class="where">{node.location}</span>{/if}
+          </span>
           {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
           {#if node.file?.encrypted}<span class="sealed" title="in the vault"><Icon name="lock" size={12} /></span>{/if}
           <span class="aside">{aside(node)}</span>
         </button>
+        {#if isTouchDevice}
+          <button class="more" aria-label="actions for {label(node)}" onclick={() => actions(index)}>
+            <Icon name="more" size={18} />
+          </button>
+        {/if}
       </li>
     {:else}
       <li class="empty muted">
@@ -208,6 +238,9 @@
     font-size: 14px;
   }
   .slash { color: var(--muted); margin-left: 1px; }
+  /* Where a search match sits, so two of the same name can be told apart. */
+  .where { margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .row.active .where { color: var(--ink); }
   .aside { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .badge { flex: none; font-size: 11px; font-weight: 700; color: var(--light-dim); }
   .shared {
@@ -220,6 +253,9 @@
   .sealed { flex: none; display: grid; color: var(--muted); }
   .row.active .sealed { color: var(--ink); }
   .empty { padding: 12px 10px; font-size: 12px; }
+  .item { display: flex; align-items: center; }
+  .more { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; background: none; color: var(--muted); }
+  .up .title { font-family: var(--font-mono); }
 
   /* Roomier tap targets where there is no keyboard. */
   @media (pointer: coarse) {

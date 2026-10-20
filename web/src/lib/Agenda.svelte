@@ -7,7 +7,9 @@
    */
   import type { AgendaCard } from './api'
   import { workspace } from './store.svelte'
-  import { formatDay, formatWeekday } from './util'
+  import { runCommand } from './commands'
+  import Icon from './Icon.svelte'
+  import { formatDay, formatWeekday, isTouchDevice } from './util'
 
   let sheet = $state<HTMLDivElement>()
 
@@ -36,7 +38,11 @@
   {#if workspace.agenda.diary_today === false}
     <p class="diary">
       <span class="dot"></span> nothing in the diary today
-      <span class="kbd">T</span> writes it
+      {#if isTouchDevice}
+        <button class="write" onclick={() => runCommand('today')}>write it</button>
+      {:else}
+        <span class="kbd">T</span> writes it
+      {/if}
     </p>
   {/if}
 
@@ -60,6 +66,12 @@
                 <span class="due">{formatWeekday(card.due_at)} {formatDay(card.due_at).slice(5)}</span>
               {/if}
             </button>
+            {#if isTouchDevice}
+              <!-- Space, for a thumb. -->
+              <button class="finish" aria-label="done: {card.title}" onclick={() => workspace.guard(() => workspace.finishCard(card))}>
+                <Icon name="check" size={18} />
+              </button>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -82,6 +94,9 @@
 </div>
 
 <style>
+  li:has(.finish) { display: flex; align-items: center; }
+  .finish { flex: none; display: grid; place-items: center; width: 44px; height: 40px; padding: 0; border: 0; background: none; color: var(--muted); }
+
   .sheet {
     display: flex;
     flex-direction: column;

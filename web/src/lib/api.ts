@@ -32,6 +32,8 @@ export interface NodeSummary {
   share_token: string | null
   /** Files only. */
   file: FileInfo | null
+  /** Search results only: where the match sits, `work/notes`. */
+  location?: string
 }
 
 /** One step of a node's path, the space first and the node itself last. */
@@ -170,15 +172,25 @@ export class ApiError extends Error {
   }
 }
 
+/** No answer at all: offline, or the server is down. Status 0, as XHR has it. */
+export const unreachable = (error: unknown) =>
+  error instanceof ApiError && (error.status === 0 || error.status === 502 || error.status === 503 || error.status === 504)
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    credentials: 'same-origin',
-    ...init,
-    headers:
-      init.body instanceof FormData
-        ? init.headers
-        : { 'content-type': 'application/json', ...init.headers },
-  })
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      credentials: 'same-origin',
+      ...init,
+      headers:
+        init.body instanceof FormData
+          ? init.headers
+          : { 'content-type': 'application/json', ...init.headers },
+    })
+  } catch {
+    // fetch says "Failed to fetch" and nothing else; this says what it means.
+    throw new ApiError(0, 'the server cannot be reached')
+  }
 
   if (!response.ok) {
     let message = response.statusText
@@ -194,6 +206,42 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 const body = (data: unknown) => JSON.stringify(data)
+
+/** The size of a page of a long list, the most the server hands out at once. */
+const PAGE = 2000
+
+/** Every page of a list, read until one comes back short. */
+async function pages<T>(read: (limit: number, offset: number) => Promise<T[]>): Promise<T[]> {
+  const all: T[] = []
+  for (;;) {
+    const page = await read(PAGE, all.length)
+    all.push(...page)
+    if (page.length < PAGE) return all
+  }
+}
+
+/**
+ * Files up as multipart, by XHR rather than fetch, because a gigabyte going
+ * up needs to say how far along it is.
+ */
+function send<T>(url: string, files: File[], progress?: (fraction: number) => void) {
+  return new Promise<T>((resolve, reject) => {
+    const form = new FormData()
+    for (const file of files) form.append('file', file)
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.responseType = 'json'
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) progress?.(event.loaded / event.total)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response as T)
+      else reject(new ApiError(xhr.status, xhr.response?.error ?? xhr.statusText))
+    }
+    xhr.onerror = () => reject(new ApiError(0, 'the upload did not reach the server'))
+    xhr.send(form)
+  })
+}
 
 export const api = {
   me: () => request<{ user: string }>('/me'),
@@ -212,13 +260,23 @@ export const api = {
   createSpace: (name: string, has_board = true) =>
     request<WorkspaceNode>('/spaces', { method: 'POST', body: body({ name, has_board }) }),
 
-  /** The children of a node, or — with `q` — a search across the whole tree. */
-  listNodes: (params: { parent?: number; q?: string; space?: number }) => {
+  /**
+   * The children of a node, or — with `q` — a search across the whole tree.
+   * A folder is read a page at a time until a page comes back short, so one
+   * that grows past a page is listed whole rather than cut off; a search
+   * stops at its first page, the best matches.
+   */
+  listNodes: async (params: { parent?: number; q?: string; space?: number }) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)
     else if (params.parent !== undefined) query.set('parent', String(params.parent))
     if (params.q && params.space !== undefined) query.set('space', String(params.space))
-    return request<NodeSummary[]>(`/nodes?${query}`)
+    if (params.q) return request<NodeSummary[]>(`/nodes?${query}`)
+    return pages((limit, offset) => {
+      query.set('limit', String(limit))
+      query.set('offset', String(offset))
+      return request<NodeSummary[]>(`/nodes?${query}`)
+    })
   },
 
   getNode: (id: number) => request<WorkspaceNode>(`/nodes/${id}`),
@@ -252,9 +310,10 @@ export const api = {
     created_at?: number
   }) => request<WorkspaceNode>('/nodes', { method: 'POST', body: body(input) }),
 
+  /** `base_updated_at`: refused with 409 if the node was saved since then. */
   updateNode: (
     id: number,
-    input: { name: string; body: string; created_at?: number; has_board?: boolean },
+    input: { name: string; body: string; created_at?: number; has_board?: boolean; base_updated_at?: number },
   ) => request<WorkspaceNode>(`/nodes/${id}`, { method: 'PUT', body: body(input) }),
 
   deleteNode: (id: number) =>
@@ -310,35 +369,18 @@ export const api = {
   moveCard: (id: number, list_id: number, position?: number) =>
     request<Card>(`/cards/${id}/move`, { method: 'POST', body: body({ list_id, position }) }),
 
-  listMedia: () => request<MediaFile[]>('/media'),
+  listMedia: () => pages((limit, offset) => request<MediaFile[]>(`/media?limit=${limit}&offset=${offset}`)),
 
   /**
    * Upload files into a space or folder as file nodes. XHR rather than fetch,
    * because a gigabyte going up needs to say how far along it is.
    */
   putFiles: (parentId: number, files: File[], encrypt: boolean, progress?: (fraction: number) => void) =>
-    new Promise<WorkspaceNode[]>((resolve, reject) => {
-      const form = new FormData()
-      for (const file of files) form.append('file', file)
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', `/api/nodes/${parentId}/files${encrypt ? '?encrypt=true' : ''}`)
-      xhr.responseType = 'json'
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) progress?.(event.loaded / event.total)
-      }
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response as WorkspaceNode[])
-        else reject(new ApiError(xhr.status, xhr.response?.error ?? xhr.statusText))
-      }
-      xhr.onerror = () => reject(new ApiError(0, 'the upload did not reach the server'))
-      xhr.send(form)
-    }),
+    send<WorkspaceNode[]>(`/api/nodes/${parentId}/files${encrypt ? '?encrypt=true' : ''}`, files, progress),
 
-  upload: (files: File[]) => {
-    const form = new FormData()
-    for (const file of files) form.append('file', file)
-    return request<MediaFile[]>('/media', { method: 'POST', body: form })
-  },
+  /** Files to embed in a document, with the same progress as `putFiles`. */
+  upload: (files: File[], progress?: (fraction: number) => void) =>
+    send<MediaFile[]>('/api/media', files, progress),
 
   deleteMedia: (id: string) => request<{ ok: true }>(`/media/${id}`, { method: 'DELETE' }),
 

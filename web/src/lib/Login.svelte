@@ -42,6 +42,7 @@
     </div>
 
     <p class="label rule">a private workspace · one user</p>
+    {#if workspace.notice}<p class="notice">{workspace.notice}</p>{/if}
 
     <label>
       <span class="label">login</span>
@@ -64,6 +65,12 @@
 </main>
 
 <style>
+  .notice {
+    margin: 0;
+    font-size: 13px;
+    color: var(--light-soft);
+  }
+
   main {
     display: grid;
     place-items: center;

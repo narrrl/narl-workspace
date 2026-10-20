@@ -2,6 +2,7 @@ import {
   api,
   ApiError,
   isContainer,
+  unreachable,
   type Agenda,
   type AgendaCard,
   type Board,
@@ -13,7 +14,7 @@ import {
   type SpaceOverview,
   type VaultStatus,
 } from './api'
-import { formatBytes, sealedNote } from './util'
+import { formatBytes, isTouchDevice, sealedNote } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -97,7 +98,7 @@ class Workspace {
   vimMode = $state('normal')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions'>('none')
 
   /*
    * What is due or in hand on every board, kept loaded all the time: the bar
@@ -140,7 +141,14 @@ class Workspace {
    */
   #spots: Record<number, Spot> = JSON.parse(localStorage.getItem('diary:spots') ?? '{}')
 
-  vimEnabled = $state(localStorage.getItem('diary:vim') !== 'off')
+  /** Modal editing on a keyboard; a phone's editor is a plain text box. */
+  vimEnabled = $state((localStorage.getItem('diary:vim') ?? (isTouchDevice ? 'off' : 'on')) !== 'off')
+
+  /** What the login screen has to say: why it is showing, if not for a first visit. */
+  notice = $state('')
+
+  /** Saves that failed for want of a server wait this long before trying again. */
+  #retryDelay = 0
 
   /** Mirror vim yanks and deletes into the system clipboard, like `set clipboard=unnamed`. */
   clipboard = $state(localStorage.getItem('diary:clipboard') !== 'off')
@@ -332,7 +340,30 @@ class Workspace {
   async #writeBack() {
     this.#autosave = null
     if (!this.open || !this.dirty) return
-    await this.guard(() => this.save({ quiet: true }))
+    try {
+      await this.save({ quiet: true })
+      if (this.#retryDelay > 0) this.say('saved — the server is back')
+      this.#retryDelay = 0
+    } catch (error) {
+      if (!unreachable(error)) return this.guard(() => Promise.reject(error))
+      // Nothing is lost — the draft is in localStorage — but it is not on the
+      // server either, so it is tried again, less often the longer it fails.
+      this.#retryDelay = Math.min(Math.max(this.#retryDelay * 2, 2000), 60_000)
+      this.say(`not saved: the server cannot be reached — kept here, trying again in ${this.#retryDelay / 1000}s`, 'error')
+      this.#autosave = setTimeout(() => void this.#writeBack(), this.#retryDelay)
+    }
+  }
+
+  /** Back online: what is waiting goes now rather than at the next retry. */
+  #watchConnection() {
+    window.addEventListener('online', () => {
+      if (!this.dirty) return
+      if (this.#autosave) clearTimeout(this.#autosave)
+      void this.#writeBack()
+    })
+    window.addEventListener('offline', () => {
+      this.say('offline — what is typed is kept here, and saved once the server answers', 'error')
+    })
   }
 
   /**
@@ -376,16 +407,28 @@ class Workspace {
     return true
   }
 
+  #watching = false
+
   async boot() {
+    if (!this.#watching) {
+      this.#watching = true
+      this.#watchConnection()
+    }
     try {
       const { user } = await api.me()
       this.user = user
+      this.notice = ''
       await this.loadSpaces(Workspace.addressedPath())
       await this.loadAgenda()
       await this.loadVault()
       await this.openAgendaIfDue()
-    } catch {
+    } catch (error) {
       this.user = null
+      // Down is not the same as logged out: say so, and keep asking.
+      if (unreachable(error)) {
+        this.notice = 'the server cannot be reached — trying again'
+        setTimeout(() => void this.boot(), 5000)
+      }
     } finally {
       this.booting = false
     }
@@ -394,6 +437,14 @@ class Workspace {
   async login(username: string, password: string) {
     const { user } = await api.login(username, password)
     this.user = user
+    this.notice = ''
+    // The session ran out under an open workspace: everything is still here,
+    // the draft included, so pick up where it stopped rather than start over.
+    if (this.spaces.length > 0) {
+      await this.refresh()
+      if (this.open && this.dirty) await this.guard(() => this.save({ quiet: true }))
+      return
+    }
     await this.loadSpaces(Workspace.addressedPath())
     await this.loadAgenda()
     await this.loadVault()
@@ -637,12 +688,20 @@ class Workspace {
     this.say(`new space ${space.slug}`)
   }
 
-  async save({ quiet = false } = {}) {
+  /**
+   * Write the draft. Refused when the document was saved somewhere else
+   * since it was opened here — another tab, the phone, the SFTP mount —
+   * unless `force`, which is `:w!`.
+   */
+  async save({ quiet = false, force = false } = {}) {
     if (!this.open) return
     // Snapshot what goes over the wire: an autosave races the typing that
     // triggered it, and anything typed since must stay marked unsaved.
     const sent = { ...this.draft, name: this.draft.name.trim() }
-    const saved = await api.updateNode(this.open.id, sent)
+    const saved = await api.updateNode(this.open.id, {
+      ...sent,
+      base_updated_at: force ? undefined : this.open.updated_at,
+    })
 
     this.open = saved
     this.dirty =
@@ -1098,6 +1157,7 @@ class Workspace {
 
   async toggleShare(id: number) {
     const node = this.open?.id === id ? this.open : await api.getNode(id)
+    if (node.kind !== 'document') return this.say('only a document can be shared', 'error')
     if (node.shared) {
       await api.unshare(id)
       this.say(`#${id} is private again`)
@@ -1115,7 +1175,7 @@ class Workspace {
    * There is nothing to re-copy later — asking again mints a new link and
    * retires the old one.
    */
-  async mintShareLink(id: number) {
+  async mintShareLink(id: number): Promise<{ url: string; sealed: number }> {
     const { path, sealed } = await api.share(id)
     const url = `${location.origin}${path}`
     await this.copy(url)
@@ -1178,7 +1238,12 @@ class Workspace {
   }
 
   async upload(files: File[]): Promise<MediaFile[]> {
-    const uploaded = await api.upload(files)
+    const what = files.length === 1 ? files[0].name : `${files.length} files`
+    const total = files.reduce((sum, file) => sum + file.size, 0)
+    this.say(`uploading ${what} (${formatBytes(total)}) …`)
+    const uploaded = await api.upload(files, (fraction) =>
+      this.say(`uploading ${what} — ${Math.floor(fraction * 100)}%`),
+    )
     this.say(`uploaded ${uploaded.length} file${uploaded.length === 1 ? '' : 's'}`)
     return uploaded
   }
@@ -1204,6 +1269,7 @@ class Workspace {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         this.user = null
+        this.notice = 'the session ran out — log in again, and carry on where you were'
         this.say('session expired — log in again', 'error')
       } else if (error instanceof ApiError && error.status === 423) {
         // It locked itself while nobody was looking.

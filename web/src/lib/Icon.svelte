@@ -32,6 +32,15 @@
     doc: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5', 'M9 13h6', 'M9 17h4'],
     agenda: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z', 'M12 7v5l3 2'],
     capture: ['M12 5v14', 'M5 12h14'],
+    upload: ['M12 15V4', 'M7 9l5-5 5 5', 'M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3'],
+    'search-all': ['M10 4a6 6 0 1 0 0 12a6 6 0 1 0 0-12z', 'M19 19l-4.5-4.5', 'M17 4h4', 'M19 2v4'],
+    today: ['M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z', 'M4 10h16', 'M12 13v4', 'M10 15h4'],
+    up: ['M12 19V5', 'M6 11l6-6 6 6'],
+    down: ['M12 5v14', 'M6 13l6 6 6-6'],
+    drop: ['M12 4v11', 'M7 10l5 5 5-5', 'M5 20h14'],
+    rename: ['M4 20h4L19 9l-4-4L4 16z', 'M13 7l4 4'],
+    trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13'],
+    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
   } satisfies Record<string, string[]>
 
   export type IconName = keyof typeof PATHS

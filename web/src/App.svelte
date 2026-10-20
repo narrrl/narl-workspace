@@ -11,6 +11,7 @@
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
+  import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
   import SecretPrompt from './lib/SecretPrompt.svelte'
   import Rail from './lib/Rail.svelte'
@@ -65,6 +66,10 @@
       cmdline = initial
     }
     hooks.openOverview = () => void openOverview()
+    hooks.openGlobalSearch = () => {
+      cmdGlobal = true
+      cmdline = '/'
+    }
   })
 
   /*
@@ -165,6 +170,18 @@
     importRoot = false
     if (files.length === 0) return
     await workspace.guard(() => workspace.importFolder(files, root))
+  }
+
+  /*
+   * Files let go anywhere but the list or the editor would make the browser
+   * open them in place of the app. The places that take files say so
+   * themselves; everywhere else refuses the drop, and says where it goes.
+   */
+  function strayDrop(event: DragEvent) {
+    if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'none'
+    if (event.type === 'drop') workspace.say('drop files on the list to put them in this folder, or into the editor to embed them', 'error')
   }
 
   // What the empty pane offers, in the key/value shape of a status readout.
@@ -636,7 +653,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} ondragover={strayDrop} ondrop={strayDrop} />
 
 {#if shareToken}
   <Shared token={shareToken} shareKey={shareKey} />
@@ -718,7 +735,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

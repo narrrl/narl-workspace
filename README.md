@@ -99,7 +99,14 @@ the space itself. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
 `:due <when|->`, `:done` and `:list <name>` (`:list!` deletes one).
 
-On a touch device modal editing is turned off and the same actions are buttons.
+On a touch device modal editing is off by default (`:set vim` turns it on) and
+the same actions are buttons: the `⋯` on a row — or a long press — opens what
+the keys do to it: rename, move, share, seal, delete. A move is picked up
+there and dropped with the button the dock then shows, in whichever folder
+is open. Inside a folder the list starts with `..`, the way up. The dock also
+has today's entry, an upload into the folder, a search across every space,
+and on the board the card moves, renames and deletes; the agenda has a done
+button per card.
 
 ## Boards
 
@@ -157,7 +164,16 @@ something is late or due, so nothing has to be remembered to be looked at.
 
 Every change is written to `localStorage` as it is typed and to the server a
 couple of seconds after typing stops, so `:w` is a habit rather than a
-necessity. A document made with `o` and left with neither a name nor a word in
+necessity. When the server cannot be reached the draft stays in the browser
+and the save is tried again, less often the longer it fails, and at once when
+the browser says it is back online. A session that runs out mid-sentence
+shows the login, and logging in again carries on where it stopped, draft and
+all.
+
+A document saved somewhere else since it was opened here — another tab, the
+phone, the SFTP mount — is not written over: `:w` says so, `:e!` takes the
+other version, and `:w!` writes this one anyway. Search results say which
+space and folder each match is in. A document made with `o` and left with neither a name nor a word in
 it is removed again on the way out, so abandoned starts do not pile up. If a tab dies mid-document, opening it again restores the draft and
 says so — `:e!` throws it away, the way vim handles a swap file.
 
