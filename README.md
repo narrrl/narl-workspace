@@ -267,9 +267,14 @@ limit at least that large too.
 The SFTP mount shows files beside the documents, under their own names — a
 later file that shares one is told apart by its id, `slides (42).pdf` — and
 anything copied in that is not a `.md` becomes a file in the tree, streamed to
-disk under the same size limit. A sealed file is listed but does not open
-there. A file copied into a sealed folder is sealed while the vault is open in
-the browser, and refused while it is shut. Editor droppings — swap files, `~` backups, dotted temp files — stay in
+disk under the same size limit. While the vault is open in the browser a
+sealed file opens there too, decrypted as it is read, and is sealed again when
+it is saved, wherever it sits; a file copied into a sealed folder is sealed on
+the way in. While the vault is shut both are refused, and locking it cuts off
+a read already under way — though a client that cached what it read keeps
+that copy until it lets go of it. Reading over the
+mount does not hold the vault open; only the browser and opening a file do.
+Editor droppings — swap files, `~` backups, dotted temp files — stay in
 memory for the session, and a dotted temp file renamed onto a real name is kept
 as that file, which is how `rsync` and most editors save.
 

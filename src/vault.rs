@@ -446,6 +446,14 @@ impl Vault {
         }
     }
 
+    /// Whether the vault is open, without counting as a use that keeps it so:
+    /// for a check that should not hold it open by being asked often.
+    pub fn is_open(&self) -> bool {
+        self.slot()
+            .as_ref()
+            .is_some_and(|open| open.touched.elapsed() < self.idle)
+    }
+
     pub fn lock(&self) {
         *self.slot() = None;
     }
