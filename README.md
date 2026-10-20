@@ -307,6 +307,13 @@ it back out. `:unlock` and `:lock` open and close it, `:passwd` changes the
 password. A sealed file carries a lock in the list, and the bar says `vault
 open` while it is.
 
+`:passwd` wraps the same key under the new password, so no file has to be
+rewritten — and so it does not take back what the old password opens. A copy
+of `diary.db` from before the change (a `diary.db.pre-*` snapshot, a backup in
+Proton Drive) still unwraps the key with the old password, and that key still
+opens every sealed file. Change the password because you want a new one, not
+to shut out someone who has the old one and an old copy.
+
 `:encrypt` on a folder or space seals it for good, not just once: every file
 in it now, and every file that lands in it later. An upload, an import, an SFTP
 write and a file or folder moved in are all sealed on the way in. While the
