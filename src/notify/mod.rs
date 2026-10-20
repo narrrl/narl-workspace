@@ -124,7 +124,7 @@ impl Notifier {
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
              WHERE c.done_at IS NULL AND c.due_at IS NOT NULL AND c.due_at < ?
-               AND s.has_board = 1
+               AND s.has_board = 1 AND s.parent_id IS NULL
              ORDER BY c.due_at",
         )
         .bind(end_of_today)
@@ -196,6 +196,7 @@ impl Notifier {
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
              WHERE c.done_at >= ? AND c.done_at < ? AND s.has_board = 1
+               AND s.parent_id IS NULL
              ORDER BY s.position, c.done_at",
         )
         .bind(start)
@@ -209,7 +210,7 @@ impl Notifier {
              JOIN board_lists l ON l.id = c.list_id
              JOIN nodes s ON s.id = l.space_id
              WHERE c.done_at IS NULL AND c.due_at IS NOT NULL AND c.due_at < ?
-               AND s.has_board = 1
+               AND s.has_board = 1 AND s.parent_id IS NULL
              ORDER BY c.due_at",
         )
         .bind(end)
@@ -349,7 +350,9 @@ impl Notifier {
     async fn drop_stale_cards(&self) -> Result<()> {
         let tz = self.config.mail.timezone;
         let waiting = sqlx::query(
-            "SELECT n.id, n.dedupe_key, c.due_at, c.done_at, s.has_board
+            "SELECT n.id, n.dedupe_key, c.due_at, c.done_at,
+                    -- A space in the trash has no board to be due on.
+                    CASE WHEN s.parent_id IS NULL THEN s.has_board ELSE 0 END AS has_board
              FROM notifications n
              LEFT JOIN cards c
                ON c.id = CAST(substr(n.dedupe_key, 10, instr(substr(n.dedupe_key, 10), ':') - 1) AS INTEGER)

@@ -185,12 +185,17 @@ pub async fn run(
 ) -> Result<()> {
     // A sealed file has no place in a view meant to be opened by name from
     // anywhere: it is left out, so it leaves the view when it is sealed.
-    let tree: Vec<TreeNode> = sqlx::query(
-        "SELECT n.id, n.parent_id, n.kind, n.name, n.slug,
+    // Nor has the trash: a file deleted leaves the view as it leaves the tree,
+    // and comes back to it if it is restored.
+    let tree: Vec<TreeNode> = sqlx::query(&format!(
+        "WITH RECURSIVE {}
+         SELECT n.id, n.parent_id, n.kind, n.name, n.slug,
                 CASE WHEN m.encrypted = 0 THEN n.media_id END AS media_id,
                 COALESCE(m.mime, '') AS mime
-         FROM nodes n LEFT JOIN media m ON m.id = n.media_id",
-    )
+         FROM nodes n LEFT JOIN media m ON m.id = n.media_id
+         WHERE n.id IN (SELECT id FROM live)",
+        crate::routes::nodes::LIVE
+    ))
     .fetch_all(db)
     .await?
     .iter()

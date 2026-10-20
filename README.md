@@ -103,7 +103,8 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
 | `n` / `N` | the next / previous search result, opened beside the results; past the last it starts again at the first |
 | `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
-| `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
+| `x`, `dd` | delete the entry under the cursor into the trash (asks `y`/`N`) |
+| `u` | undo the last delete: it comes back out of the trash to where it was |
 | `:` | command line — `Tab` / `Shift-Tab` cycle the matching commands, then the argument (folders for `:cd` and `:mv`, spaces for `:space`, options for `:set` …); `↑` / `↓` recall the lines run before that start as this one does |
 | `Ctrl-S` | save from anywhere |
 | `?` | help |
@@ -118,11 +119,11 @@ headings as they do in the reader. `gf` follows the link under the cursor, savin
 first, and `gx` opens it in a new tab. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
 list (`:bn` and `:bp` walk the tiles), `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
-`:clear` drops the search, `:reload` re-reads the folder, `:stats` counts words
+`:clear` drops the search, `:trash` lists what was deleted, `:reload` re-reads the folder, `:stats` counts words
 and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
 session, `:logout!` every session and `:sessions rm <n>` one other. The tree has its own: `:space [name]` switches (`:space! <name>`
-makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
+makes one, `:rmspace [name]` puts one in the trash with everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..|/>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
 (`:import!` takes a `.zip` instead). `:upload` outside the editor puts files
@@ -137,7 +138,7 @@ the same actions are buttons: the `⋯` on a row — or a long press — opens w
 the keys do to it: rename, move, share, seal, delete. A move is picked up
 there and dropped with the button the dock then shows, in whichever folder
 is open. Inside a folder the list starts with `..`, the way up. The dock also
-has today's entry, an upload into the folder, a search across every space,
+has today's entry, an upload into the folder, the trash, a search across every space,
 and on the board the card moves, renames and deletes; the agenda has a done
 button per card.
 
@@ -254,6 +255,24 @@ space and folder each match is in. A document made with `o` and left with neithe
 it is removed again on the way out, so abandoned starts do not pile up. If a tab dies mid-document, opening it again restores the draft and
 says so — `:e!` throws it away, the way vim handles a swap file.
 
+A delete is not the end of anything. `x`, `dd`, `:delete` and `:rmspace`
+put what they delete in the trash, with everything inside it, and `u` puts
+the last of them back where it was — the same folder, the same name, unless
+a new one took the name meanwhile. `:trash` lists everything in it, the last
+deleted first: `j`/`k` walk it, `Enter` or `r` restores, `x` deletes one for
+good and `:trash purge` empties it, each asking first. Something whose folder
+has gone since comes back to the root of its space, and something whose space
+is in the trash too waits until the space is restored. What has been in the
+trash for `WORKSPACE_TRASH_DAYS` (30 by default) is deleted for good by the
+daily sweep, files and all.
+
+While it waits, a node in the trash is out of sight: not in the tree, the
+search, the agenda, the mails, the SFTP mount, the export or the readable
+`files/` view on Proton Drive. A card whose notes are in the trash keeps
+pointing at them and finds them again after a restore, and a shared document
+answers like an unknown link until it is restored — with the same link its
+readers already hold.
+
 `:export` downloads the open document as markdown. `:export!` downloads the
 whole workspace as a zip: the tree as real directories, empty folders too, one
 markdown file per document, every file in the tree where it sits and every
@@ -272,7 +291,7 @@ An upload that nothing embeds any more — pasted, then deleted from the
 document — is kept a week and then removed, along with what a killed upload
 or a crash leaves in `uploads/`. That runs at start and once a day. A file in
 the tree is never one of them: it is deleted from its folder, not from
-`:media`.
+`:media`, and its bytes stay on the disk until it leaves the trash.
 
 `:media` lists every upload: `j`/`k` walk it, `i` or `Enter` embeds the
 highlighted one at the cursor while writing, `y` copies its address and `x`
@@ -322,6 +341,10 @@ Nothing done over the mount holds the vault open; only the browser does. A
 session holds at most 256 handles and 64 MB in memory, the server at most 32
 connections, and one whose client has stopped answering is dropped within a
 few minutes.
+`rm` and `rmdir` over the mount put things in the trash, as a delete in
+the browser does. A rename onto a name that is taken replaces what was
+there, as `rename(2)` does, without keeping it in the trash: editors and
+`rsync` save that way, and the trash would fill up with every save.
 Editor droppings — swap files, `~` backups, dotted temp files — stay in
 memory for the session, and a dotted temp file renamed onto a real name is kept
 as that file, which is how `rsync` and most editors save.
@@ -635,7 +658,10 @@ sealed or not.
 | `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
 | `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create |
-| `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete (a delete takes the subtree) |
+| `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete into the trash, subtree and all — or for good, for something already in it |
+| `GET`/`DELETE` | `/api/trash` | what was deleted, the last first / empty it |
+| `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |
+| `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
 | `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, and whether the diary has today |
 | `POST` | `/api/spaces/{id}/lists` | add a list |

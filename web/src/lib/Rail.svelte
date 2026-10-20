@@ -83,6 +83,7 @@
       ],
       [
         { icon: 'upload', label: 'Upload files into this folder', keys: [':upload'], run: () => hooks.pickTreeFiles(false) },
+        { icon: 'trash', label: 'The trash — what was deleted', keys: [':trash'], run: () => runCommand('trash') },
         ...(workspace.marked.length
           ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.marked)} here`, keys: ['p'], run: () => workspace.guard(() => workspace.drop()), on: true }]
           : []),

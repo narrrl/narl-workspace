@@ -10,7 +10,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::media,
+    routes::{media, trash},
     state::AppState,
 };
 
@@ -27,6 +27,15 @@ pub const FILE: &str = "file";
 /// whose empty days the reminder mail is about. Found by role rather than by
 /// slug, so it stays the diary under any name.
 pub const DIARY: &str = "diary";
+
+/// The nodes in the tree proper — the spaces and everything under them, so
+/// not the trash — for a query that reads every node rather than walking down
+/// from one: `WITH RECURSIVE {LIVE} SELECT … WHERE id IN (SELECT id FROM live)`.
+pub const LIVE: &str = "live (id) AS (
+         SELECT id FROM nodes WHERE parent_id IS NULL AND kind = 'space'
+         UNION ALL
+         SELECT n.id FROM nodes n JOIN live ON n.parent_id = live.id
+     )";
 
 /// Whether a node of this kind can hold other nodes.
 pub fn is_container(kind: &str) -> bool {
@@ -54,7 +63,7 @@ pub struct NodeSummary {
     pub excerpt: String,
     pub position: i64,
     pub has_board: bool,
-    /// Spaces the code has to tell apart: `diary`, or nothing.
+    /// Nodes the code has to tell apart: `diary`, `trash`, or nothing.
     pub role: Option<String>,
     pub child_count: i64,
     pub created_at: i64,
@@ -486,11 +495,13 @@ pub async fn list(
     let searching = search.and_then(fts_query).is_some();
     let rows = match search.and_then(fts_query) {
         // A search reaches through the whole tree, optionally confined to one
-        // space: the recursive term collects that space and everything under it.
+        // space: the recursive term collects that space, or every space, and
+        // everything under it — which leaves the trash out.
         Some(query) => {
             sqlx::query(&format!(
                 "WITH RECURSIVE sub (id) AS (
-                     SELECT id FROM nodes WHERE id = ?4
+                     SELECT id FROM nodes
+                     WHERE id = ?4 OR (?4 IS NULL AND parent_id IS NULL AND kind = 'space')
                      UNION ALL
                      SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
                  )
@@ -499,7 +510,7 @@ pub async fn list(
                  JOIN nodes n ON n.id = nodes_fts.rowid
                  WHERE nodes_fts MATCH ?1
                    AND n.kind <> 'space'
-                   AND (?4 IS NULL OR n.id IN (SELECT id FROM sub))
+                   AND n.id IN (SELECT id FROM sub)
                  ORDER BY rank
                  LIMIT ?2 OFFSET ?3"
             ))
@@ -516,7 +527,7 @@ pub async fn list(
             sqlx::query(&format!(
                 "SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
                  FROM nodes n
-                 WHERE n.parent_id IS ?1
+                 WHERE n.parent_id IS ?1 AND n.role IS NOT 'trash'
                  ORDER BY CASE n.kind WHEN 'folder' THEN 0 ELSE 1 END,
                           n.position, n.created_at DESC, n.id DESC
                  LIMIT ?2 OFFSET ?3"
@@ -552,11 +563,16 @@ pub async fn list(
     Ok(Json(found))
 }
 
+/// A node in the trash reads as gone: whatever still points at it — a card,
+/// a link, a tab left open — finds nothing, as it did before there was one.
 pub async fn get(
     _: Session,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Node>> {
+    if trash::in_trash(&mut *state.db.acquire().await?, id).await? {
+        return Err(AppError::NotFound);
+    }
     load(&state, id).await.map(Json)
 }
 
@@ -577,12 +593,16 @@ pub async fn resolve(
 ) -> AppResult<Json<Node>> {
     let mut current: Option<i64> = None;
     for segment in params.path.split('/').filter(|s| !s.is_empty()) {
-        let row = sqlx::query("SELECT id FROM nodes WHERE parent_id IS ?1 AND slug = ?2")
-            .bind(current)
-            .bind(segment)
-            .fetch_optional(&state.db)
-            .await?
-            .ok_or(AppError::NotFound)?;
+        // A path starts at a space, never at the trash beside them.
+        let row = sqlx::query(
+            "SELECT id FROM nodes
+             WHERE parent_id IS ?1 AND slug = ?2 AND (?1 IS NOT NULL OR kind = 'space')",
+        )
+        .bind(current)
+        .bind(segment)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
         current = Some(row.get("id"));
     }
     load(&state, current.ok_or(AppError::NotFound)?)
@@ -717,21 +737,28 @@ pub async fn update(
     load(&state, id).await.map(Json)
 }
 
+/// A delete puts the node in the trash; one already in the trash is purged.
 pub async fn remove(
     _: Session,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let removed = delete_subtree(&state.db, &state.config.uploads_dir(), id).await?;
+    let purged = trash::in_trash(&mut *state.db.acquire().await?, id).await?;
+    let removed = if purged {
+        purge_subtree(&state.db, &state.config.uploads_dir(), id).await?
+    } else {
+        trash::trash_subtree(&state.db, id).await?
+    };
     state.backup.signal();
-    Ok(Json(serde_json::json!({ "ok": true, "removed": removed })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "removed": removed, "purged": purged }),
+    ))
 }
 
-/// Delete a node, everything beneath it, and the files nothing outside it
-/// embeds. The one way a node is deleted, so a delete through the SFTP mount
-/// cleans up exactly what one through the API does. Returns how many nodes
-/// went.
-pub async fn delete_subtree(
+/// Delete a node for good, everything beneath it, and the files nothing
+/// outside it embeds. What emptying the trash does, and what the mount does
+/// when a save replaces one file with another. Returns how many nodes went.
+pub async fn purge_subtree(
     db: &SqlitePool,
     uploads: &std::path::Path,
     id: i64,
@@ -746,6 +773,11 @@ pub async fn delete_subtree(
     if role.as_deref() == Some(DIARY) {
         return Err(AppError::BadRequest(
             "the diary space stays — empty it instead, or rename it".into(),
+        ));
+    }
+    if role.as_deref() == Some(trash::TRASH) {
+        return Err(AppError::BadRequest(
+            "the trash stays — :trash purge empties it".into(),
         ));
     }
 
@@ -903,7 +935,8 @@ async fn movable(
     Ok(nodes)
 }
 
-/// Refuse anything but a space or a folder as the place a node goes into.
+/// Refuse anything but a space or a folder as the place a node goes into —
+/// and one in the trash, where whatever went in would go when it is purged.
 pub async fn container(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
     let kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
         .bind(id)
@@ -915,6 +948,11 @@ pub async fn container(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
         return Err(AppError::BadRequest(format!(
             "a {kind} cannot contain other nodes"
         )));
+    }
+    if trash::in_trash(&mut *db, id).await? {
+        return Err(AppError::BadRequest(
+            "that folder is in the trash — :trash brings it back".into(),
+        ));
     }
     Ok(())
 }
@@ -1001,7 +1039,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        delete_subtree, excerpt, fts_query, next_slug, recent_documents, slugify, EXCERPT_CHARS,
+        excerpt, fts_query, next_slug, purge_subtree, recent_documents, slugify, EXCERPT_CHARS,
         HEAD_CHARS,
     };
     use crate::error::AppError;
@@ -1029,7 +1067,7 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            delete_subtree(&db, dir.path(), diary).await,
+            purge_subtree(&db, dir.path(), diary).await,
             Err(AppError::BadRequest(_))
         ));
 
@@ -1071,7 +1109,7 @@ mod tests {
             }
         }
 
-        assert_eq!(delete_subtree(&db, dir.path(), folder).await.unwrap(), 2);
+        assert_eq!(purge_subtree(&db, dir.path(), folder).await.unwrap(), 2);
         let media: Vec<String> = sqlx::query_scalar("SELECT id FROM media")
             .fetch_all(&db)
             .await
@@ -1080,7 +1118,7 @@ mod tests {
         assert!(!dir.path().join(only).exists());
         assert!(dir.path().join(shared).exists());
         assert!(matches!(
-            delete_subtree(&db, dir.path(), folder).await,
+            purge_subtree(&db, dir.path(), folder).await,
             Err(AppError::NotFound)
         ));
     }

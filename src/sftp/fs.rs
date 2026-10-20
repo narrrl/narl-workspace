@@ -35,7 +35,7 @@ use crate::{
         Backup,
     },
     error::{AppError, AppResult},
-    routes::{media, nodes, seal},
+    routes::{media, nodes, seal, trash},
     state::AppState,
     vault,
 };
@@ -600,7 +600,8 @@ impl SpaceFs {
         for slug in [leaf, slugged.as_str()] {
             let row = sqlx::query(
                 "SELECT id, kind, slug, updated_at FROM nodes
-                 WHERE parent_id IS ?1 AND slug = ?2 AND kind IN ('space', 'folder')",
+                 WHERE parent_id IS ?1 AND slug = ?2 AND kind IN ('space', 'folder')
+                   AND role IS NOT 'trash'",
             )
             .bind(parent)
             .bind(slug)
@@ -773,8 +774,24 @@ impl SpaceFs {
         Ok(())
     }
 
+    /// `rm` and `rmdir`: into the trash, as a delete in the browser does.
     async fn delete_node(&self, id: i64) -> SftpResult<()> {
-        nodes::delete_subtree(&self.db, &self.uploads, id)
+        trash::trash_subtree(&self.db, id)
+            .await
+            .map_err(|e| match e {
+                AppError::NotFound => StatusCode::NoSuchFile,
+                AppError::BadRequest(_) => StatusCode::PermissionDenied,
+                _ => StatusCode::Failure,
+            })?;
+        self.changed();
+        Ok(())
+    }
+
+    /// A rename onto a name that is taken: what was there is replaced, as
+    /// `rename(2)` replaces it, and not kept in the trash — an editor or
+    /// `rsync` saving that way would fill it with every save.
+    async fn replace_node(&self, id: i64) -> SftpResult<()> {
+        nodes::purge_subtree(&self.db, &self.uploads, id)
             .await
             .map_err(|e| match e {
                 AppError::NotFound => StatusCode::NoSuchFile,
@@ -1081,7 +1098,8 @@ impl SpaceFs {
         let parent = self.resolve_dir(&segs).await?;
         let rows = sqlx::query(&format!(
             "SELECT kind, slug, updated_at, {DOC_SIZE} AS size FROM nodes
-             WHERE parent_id IS ?1 AND kind <> 'file' ORDER BY kind, slug"
+             WHERE parent_id IS ?1 AND kind <> 'file' AND role IS NOT 'trash'
+             ORDER BY kind, slug"
         ))
         .bind(parent)
         .fetch_all(&self.db)
@@ -1716,7 +1734,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                     (Some(_), Some(Target::Doc(other))) if other.id != doc.id => {
                         self.save_doc(other.id, render_doc(&doc.name, &doc.body).into_bytes())
                             .await?;
-                        self.delete_node(doc.id).await?;
+                        self.replace_node(doc.id).await?;
                     }
                     (Some(stem), _) => {
                         let new_slug = nodes::unique_slug(
@@ -1763,7 +1781,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                     Some(Target::Dir { .. } | Target::Doc(_)) => return Err(StatusCode::Failure),
                     Some(Target::File(other)) if other.id == file.id => {}
                     // Onto another file, as rename(2) does: that one goes.
-                    Some(Target::File(other)) => self.delete_node(other.id).await?,
+                    Some(Target::File(other)) => self.replace_node(other.id).await?,
                     Some(Target::Scratch(key)) => {
                         self.scratch.remove(&key);
                     }
@@ -1958,6 +1976,11 @@ mod tests {
             .await
             .expect("remove");
         assert_eq!(names(&fs).await, ["notes.md"]);
+        // In the trash, with their bytes, until it is emptied.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+        crate::routes::trash::purge_older(&fs.db, dir.path(), i64::MAX)
+            .await
+            .expect("empty the trash");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 

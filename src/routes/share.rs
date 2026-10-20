@@ -16,7 +16,7 @@ use crate::{
     auth::{self, Session},
     config::Config,
     error::{AppError, AppResult},
-    routes::media,
+    routes::{media, trash},
     state::AppState,
 };
 
@@ -187,7 +187,7 @@ pub async fn read(
     Json(body): Json<ReadRequest>,
 ) -> AppResult<impl IntoResponse> {
     let row = sqlx::query(
-        "SELECT name, body, created_at, updated_at, share_key_hash
+        "SELECT id, name, body, created_at, updated_at, share_key_hash
          FROM nodes WHERE share_token = ?1",
     )
     .bind(&token)
@@ -201,6 +201,11 @@ pub async fn read(
         // confirm that the token itself is live.
         return Err(AppError::NotFound);
     };
+    // A document in the trash is not published, but its link comes back with
+    // it: the key is still the one its readers hold.
+    if trash::in_trash(&mut *state.db.acquire().await?, row.get("id")).await? {
+        return Err(AppError::NotFound);
+    }
 
     let cookie = share_cookie(&state.config, &token, &stored);
     Ok((
@@ -223,8 +228,8 @@ pub async fn serve_media(
     Path((token, id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let stored: Option<String> = sqlx::query(
-        "SELECT n.share_key_hash
+    let row = sqlx::query(
+        "SELECT n.id, n.share_key_hash
          FROM node_media nm
          JOIN nodes n ON n.id = nm.node_id
          WHERE nm.media_id = ?1 AND n.share_token = ?2",
@@ -232,13 +237,18 @@ pub async fn serve_media(
     .bind(&id)
     .bind(&token)
     .fetch_optional(&state.db)
-    .await?
-    .and_then(|row| row.get("share_key_hash"));
+    .await?;
+    let stored: Option<String> = row.as_ref().and_then(|row| row.get("share_key_hash"));
 
     let allowed =
         stored.is_some_and(|stored| holds_share_cookie(&state.config, &headers, &token, &stored));
     if !allowed {
         return Err(AppError::NotFound);
+    }
+    if let Some(row) = &row {
+        if trash::in_trash(&mut *state.db.acquire().await?, row.get("id")).await? {
+            return Err(AppError::NotFound);
+        }
     }
     media::stream_media(&state, &id, false, headers.get(header::RANGE)).await
 }
@@ -365,6 +375,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s.media(Some(&cookie)).await, StatusCode::NOT_FOUND);
+    }
+
+    /// A shared document in the trash answers like an unknown link, and comes
+    /// back with the link its readers already hold.
+    #[tokio::test]
+    async fn the_trash_unpublishes_until_a_restore() {
+        let s = shared().await;
+        let (status, set) = s.read(&s.key).await;
+        assert_eq!(status, StatusCode::OK);
+        let cookie = set.unwrap().split(';').next().unwrap().to_string();
+        let doc: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE share_token = ?1")
+            .bind(&s.token)
+            .fetch_one(&s.state.db)
+            .await
+            .unwrap();
+
+        crate::routes::trash::trash_subtree(&s.state.db, doc)
+            .await
+            .unwrap();
+        assert_eq!(s.read(&s.key).await, (StatusCode::NOT_FOUND, None));
+        assert_eq!(s.media(Some(&cookie)).await, StatusCode::NOT_FOUND);
+
+        crate::routes::trash::restore_node(&s.state, doc)
+            .await
+            .unwrap();
+        assert_eq!(s.read(&s.key).await.0, StatusCode::OK);
+        assert_eq!(s.media(Some(&cookie)).await, StatusCode::OK);
     }
 
     #[tokio::test]

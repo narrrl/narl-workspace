@@ -1,6 +1,7 @@
 import { tick } from 'svelte'
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
+import { emptyTrash } from './Trash.svelte'
 import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
 
 export type { ScrollAmount, SidewaysAmount }
@@ -693,7 +694,7 @@ export const commands: CommandSpec[] = [
     aliases: ['d', 'rm'],
     args: '[id]',
     group: 'documents',
-    help: 'delete a node, and everything under it (asks first)',
+    help: 'delete a node, and everything under it, into the trash (asks first) — u brings it back',
     run: async (arg) => {
       // On the board the thing under the cursor is a card, not a node.
       if (workspace.view === 'board') {
@@ -712,7 +713,7 @@ export const commands: CommandSpec[] = [
         node && isContainer(node)
           ? `delete the ${node.kind} ${name} and everything in it?`
           : `delete ${name}?`
-      if (!(await workspace.ask(`${what} this cannot be undone.`))) return
+      if (!(await workspace.ask(`${what} it goes to the trash.`))) return
       await workspace.guard(() => workspace.deleteNode(id))
     },
   },
@@ -761,7 +762,7 @@ export const commands: CommandSpec[] = [
     aliases: ['rms'],
     args: '[name]',
     group: 'tree',
-    help: 'delete a space and everything in it (asks first)',
+    help: 'delete a space and everything in it, into the trash (asks first)',
     complete: spaceNames,
     run: async (arg) => {
       const wanted = arg.trim().toLowerCase()
@@ -769,10 +770,26 @@ export const commands: CommandSpec[] = [
         ? workspace.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted)
         : workspace.space
       if (!space) return workspace.say(`no such space: ${wanted || '(none open)'}`, 'error')
-      if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? this cannot be undone.`))) {
+      if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? it goes to the trash.`))) {
         return
       }
       await workspace.guard(() => workspace.deleteSpace(space.id))
+    },
+  },
+  {
+    name: 'trash',
+    args: '[purge]',
+    group: 'tree',
+    help: 'what was deleted — j/k, Enter brings it back, x deletes it for good; :trash purge empties it',
+    complete: () => ['purge'],
+    run: async (arg) => {
+      if (arg.trim() === 'purge') return emptyTrash()
+      if (arg.trim()) return workspace.say('usage: :trash [purge]', 'error')
+      await workspace.guard(async () => {
+        await workspace.loadTrash()
+        workspace.trashCursor = 0
+        workspace.overlay = 'trash'
+      })
     },
   },
   {

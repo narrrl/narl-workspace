@@ -10,6 +10,7 @@ pub mod seal;
 pub mod session;
 pub mod share;
 pub mod ssh_keys;
+pub mod trash;
 pub mod vault;
 
 use axum::{
@@ -93,6 +94,9 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/media/{id}", get(media::serve).delete(media::remove))
         .route("/share/{token}", post(share::read))
         .route("/share/{token}/media/{id}", get(share::serve_media))
+        .route("/trash", get(trash::list).delete(trash::empty))
+        .route("/trash/{id}", delete(trash::purge))
+        .route("/trash/{id}/restore", post(trash::restore))
         .route("/ssh-keys", get(ssh_keys::list).post(ssh_keys::add))
         .route(
             "/ssh-keys/{id}",

@@ -14,6 +14,7 @@
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
   import MediaBrowser, { copyMedia, insertMedia, removeMedia } from './lib/MediaBrowser.svelte'
+  import Trash, { purgeTrashed, restoreTrashed } from './lib/Trash.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
   import SecretPrompt from './lib/SecretPrompt.svelte'
@@ -391,6 +392,35 @@
     }
   }
 
+  /** The trash's keys: j/k down what was deleted, Enter or r restores, x deletes for good. */
+  function trashKey(event: KeyboardEvent): boolean {
+    const items = workspace.trash
+    const last = Math.max(items.length - 1, 0)
+    const item = items[workspace.trashCursor]
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        workspace.trashCursor = Math.min(workspace.trashCursor + 1, last)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.trashCursor = Math.max(workspace.trashCursor - 1, 0)
+        return true
+      case 'G':
+        workspace.trashCursor = last
+        return true
+      case 'Enter':
+      case 'r':
+        if (item) void restoreTrashed(item)
+        return true
+      case 'x':
+        if (item) void purgeTrashed(item)
+        return true
+      default:
+        return false
+    }
+  }
+
   /*
    * `F`: the hints are pinned where the targets are, so a pane still sliding
    * in — a space switch, the board just opened — is let settle first.
@@ -574,6 +604,12 @@
     }
     if (workspace.overlay === 'media' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (mediaKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
+    if (workspace.overlay === 'trash' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (trashKey(event)) {
         event.preventDefault()
         return
       }
@@ -862,6 +898,11 @@
         event.preventDefault()
         void runCommand('d')
         break
+      case 'u':
+        // A delete goes to the trash, so it can be undone the way vim undoes.
+        event.preventDefault()
+        void workspace.guard(() => workspace.undoDelete())
+        break
       case 's':
         // Sharing is a key away; taking a link back from its readers asks first.
         event.preventDefault()
@@ -1000,7 +1041,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

@@ -12,6 +12,7 @@ import {
   type MediaFile,
   type NodeSummary,
   type SpaceOverview,
+  type TrashItem,
   type VaultStatus,
 } from './api'
 import { formatBytes, isTouchDevice, sealedNote, type Heading } from './util'
@@ -278,7 +279,7 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash'>('none')
   /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
   outline = $state.raw<Heading[]>([])
   outlineCursor = $state(0)
@@ -305,6 +306,11 @@ class Workspace {
   vault = $state<VaultStatus | null>(null)
   media = $state<MediaFile[]>([])
   mediaCursor = $state(0)
+  /** What `:trash` lists: everything deleted, the last first. */
+  trash = $state<TrashItem[]>([])
+  trashCursor = $state(0)
+  /** The last thing deleted here, which `u` puts back. */
+  lastDeleted = $state<number | null>(null)
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
@@ -998,13 +1004,67 @@ class Workspace {
     for (const tile of showing) tile.stopAutosave()
     this.dropStash(id)
     const node = showing[0]?.open ?? this.nodes.find((n) => n.id === id)
-    const { removed } = await api.deleteNode(id)
+    const { removed, purged } = await api.deleteNode(id)
     for (const tile of showing) tile.clear()
     this.prune()
     this.marked = this.marked.filter((n) => n.id !== id)
     await this.refresh()
     const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
-    this.say(removed > 1 ? `deleted ${name} and ${removed - 1} inside it` : `deleted ${name}`)
+    if (purged) return this.say(`deleted ${name} for good`)
+    this.lastDeleted = id
+    const what = removed > 1 ? `${name} and ${removed - 1} inside it` : name
+    this.say(`${what} went to the trash — u brings it back`)
+  }
+
+  /** `u`: the last delete, undone. */
+  async undoDelete() {
+    const id = this.lastDeleted
+    if (id === null) return this.say('nothing deleted here to undo — :trash has the rest', 'error')
+    await this.restore(id)
+  }
+
+  /**
+   * Out of the trash, back where it was. A space is entered again; anything
+   * else in the space being browsed gets the cursor, so `u` lands on what it
+   * brought back.
+   */
+  async restore(id: number) {
+    const { node, elsewhere } = await api.restore(id)
+    if (this.lastDeleted === id) this.lastDeleted = null
+    const name = `"${node.name.trim() || node.slug}"`
+    if (node.kind === 'space') {
+      this.spaces = await api.listSpaces()
+      if (this.overlay !== 'trash') await this.enterSpace(node.id)
+      this.say(`restored the space ${name}`)
+    } else {
+      const parent = node.path.at(-2)
+      if (parent && node.path[0]?.id === this.spaceId && this.view === 'tree') {
+        if (parent.id === this.parentId && !this.query) await this.refresh(node.id)
+        else if (this.overlay !== 'trash') await this.goTo(parent.id, node.id)
+      }
+      const where = node.path.slice(0, -1).map((crumb) => crumb.slug).join('/')
+      this.say(elsewhere ? `restored ${name} to ${where} — the folder it was in is gone` : `restored ${name} to ${where}`)
+    }
+    if (this.overlay === 'trash') await this.loadTrash()
+  }
+
+  async loadTrash() {
+    this.trash = await api.trash()
+    this.trashCursor = Math.min(this.trashCursor, Math.max(this.trash.length - 1, 0))
+  }
+
+  /** Delete one thing in the trash for good, files and all. */
+  async purge(id: number) {
+    await api.purge(id)
+    if (this.lastDeleted === id) this.lastDeleted = null
+    await this.loadTrash()
+  }
+
+  async emptyTrash() {
+    const { removed } = await api.emptyTrash()
+    this.lastDeleted = null
+    if (this.overlay === 'trash') await this.loadTrash()
+    this.say(removed === 1 ? 'the trash is empty — 1 thing deleted for good' : `the trash is empty — ${removed} things deleted for good`)
   }
 
   /**
@@ -1038,6 +1098,7 @@ class Workspace {
    */
   async deleteSpace(id: number) {
     const { removed } = await api.deleteNode(id)
+    this.lastDeleted = id
     for (const tile of this.tiles) tile.clear()
     this.prune()
     this.rawBoard = null
@@ -1053,7 +1114,7 @@ class Workspace {
       this.nodes = []
       this.cursor = 0
     }
-    this.say(`deleted the space and ${removed - 1} node(s) in it`)
+    this.say(`the space and ${removed - 1} node(s) in it went to the trash — u brings it back`)
   }
 
   /** Reparent the node under the cursor, for `:mv`. */
@@ -1443,6 +1504,18 @@ class Workspace {
     const space = this.spaceId
     if (!card || space === null) return
     let nodeId = card.node_id
+    if (nodeId !== null) {
+      // Deleted notes read as gone, but the card still points at them, so
+      // the way back to them is named rather than a bare "not found".
+      try {
+        await api.getNode(nodeId)
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          return this.say(`the notes of "${card.title}" are gone — :trash may still have them`, 'error')
+        }
+        throw error
+      }
+    }
     if (nodeId === null) {
       const node = await api.createNode({ parent_id: space, name: card.title, body: '' })
       await api.updateCard(card.id, { node_id: node.id })

@@ -191,7 +191,7 @@ async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard
          JOIN board_lists l ON l.id = c.list_id
          JOIN bounds b ON b.space_id = l.space_id
          JOIN nodes s ON s.id = l.space_id
-         WHERE s.has_board <> 0
+         WHERE s.has_board <> 0 AND s.parent_id IS NULL
            AND c.done_at IS NULL
            AND (l.position < b.last OR b.first = b.last)
            AND ((c.due_at IS NOT NULL AND c.due_at < ?1) OR (l.position > b.first))

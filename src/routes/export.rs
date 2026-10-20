@@ -21,7 +21,7 @@ use crate::{
     routes::{
         manifest::{self, CardMeta, ListMeta, Manifest, NodeMeta, SpaceMeta},
         media::MEDIA_REF,
-        nodes::{is_container, DOCUMENT, SPACE},
+        nodes::{is_container, DOCUMENT, LIVE, SPACE},
     },
     state::AppState,
 };
@@ -179,11 +179,12 @@ tree stays intact. Nothing here needs the workspace application to read it.
 /// Everything, as one zip. A workspace you cannot get out of is not one you
 /// can trust, so this is deliberately a plain archive of plain files.
 pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Response> {
-    let nodes: HashMap<i64, ExportNode> = sqlx::query(
-        "SELECT id, parent_id, kind, name, slug, body, media_id, created_at, updated_at,
+    let nodes: HashMap<i64, ExportNode> = sqlx::query(&format!(
+        "WITH RECURSIVE {LIVE}
+         SELECT id, parent_id, kind, name, slug, body, media_id, created_at, updated_at,
                 has_board, role
-         FROM nodes ORDER BY created_at, id",
-    )
+         FROM nodes WHERE id IN (SELECT id FROM live) ORDER BY created_at, id"
+    ))
     .fetch_all(&state.db)
     .await?
     .into_iter()

@@ -23,7 +23,7 @@ export interface NodeSummary {
   excerpt: string
   position: number
   has_board: boolean
-  /** Spaces the app has to tell apart: `diary`, or nothing. */
+  /** Nodes the app has to tell apart: `diary`, `trash`, or nothing. */
   role: string | null
   child_count: number
   created_at: number
@@ -76,6 +76,21 @@ export interface SshKey {
   last_used_at: number | null
   /** May read sealed files over the mount while the vault is open. */
   vault: boolean
+}
+
+/** Something deleted, waiting in the trash to be restored or purged. */
+export interface TrashItem {
+  id: number
+  kind: NodeKind
+  name: string
+  slug: string
+  /** The folder it was deleted from, `work/notes`; empty for a space. */
+  from: string
+  deleted_at: number
+  /** When the sweep deletes it for good. */
+  purge_at: number
+  /** How many nodes are inside it. */
+  inside: number
 }
 
 export interface SharedDocument {
@@ -383,8 +398,19 @@ export const api = {
     input: { name: string; body: string; created_at?: number; has_board?: boolean; base_updated_at?: number },
   ) => request<WorkspaceNode>(`/nodes/${id}`, { method: 'PUT', body: body(input) }),
 
+  /** Into the trash; `purged` when it was in the trash already and is now gone. */
   deleteNode: (id: number) =>
-    request<{ ok: true; removed: number }>(`/nodes/${id}`, { method: 'DELETE' }),
+    request<{ ok: true; removed: number; purged: boolean }>(`/nodes/${id}`, { method: 'DELETE' }),
+
+  trash: () => request<TrashItem[]>('/trash'),
+
+  /** Back where it was; `elsewhere` when that folder is gone and it went to its space. */
+  restore: (id: number) =>
+    request<{ node: WorkspaceNode; elsewhere: boolean }>(`/trash/${id}/restore`, { method: 'POST' }),
+
+  purge: (id: number) => request<{ ok: true; removed: number }>(`/trash/${id}`, { method: 'DELETE' }),
+
+  emptyTrash: () => request<{ ok: true; removed: number }>('/trash', { method: 'DELETE' }),
 
   moveNode: (id: number, parent_id: number, position?: number) =>
     request<WorkspaceNode>(`/nodes/${id}/move`, { method: 'POST', body: body({ parent_id, position }) }),

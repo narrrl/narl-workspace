@@ -1,6 +1,7 @@
 //! Housekeeping for `uploads/`: what a crash, a killed upload or a forgotten
 //! embed leaves behind. Nothing else ever deletes these, so without this they
-//! would only grow — on the disk and in every backup of it.
+//! would only grow — on the disk and in every backup of it. The trash is
+//! emptied here too, of what has waited in it long enough.
 
 use std::{collections::HashSet, path::Path, time::Duration};
 
@@ -18,21 +19,22 @@ const UNREFERENCED_DAYS: i64 = 7;
 
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
-pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf) {
+pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf, trash_days: i64) {
     crate::tasks::supervise("the uploads sweep", move || {
         let (db, uploads) = (db.clone(), uploads.clone());
-        sweep_forever(db, uploads)
+        sweep_forever(db, uploads, trash_days)
     });
 }
 
-async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf) {
+async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf, trash_days: i64) {
     {
         let mut ticker = tokio::time::interval(EVERY);
         loop {
             ticker.tick().await;
-            match run(&db, &uploads).await {
+            match run(&db, &uploads, trash_days).await {
                 Ok(swept) if swept.any() => tracing::info!(
-                    "swept uploads: {} partial, {} without a row, {} that nothing embeds",
+                    "swept: {} out of the trash; uploads: {} partial, {} without a row, {} that nothing embeds",
+                    swept.trashed,
                     swept.partial,
                     swept.stray,
                     swept.unreferenced
@@ -46,6 +48,8 @@ async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf) {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Swept {
+    /// Things deleted long enough ago to be purged from the trash.
+    pub trashed: usize,
     pub partial: usize,
     pub stray: usize,
     pub unreferenced: usize,
@@ -53,12 +57,21 @@ pub struct Swept {
 
 impl Swept {
     fn any(&self) -> bool {
-        self.partial + self.stray + self.unreferenced > 0
+        self.trashed + self.partial + self.stray + self.unreferenced > 0
     }
 }
 
-pub async fn run(db: &SqlitePool, uploads: &Path) -> anyhow::Result<Swept> {
-    let mut swept = Swept::default();
+pub async fn run(db: &SqlitePool, uploads: &Path, trash_days: i64) -> anyhow::Result<Swept> {
+    // First, so the files only the purged nodes held are released and go in
+    // this same pass.
+    let trashed =
+        crate::routes::trash::purge_older(db, uploads, crate::now() - trash_days * 86_400)
+            .await
+            .map_err(|e| anyhow::anyhow!("emptying the trash: {e:?}"))?;
+    let mut swept = Swept {
+        trashed,
+        ..Swept::default()
+    };
 
     sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
         .bind(crate::now())
@@ -189,10 +202,11 @@ mod tests {
         let fresh = "55555555-5555-4555-8555-555555555555.part";
         std::fs::write(dir.path().join(fresh), b"x").unwrap();
 
-        let swept = run(&db, dir.path()).await.unwrap();
+        let swept = run(&db, dir.path(), 30).await.unwrap();
         assert_eq!(
             swept,
             Swept {
+                trashed: 0,
                 partial: 1,
                 stray: 2,
                 unreferenced: 1
