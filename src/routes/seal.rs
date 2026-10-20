@@ -509,6 +509,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn several_move_together_or_not_at_all() {
+        use crate::routes::nodes::{move_nodes, Moved};
+
+        let w = world().await;
+        let from = node(&w.state, Some(w.space), "folder", "from").await;
+        let a = plain_file(&w.state, from, "notes.txt").await.unwrap();
+        let b = node(&w.state, Some(w.space), "folder", "inner").await;
+        let c = plain_file(&w.state, b, "notes.txt").await.unwrap();
+        let slug = |id: i64| {
+            sqlx::query_scalar::<_, String>("SELECT slug FROM nodes WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&w.state.db)
+        };
+        let parent = |id: i64| {
+            sqlx::query_scalar::<_, i64>("SELECT parent_id FROM nodes WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&w.state.db)
+        };
+
+        // A folder among them that would go into itself stops all of them.
+        let refused = move_nodes(&w.state, &[a, b], b, None).await.unwrap_err();
+        assert!(matches!(&refused, AppError::BadRequest(m) if m.contains("itself")));
+        assert_eq!(parent(a).await.unwrap(), from);
+        // So does a space.
+        assert!(move_nodes(&w.state, &[a, w.space], w.folder, None)
+            .await
+            .is_err());
+        assert_eq!(parent(a).await.unwrap(), from);
+
+        // Two of a name land side by side, and what is already there stays.
+        let done = move_nodes(&w.state, &[a, c, from], w.space, None).await;
+        assert_eq!(
+            done.unwrap(),
+            Moved {
+                moved: 2,
+                unchanged: 1
+            }
+        );
+        assert_eq!(parent(c).await.unwrap(), w.space);
+        assert_ne!(slug(a).await.unwrap(), slug(c).await.unwrap());
+
+        // Into a sealed folder with the vault shut, none goes.
+        seal_node(&w.state, w.folder).await.unwrap();
+        w.state.vault.lock();
+        assert!(matches!(
+            move_nodes(&w.state, &[a, c], w.folder, None).await,
+            Err(AppError::Locked)
+        ));
+        assert_eq!(parent(a).await.unwrap(), w.space);
+
+        // With it open, they all go, and sealed.
+        w.state.vault.open_with(Zeroizing::new([7u8; 32]));
+        let done = move_nodes(&w.state, &[a, c, b], w.folder, None).await;
+        assert_eq!(
+            done.unwrap(),
+            Moved {
+                moved: 3,
+                unchanged: 0
+            }
+        );
+        assert!(encrypted(&w.state, a).await && encrypted(&w.state, c).await);
+        assert!(sealed(&w.state, b).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn only_the_sealed_folder_itself_opens() {
         let w = world().await;
         let inner = node(&w.state, Some(w.folder), "folder", "inner").await;

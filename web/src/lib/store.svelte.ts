@@ -89,12 +89,13 @@ class Workspace {
   returnTo = $state<'board' | null>(null)
 
   /*
-   * The node picked up by `m`, waiting for the `p` that drops it into whatever
-   * folder the list is showing then. A move is two keystrokes apart in time
-   * because the destination is somewhere else in the tree — there is no way to
-   * name it and be somewhere else at once.
+   * The nodes picked up by `m`, waiting for the `p` that drops them into
+   * whatever folder the list is showing then. A move is two keystrokes apart
+   * in time because the destination is somewhere else in the tree — there is
+   * no way to name it and be somewhere else at once — so the marks stay put
+   * while the list walks, and can be gathered from several folders.
    */
-  marked = $state<NodeSummary | null>(null)
+  marked = $state.raw<NodeSummary[]>([])
 
   pane = $state<Pane>('list')
   vimMode = $state('normal')
@@ -758,7 +759,7 @@ class Workspace {
       this.dirty = false
       this.pane = 'list'
     }
-    if (this.marked?.id === id) this.marked = null
+    this.marked = this.marked.filter((n) => n.id !== id)
     await this.refresh()
     const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
     this.say(removed > 1 ? `deleted ${name} and ${removed - 1} inside it` : `deleted ${name}`)
@@ -820,6 +821,34 @@ class Workspace {
     this.say(`moved #${id}`)
   }
 
+  isMarked(id: number): boolean {
+    return this.marked.some((n) => n.id === id)
+  }
+
+  /**
+   * Move `nodes` into `parent`, all or none, and say how it went. An open one
+   * is saved and closed first: it is about to be somewhere else.
+   */
+  async moveNodes(nodes: NodeSummary[], parent: number, where = 'here') {
+    if (nodes.length === 0) return this.say('nothing marked — press m on a row first', 'error')
+    if (this.open && nodes.some((n) => n.id === this.open?.id)) {
+      await this.flush()
+      this.open = null
+      this.editing = false
+      this.pane = 'list'
+    }
+    const { moved, unchanged } = await api.moveNodes(
+      nodes.map((n) => n.id),
+      parent,
+    )
+    const gone = new Set(nodes.map((n) => n.id))
+    this.marked = this.marked.filter((n) => !gone.has(n.id))
+    await this.refresh(nodes.length === 1 ? nodes[0].id : undefined)
+    const what = nodes.length === 1 ? nodes[0].name.trim() || nodes[0].slug : `${moved}`
+    const already = unchanged > 0 ? ` — ${unchanged} already ${unchanged === 1 ? 'was' : 'were'}` : ''
+    this.say(moved === 0 ? `already ${where}` : `moved ${what} ${where}${already}`)
+  }
+
   /** `1`..`9`, `0`: the space at that place on the bar. */
   async switchSpace(index: number) {
     const space = this.spaces[index]
@@ -841,22 +870,11 @@ class Workspace {
    */
   async sendToSpace(index: number) {
     const space = this.spaces[index]
-    const node = this.marked ?? this.selected
+    const nodes = this.marked.length ? this.marked : this.selected ? [this.selected] : []
     if (!space) return this.say(`no space ${index + 1}`, 'error')
-    if (!node) return this.say('nothing selected', 'error')
-    if (node.parent_id === space.id) return this.say(`already in ${space.slug}`)
-
-    if (this.open?.id === node.id) {
-      await this.flush()
-      this.open = null
-      this.editing = false
-      this.pane = 'list'
-    }
-    await api.moveNode(node.id, space.id)
-    this.marked = null
-    await this.refresh()
+    if (nodes.length === 0) return this.say('nothing selected', 'error')
+    await this.moveNodes(nodes, space.id, `→ ${index + 1} ${space.slug}`)
     this.spaces = await api.listSpaces()
-    this.say(`moved ${node.name.trim() || node.slug} → ${index + 1} ${space.slug}`)
   }
 
   async loadAgenda() {
@@ -904,33 +922,56 @@ class Workspace {
     this.overview = await api.overview()
   }
 
-  /** `m`: pick the node under the cursor up, or put it back down unmoved. */
-  mark() {
-    const node = this.selected
+  /**
+   * `m`: pick the node under the cursor up, or put it back down unmoved, and
+   * step to the next row — `mmm` picks up three in a row.
+   */
+  mark(node = this.selected, step = true) {
     if (!node) return this.say('nothing selected', 'error')
-    if (this.marked?.id === node.id) {
-      this.marked = null
-      return this.say('unmarked')
-    }
-    this.marked = node
-    this.say(`marked ${node.name.trim() || node.slug} — p drops it in this folder`)
+    this.marked = this.isMarked(node.id) ? this.marked.filter((n) => n.id !== node.id) : [...this.marked, node]
+    if (step && node === this.selected) this.move(1)
+    this.#sayMarked()
   }
 
-  /** `p`: drop the marked node into the folder the list is showing. */
-  async drop() {
-    const node = this.marked
-    const parent = this.parentId
-    if (!node) return this.say('nothing marked — press m on a row first', 'error')
-    if (parent === null) return this.say('no folder open', 'error')
-    if (node.parent_id === parent) {
-      this.marked = null
-      return this.say('already here')
-    }
+  /** Shift-click: mark every row from the cursor to `index`. */
+  markRange(index: number) {
+    const [from, to] = [Math.min(this.cursor, index), Math.max(this.cursor, index)]
+    const rows = this.nodes.slice(from, to + 1).filter((n) => !this.isMarked(n.id))
+    this.marked = [...this.marked, ...rows]
+    this.cursor = index
+    this.#sayMarked()
+  }
 
-    await api.moveNode(node.id, parent)
-    this.marked = null
-    await this.refresh(node.id)
-    this.say(`moved ${node.name.trim() || node.slug} here`)
+  /** `M`: mark the whole folder, or, when it all is, none of it. */
+  markAll() {
+    const all = this.nodes.length > 0 && this.nodes.every((n) => this.isMarked(n.id))
+    const here = new Set(this.nodes.map((n) => n.id))
+    this.marked = all
+      ? this.marked.filter((n) => !here.has(n.id))
+      : [...this.marked, ...this.nodes.filter((n) => !this.isMarked(n.id))]
+    this.#sayMarked()
+  }
+
+  unmarkAll() {
+    if (this.marked.length === 0) return
+    this.marked = []
+    this.say('unmarked')
+  }
+
+  #sayMarked() {
+    const count = this.marked.length
+    if (count === 0) return this.say('unmarked')
+    const first = this.marked[0]
+    const what = count === 1 ? first.name.trim() || first.slug : `${count} nodes`
+    this.say(`marked ${what} — p drops ${count === 1 ? 'it' : 'them'} in the folder you are in`)
+  }
+
+  /** `p`: drop the marked nodes into the folder the list is showing. */
+  async drop() {
+    const parent = this.parentId
+    if (this.marked.length === 0) return this.say('nothing marked — press m on a row first', 'error')
+    if (parent === null) return this.say('no folder open', 'error')
+    await this.moveNodes(this.marked, parent)
   }
 
   /*

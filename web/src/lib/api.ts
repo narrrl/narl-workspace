@@ -359,6 +359,9 @@ export const api = {
 
   moveNode: (id: number, parent_id: number, position?: number) =>
     request<WorkspaceNode>(`/nodes/${id}/move`, { method: 'POST', body: body({ parent_id, position }) }),
+  /** All of them into `parent_id`, or none when one cannot go. */
+  moveNodes: (ids: number[], parent_id: number) =>
+    request<{ moved: number; unchanged: number }>('/nodes/move', { method: 'POST', body: body({ ids, parent_id }) }),
 
   /** Publishes the document, or mints a fresh key for one already published. */
   share: (id: number) =>

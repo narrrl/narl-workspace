@@ -1,5 +1,6 @@
 <script lang="ts">
   import { isContainer, type NodeSummary } from './api'
+  import { carry, into, release } from './carry'
   import Icon from './Icon.svelte'
   import { workspace } from './store.svelte'
   import { formatBytes, formatDay, formatTime, formatWeekday, isTouchDevice } from './util'
@@ -35,6 +36,13 @@
     if (files.length === 0 || workspace.query) return
     event.preventDefault()
     void workspace.guard(() => workspace.putFiles(files))
+  }
+
+  /* Ctrl or Cmd picks a row up, Shift every row from the cursor to it. */
+  function click(event: MouseEvent, index: number, node: NodeSummary) {
+    if (event.ctrlKey || event.metaKey) return workspace.mark(node, false)
+    if (event.shiftKey) return workspace.markRange(index)
+    pick(index)
   }
 
   function pick(index: number) {
@@ -99,7 +107,13 @@
           <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>
       {/if}
-      <li class="item">
+      <li
+        class="item"
+        draggable={!isTouchDevice}
+        ondragstart={(event) => carry(event, node)}
+        ondragend={release}
+        {@attach into(isContainer(node) ? node.id : null, `into ${label(node)}`)}
+      >
         <button
           class="row"
           oncontextmenu={(event) => {
@@ -108,15 +122,16 @@
           }}
           class:active={index === workspace.cursor}
           class:open={workspace.open?.id === node.id}
+          class:marked={workspace.isMarked(node.id)}
           data-index={index}
-          onclick={() => pick(index)}
+          onclick={(event) => click(event, index, node)}
         >
           <span class="dot"></span>
           <span class="title">
             {label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}
             {#if workspace.query && node.location}<span class="where">{node.location}</span>{/if}
           </span>
-          {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
+          {#if workspace.isMarked(node.id)}<span class="badge" title="marked — p drops what is marked in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
           {#if node.file?.encrypted}<span class="sealed" title="in the vault"><Icon name="lock" size={12} /></span>{/if}
           {#if node.sealed}<span class="sealed" title="sealed — files added here go into the vault"><Icon name="lock" size={12} /></span>{/if}
@@ -214,6 +229,8 @@
   .row:hover { background: var(--surface-alt); color: var(--light); border-color: transparent; }
   .row:active { transform: none; }
   .row.open { color: var(--light); }
+  /* Picked up: a rule down the left edge, which the cursor's fill still shows. */
+  .row.marked { box-shadow: inset 2px 0 0 var(--light-dim); color: var(--light); }
   .row.active, .row:focus-visible { background: var(--light); color: var(--ink); }
   .row.active :is(.aside, .slash, .badge), .row:focus-visible :is(.aside, .slash, .badge) { color: var(--ink); }
 

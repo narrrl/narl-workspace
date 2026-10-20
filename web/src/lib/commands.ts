@@ -337,9 +337,9 @@ export const commands: CommandSpec[] = [
     aliases: ['mv'],
     args: '<folder|..>',
     group: 'tree',
-    help: 'move the selected node into a folder here, or up one level',
+    help: 'move the marked nodes, or else the selected one, into a folder here, or up one level',
     run: async (arg) => {
-      const node = workspace.target
+      const node = workspace.marked[0] ?? workspace.target
       if (!node) return workspace.say('nothing selected', 'error')
       const target = arg.trim()
       if (!target) return workspace.say('usage: :mv <folder|..>', 'error')
@@ -354,8 +354,15 @@ export const commands: CommandSpec[] = [
       const destination = target === '..' ? await up() : findFolder(target)?.id
       if (destination === undefined) return workspace.say(`no such folder: ${target}`, 'error')
       if (destination === node.id) return workspace.say('a folder cannot hold itself', 'error')
+      if (workspace.marked.length) return workspace.guard(() => workspace.moveNodes(workspace.marked, destination))
       await workspace.guard(() => workspace.moveNode(node.id, destination))
     },
+  },
+  {
+    name: 'unmark',
+    group: 'tree',
+    help: 'put down everything picked up with m',
+    run: () => workspace.unmarkAll(),
   },
   {
     name: 'new',

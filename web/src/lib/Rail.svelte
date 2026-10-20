@@ -7,11 +7,14 @@
    * same doors out in a row for the bottom band on a phone, without the ones
    * that only make sense with a keyboard or two panes.
    */
+  import type { NodeSummary } from './api'
   import { hooks, runCommand } from './commands'
   import Icon, { type IconName } from './Icon.svelte'
   import { workspace } from './store.svelte'
 
   const { dock = false }: { dock?: boolean } = $props()
+
+  const dropping = (nodes: NodeSummary[]) => (nodes.length === 1 ? nodes[0].name.trim() || nodes[0].slug : `${nodes.length} nodes`)
 
   type Door = {
     icon: IconName
@@ -80,8 +83,8 @@
       ],
       [
         { icon: 'upload', label: 'Upload files into this folder', keys: [':upload'], run: () => hooks.pickTreeFiles(false) },
-        ...(workspace.marked
-          ? [{ icon: 'drop' as const, label: `Drop ${workspace.marked.name.trim() || workspace.marked.slug} here`, keys: ['p'], run: () => workspace.guard(() => workspace.drop()), on: true }]
+        ...(workspace.marked.length
+          ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.marked)} here`, keys: ['p'], run: () => workspace.guard(() => workspace.drop()), on: true }]
           : []),
       ],
       [

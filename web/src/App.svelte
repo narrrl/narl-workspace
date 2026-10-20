@@ -568,9 +568,13 @@
         else void workspace.guard(() => workspace.openSelected())
         break
       case 'm':
-        // Pick a node up here, walk to a folder, put it down with `p`.
+        // Pick nodes up here, walk to a folder, put them down with `p`.
         event.preventDefault()
         workspace.mark()
+        break
+      case 'M':
+        event.preventDefault()
+        workspace.markAll()
         break
       case 'p':
         event.preventDefault()
@@ -619,6 +623,7 @@
       case 'Escape':
         event.preventDefault()
         if (workspace.open) void runCommand('q')
+        else workspace.unmarkAll()
         break
       case 'x':
         event.preventDefault()

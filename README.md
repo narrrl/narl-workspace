@@ -67,7 +67,7 @@ it; in the document pane it is that document. In the browse pane:
 | key | action |
 | --- | --- |
 | `1` … `9`, `0` | switch to that space |
-| `Shift-1` … `9` | send the marked or selected node to that space |
+| `Shift-1` … `9` | send the marked nodes, or the selected one, to that space |
 | `Tab`, `Shift-Tab` | next / previous space |
 | `w` | overview of every space; `hjkl` then `Enter` |
 | `f` | fullscreen the focused pane |
@@ -80,7 +80,8 @@ it; in the document pane it is that document. In the browse pane:
 | `O` | a new folder here |
 | `i`, `a` | edit the open entry |
 | `R` | rename what is highlighted — a document, a folder or a file (`:name!` renames the space) |
-| `m` / `p` | pick a node up, then drop it into the folder you walk to |
+| `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
+| `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
 | `b` | the board of this space |
 | `t` | the agenda: what is late, due this week, or in hand, on every board |
 | `T` | today's diary entry, started if there is none |
@@ -557,6 +558,7 @@ sealed or not.
 | `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, done, link) / delete |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
+| `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |
 | `POST` | `/api/import` | import an export at the root: directories become spaces |
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |

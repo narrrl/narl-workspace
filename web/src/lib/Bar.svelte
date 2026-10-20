@@ -6,6 +6,7 @@
    * that is genuinely faster to walk with a pointer than with `:cd`.
    */
   import Clock from './Clock.svelte'
+  import { into } from './carry'
   import { hooks, runCommand } from './commands'
   import { workspace } from './store.svelte'
 
@@ -26,6 +27,7 @@
         aria-current={space.id === workspace.spaceId}
         title="{space.name} ({index < 10 ? (index + 1) % 10 : ''})"
         onclick={() => workspace.guard(() => workspace.enterSpace(space.id))}
+        {@attach into(space.id, `→ ${space.slug}`)}
       >
         {#if index < 10}<span class="n">{(index + 1) % 10}</span>{/if}<span class="slug">{space.slug}</span>
       </button>
@@ -45,6 +47,7 @@
         class="crumb"
         class:here={crumbs.length === 0}
         onclick={() => workspace.spaceId !== null && workspace.guard(() => workspace.goTo(workspace.spaceId!))}
+        {@attach into(workspace.spaceId, 'into ~')}
       >
         ~
       </button>
@@ -54,6 +57,7 @@
           class="crumb"
           class:here={index === crumbs.length - 1}
           onclick={() => workspace.guard(() => workspace.goTo(crumb.id))}
+          {@attach into(crumb.id, `into ${crumb.slug}`)}
         >
           {crumb.slug}
         </button>

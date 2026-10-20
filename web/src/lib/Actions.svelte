@@ -20,10 +20,17 @@
     const list: Action[] = [
       { label: isContainer(node) ? 'open' : 'read', run: () => workspace.guard(() => workspace.openSelected()) },
       { label: 'rename', run: () => hooks.openCommandLine(`:name ${node.name}`) },
-      workspace.marked?.id === node.id
-        ? { label: 'put it back — not moving', run: () => workspace.mark() }
-        : { label: 'move — then open a folder and drop it there', run: () => workspace.mark() },
+      workspace.isMarked(node.id)
+        ? { label: 'put it back — not moving', run: () => workspace.mark(node, false) }
+        : { label: 'move — then open a folder and drop it there', run: () => workspace.mark(node, false) },
     ]
+    if (workspace.marked.length && workspace.parentId !== null && !workspace.isMarked(node.id)) {
+      const count = workspace.marked.length
+      list.push({
+        label: `drop the ${count === 1 ? 'marked node' : `${count} marked nodes`} here`,
+        run: () => workspace.guard(() => workspace.drop()),
+      })
+    }
     if (node.kind === 'document') {
       list.push(
         node.shared

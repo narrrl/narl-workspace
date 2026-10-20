@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use axum::{
     extract::{Path, Query, State},
@@ -170,6 +170,23 @@ pub struct MoveInput {
     #[serde(default)]
     pub position: Option<i64>,
 }
+
+#[derive(Deserialize)]
+pub struct MoveManyInput {
+    pub ids: Vec<i64>,
+    pub parent_id: i64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Moved {
+    pub moved: usize,
+    /// Already in the folder they were sent to.
+    pub unchanged: usize,
+}
+
+/// How many nodes one move takes: a folder's worth picked up by hand, with
+/// room to spare, and still one short transaction.
+const MOVE_AT_ONCE: usize = 1000;
 
 /// How much of a body the list query reads. Comfortably more than an excerpt
 /// needs, and a rounding error next to documents that run to thousands of words.
@@ -763,68 +780,127 @@ pub async fn move_node(
     Path(id): Path<i64>,
     Json(input): Json<MoveInput>,
 ) -> AppResult<Json<Node>> {
-    if input.parent_id == id {
-        return Err(AppError::BadRequest("a node cannot contain itself".into()));
+    move_nodes(&state, &[id], input.parent_id, input.position).await?;
+    load(&state, id).await.map(Json)
+}
+
+/// Move several nodes into one folder: all of them, or — when one of them
+/// cannot go there — none.
+pub async fn move_many(
+    _: Session,
+    State(state): State<AppState>,
+    Json(input): Json<MoveManyInput>,
+) -> AppResult<Json<Moved>> {
+    let mut seen = HashSet::new();
+    let ids: Vec<i64> = input
+        .ids
+        .into_iter()
+        .filter(|id| seen.insert(*id))
+        .collect();
+    if ids.is_empty() {
+        return Err(AppError::BadRequest("there is nothing to move".into()));
     }
-    // Into a sealed folder, the files go sealed or not at all — and only
-    // into a place it may go at all, which the transaction checks again.
+    if ids.len() > MOVE_AT_ONCE {
+        return Err(AppError::BadRequest(format!(
+            "{MOVE_AT_ONCE} nodes at most move at once"
+        )));
+    }
+    move_nodes(&state, &ids, input.parent_id, None)
+        .await
+        .map(Json)
+}
+
+/// Put `ids` under `parent`, in that order. Every node is checked before any
+/// moves; into a sealed folder they go sealed, or nothing goes.
+pub async fn move_nodes(
+    state: &AppState,
+    ids: &[i64],
+    parent: i64,
+    position: Option<i64>,
+) -> AppResult<Moved> {
+    // Checked before sealing, so that nothing is sealed for a move that is
+    // refused anyway, and again in the transaction that moves them.
     {
         let mut conn = state.db.acquire().await?;
-        container(&mut conn, input.parent_id).await?;
-        if descendants(&mut conn, id).await?.contains(&input.parent_id) {
-            return Err(AppError::BadRequest(
-                "a folder cannot be moved into itself".into(),
-            ));
-        }
+        movable(&mut conn, ids, parent).await?;
     }
-    crate::routes::seal::enter(&state, id, input.parent_id).await?;
+    for &id in ids {
+        crate::routes::seal::enter(state, id, parent).await?;
+    }
 
     let mut tx = crate::db::begin_write(&state.db).await?;
-
-    let row = sqlx::query("SELECT kind, name FROM nodes WHERE id = ?1")
+    let nodes = movable(&mut tx, ids, parent).await?;
+    let mut done = Moved {
+        moved: 0,
+        unchanged: 0,
+    };
+    for (id, name, from) in nodes {
+        if from == Some(parent) && position.is_none() {
+            done.unchanged += 1;
+            continue;
+        }
+        // The slug has to be free where it lands, not where it came from —
+        // and it sees the ones moved in before it, so two `notes` stay apart.
+        let slug = unique_slug(&mut tx, Some(parent), &slugify(&name), Some(id)).await?;
+        sqlx::query(
+            "UPDATE nodes
+             SET parent_id = ?1, slug = ?2, position = COALESCE(?3, position), updated_at = ?4
+             WHERE id = ?5",
+        )
+        .bind(parent)
+        .bind(&slug)
+        .bind(position)
+        .bind(crate::now())
         .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let kind: String = row.get("kind");
-    let name: String = row.get("name");
-    // A space is a root: under a folder it would drop out of the switcher
-    // while its board and its cards carried on as if nothing had happened.
-    if kind == SPACE {
-        return Err(AppError::BadRequest(
-            "a space cannot be moved into anything".into(),
-        ));
+        .execute(&mut *tx)
+        .await?;
+        done.moved += 1;
     }
-
-    container(&mut tx, input.parent_id).await?;
-
-    // Moving a folder into its own subtree would cut that subtree loose from
-    // every root, where nothing could reach it again.
-    if descendants(&mut tx, id).await?.contains(&input.parent_id) {
-        return Err(AppError::BadRequest(
-            "a folder cannot be moved into itself".into(),
-        ));
-    }
-
-    // The slug has to be free where it lands, not where it came from.
-    let slug = unique_slug(&mut tx, Some(input.parent_id), &slugify(&name), Some(id)).await?;
-
-    sqlx::query(
-        "UPDATE nodes
-         SET parent_id = ?1, slug = ?2, position = COALESCE(?3, position), updated_at = ?4
-         WHERE id = ?5",
-    )
-    .bind(input.parent_id)
-    .bind(&slug)
-    .bind(input.position)
-    .bind(crate::now())
-    .bind(id)
-    .execute(&mut *tx)
-    .await?;
     tx.commit().await?;
 
-    state.backup.signal();
-    load(&state, id).await.map(Json)
+    if done.moved > 0 {
+        state.backup.signal();
+    }
+    Ok(done)
+}
+
+/// Refuse the move unless every one of `ids` may go into `parent`; the id,
+/// name and present parent of each when they all may.
+async fn movable(
+    db: &mut SqliteConnection,
+    ids: &[i64],
+    parent: i64,
+) -> AppResult<Vec<(i64, String, Option<i64>)>> {
+    container(&mut *db, parent).await?;
+    let mut nodes = Vec::with_capacity(ids.len());
+    for &id in ids {
+        if id == parent {
+            return Err(AppError::BadRequest("a node cannot contain itself".into()));
+        }
+        let row = sqlx::query("SELECT kind, name, parent_id FROM nodes WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let kind: String = row.get("kind");
+        let name: String = row.get("name");
+        // A space is a root: under a folder it would drop out of the switcher
+        // while its board and its cards carried on as if nothing had happened.
+        if kind == SPACE {
+            return Err(AppError::BadRequest(format!(
+                "{name} is a space, and a space cannot be moved into anything"
+            )));
+        }
+        // Moving a folder into its own subtree would cut that subtree loose
+        // from every root, where nothing could reach it again.
+        if descendants(&mut *db, id).await?.contains(&parent) {
+            return Err(AppError::BadRequest(format!(
+                "{name} cannot be moved into itself"
+            )));
+        }
+        nodes.push((id, name, row.get("parent_id")));
+    }
+    Ok(nodes)
 }
 
 /// Refuse anything but a space or a folder as the place a node goes into.

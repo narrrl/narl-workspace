@@ -4,7 +4,7 @@
 
   const keys: [string, string][] = [
     ['1 … 9 · 0', 'switch to that space, like a workspace'],
-    ['Shift 1 … 9', 'send the marked or selected node to that space'],
+    ['Shift 1 … 9', 'send the marked nodes, or the selected one, to that space'],
     ['Tab · Shift-Tab', 'next / previous space'],
     ['w', 'overview of every space — hjkl, then Enter'],
     ['f', 'fullscreen the focused pane; again or Esc to leave'],
@@ -18,7 +18,9 @@
     ['O', 'new folder here'],
     ['i · a', 'edit the open document'],
     ['R', 'rename what is under the cursor — document, folder or card'],
-    ['m / p', 'pick a node up, then drop it into the folder you walk to'],
+    ['m / p', 'pick nodes up, then drop them all into the folder you walk to'],
+    ['M', 'pick up the whole folder — again puts it all back'],
+    ['Ctrl / Shift-click', 'pick a row up · every row up to it — drag them onto a folder'],
     ['t', 'agenda — late, due this week, in hand, on every board'],
     ['T', "today's diary entry, started if there is none"],
     ['Ctrl-P', 'find anything, in every space'],
