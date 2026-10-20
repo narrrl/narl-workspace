@@ -170,7 +170,7 @@
   .sheet { width: min(100%, 112ch); overflow-y: auto; overflow-x: hidden; }
 
   /* Newspaper columns, so the short groups fill the gaps under the long ones. */
-  .cols { columns: 38ch; column-gap: 32px; }
+  .cols { columns: 44ch; column-gap: 36px; }
 
   section { break-inside: avoid; min-width: 0; margin: 0 0 20px; }
 
@@ -187,16 +187,20 @@
   }
   h2::after { content: ''; height: 1px; flex: 1; background: var(--overlay); }
 
+  /* The key column is capped, so one long signature cannot squeeze every
+     description in its group down to a letter a line; arguments wrap
+     underneath the name instead. */
   dl {
     margin: 0;
     display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 4px 14px;
-    font-size: 12px;
+    grid-template-columns: fit-content(20ch) minmax(0, 1fr);
+    gap: 7px 16px;
+    font-size: 13px;
+    line-height: 1.45;
   }
   dt { color: var(--light); white-space: nowrap; }
-  .args { margin-left: 0.6ch; }
-  dd { margin: 0; color: var(--subtle); overflow-wrap: anywhere; }
+  .args { display: block; white-space: normal; font-size: 11px; }
+  dd { margin: 0; color: var(--fg); overflow-wrap: break-word; }
 
   footer {
     font-size: 12px;
