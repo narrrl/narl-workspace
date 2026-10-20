@@ -500,6 +500,15 @@ pub async fn stream_media(
         "attachment"
     };
 
+    // A PDF is shown in a frame of the file pane, by the browser's own viewer,
+    // and that viewer will not start inside a sandbox. It runs no script of
+    // the origin's either way, and nothing but the app may frame it.
+    let (policy, frames) = if mime == "application/pdf" {
+        ("default-src 'none'; frame-ancestors 'self'", "SAMEORIGIN")
+    } else {
+        ("sandbox; default-src 'none'", "DENY")
+    };
+
     let key = match (encrypted, private) {
         (false, _) => None,
         (true, false) => return Err(AppError::NotFound),
@@ -559,10 +568,8 @@ pub async fn stream_media(
             // Belt and braces: never let the browser sniff past the type above,
             // and strip the ambient authority of the origin from the response.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "sandbox; default-src 'none'".to_string(),
-            ),
+            (header::CONTENT_SECURITY_POLICY, policy.to_string()),
+            (header::X_FRAME_OPTIONS, frames.to_string()),
         ],
         body,
     )

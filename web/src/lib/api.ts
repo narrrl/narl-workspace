@@ -141,6 +141,42 @@ export interface MediaFile {
   file_node: number | null
 }
 
+/** One thing a certificate, key or keystore file holds, as `/inspect` describes it. */
+export type CertItem =
+  | {
+      kind: 'certificate'
+      subject: string
+      issuer: string
+      serial: string
+      not_before: number
+      not_after: number
+      /** `RSA 2048`, `EC P-256`, `Ed25519`. */
+      key: string
+      names: string[]
+      usage: string[]
+      ca: boolean
+      sha256: string
+      sha1: string
+      label: string | null
+    }
+  | { kind: 'request'; subject: string; key: string; names: string[] }
+  | {
+      kind: 'private_key'
+      /** Null while it is still encrypted. */
+      key: string | null
+      encrypted: boolean
+      /** The index of its certificate among the items. */
+      matches: number | null
+      label: string | null
+    }
+  | { kind: 'public_key'; key: string }
+
+export interface Inspection {
+  items: CertItem[]
+  /** Something in the file is behind a password that was not given. */
+  needs_password: boolean
+}
+
 /** The vault, as `/api/vault` reports it. */
 export interface VaultStatus {
   configured: boolean
@@ -402,6 +438,10 @@ export const api = {
     request<{ files: number; unchanged: number; failed: number; shared: number }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
       method: 'POST',
     }),
+
+  /** What a certificate, key or keystore holds; the password opens it for this answer only. */
+  inspect: (id: number, password?: string) =>
+    request<Inspection>(`/nodes/${id}/inspect`, { method: 'POST', body: body({ password }) }),
 
   backupStatus: () => request<BackupStatus>('/backup'),
 

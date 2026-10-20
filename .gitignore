@@ -14,3 +14,7 @@
 
 # host-specific compose overlay
 compose.override.yml
+
+# Throwaway certificates the inspect tests read; a global *.pem rule must not
+# keep them out.
+!/src/routes/testdata/*.pem

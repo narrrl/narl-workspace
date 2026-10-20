@@ -64,6 +64,15 @@ russh-sftp = "3"
 # speaks rand_core 0.10, one major version past the `rand` used everywhere else.
 rand10 = { package = "rand", version = "0.10" }
 
+# Reading certificates, keys and keystores for the file view, in pure Rust —
+# there is no OpenSSL to lean on. p12-keystore brings RC2 and 3DES for the
+# keystores older tools still export; pkcs8 opens encrypted PKCS#8 keys.
+x509-parser = "0.18"
+p12-keystore = "0.4"
+pkcs8 = { version = "0.11", features = ["encryption", "3des", "std"] }
+sec1 = { version = "0.8", features = ["der"] }
+sha1 = "0.10"
+
 [dev-dependencies]
 # A paused clock, so tests of timed loops do not wait in real time.
 tokio = { version = "1", features = ["test-util"] }

@@ -371,7 +371,7 @@ fn compressible(
 /// runtime; scripts stay confined to the bundled files.
 const CSP: &str = "default-src 'self'; img-src 'self' data:; media-src 'self'; \
     style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; \
-    object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 type HeaderLayer = SetResponseHeaderLayer<HeaderValue>;
 

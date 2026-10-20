@@ -2,6 +2,7 @@ pub mod backup;
 pub mod boards;
 pub mod export;
 pub mod import;
+pub mod inspect;
 pub mod manifest;
 pub mod media;
 pub mod nodes;
@@ -68,6 +69,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/nodes/{id}/files", post(media::upload_into).layer(uploads))
         .route("/nodes/{id}/encrypt", post(seal::encrypt))
         .route("/nodes/{id}/decrypt", post(seal::decrypt))
+        .route("/nodes/{id}/inspect", post(inspect::inspect))
         .route(
             "/vault",
             get(vault::status)

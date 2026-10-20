@@ -11,7 +11,8 @@ one binary. It was called `narl-diary` until it grew everything but the diary.
 - A kanban board per space, so what is open at work is not mixed up with uni.
 - Drag, drop or paste images, video and audio straight into an entry.
 - Files of any kind — PDFs, archives, recordings — live in the tree beside the
-  notes about them, streamed to disk however large.
+  notes about them, streamed to disk however large — and PDFs, text, code,
+  tables and certificates open in place.
 - Share any document behind an unguessable link — revocable at any time.
 - A vault: files sealed with AES-256-GCM under a password that is never stored,
   readable only while it is unlocked.
@@ -237,8 +238,23 @@ the tree is never one of them: it is deleted from its folder, not from
 ## Files
 
 A file is a node like a document, only with bytes instead of text: it sits in
-a folder, shows its size in the list, and `Enter` opens it — images, video,
-audio and plain text are shown in place, anything else is a download. `:name`
+a folder, shows its size in the list, and `Enter` opens it. What is shown in
+place:
+
+- images, video and audio;
+- PDFs, in the browser's own viewer;
+- text and source code of any kind, recognised by its name or, failing that, by
+  its first few kilobytes, with line numbers and the first 256 KiB of it;
+- markdown, rendered, with `source` to see it as written;
+- CSV and TSV, as a table of the first 500 rows;
+- certificates, keys and keystores — `.pem`, `.crt`, `.cer`, `.der`, `.csr`,
+  `.key`, `.p8`, `.p12`, `.pfx` — read on the server: subject, issuer,
+  validity, key, names, usage and fingerprints, and which key belongs to which
+  certificate. A `.p12` or an encrypted key asks for its password, which opens
+  it for that one look and is never stored. Nothing of a private key is ever
+  sent back but its algorithm and size.
+
+Anything else is a download. `:name`
 renames it, and the download is called whatever it is called now; `:mv`, `m`
 and `p` move it; `x` deletes it. `:upload` picks files for the folder being
 browsed, or drop them onto the list. Each upload is written to disk as it
@@ -532,6 +548,7 @@ sealed or not.
 | `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
 | `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
+| `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
 | `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or every file under a folder, or take it out |
 | `GET`/`POST`/`PUT` | `/api/vault` | status / set the password once / change it |
 | `POST` | `/api/vault/unlock`, `/api/vault/lock` | open / close the vault |
