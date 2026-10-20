@@ -78,6 +78,21 @@ export interface SshKey {
   vault: boolean
 }
 
+/** What a document said before a save replaced it. */
+export interface RevisionSummary {
+  id: number
+  name: string
+  saved_at: number
+  /** `edit`, `force` (`:w!`), `sftp`, or `restore`. */
+  reason: string
+  /** Characters of text. */
+  size: number
+}
+
+export interface Revision extends Omit<RevisionSummary, 'size'> {
+  body: string
+}
+
 /** Something deleted, waiting in the trash to be restored or purged. */
 export interface TrashItem {
   id: number
@@ -392,11 +407,27 @@ export const api = {
     created_at?: number
   }) => request<WorkspaceNode>('/nodes', { method: 'POST', body: body(input) }),
 
-  /** `base_updated_at`: refused with 409 if the node was saved since then. */
+  /**
+   * `base_updated_at`: refused with 409 if the node was saved since then.
+   * `restore`: the text is a revision brought back, so what it replaces is
+   * kept as a revision whatever the last one was.
+   */
   updateNode: (
     id: number,
-    input: { name: string; body: string; created_at?: number; has_board?: boolean; base_updated_at?: number },
+    input: {
+      name: string
+      body: string
+      created_at?: number
+      has_board?: boolean
+      base_updated_at?: number
+      restore?: boolean
+    },
   ) => request<WorkspaceNode>(`/nodes/${id}`, { method: 'PUT', body: body(input) }),
+
+  /** A document's earlier versions, the newest first. */
+  revisions: (id: number) => request<RevisionSummary[]>(`/nodes/${id}/revisions`),
+
+  revision: (id: number, rev: number) => request<Revision>(`/nodes/${id}/revisions/${rev}`),
 
   /** Into the trash; `purged` when it was in the trash already and is now gone. */
   deleteNode: (id: number) =>

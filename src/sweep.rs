@@ -1,7 +1,8 @@
 //! Housekeeping for `uploads/`: what a crash, a killed upload or a forgotten
 //! embed leaves behind. Nothing else ever deletes these, so without this they
 //! would only grow — on the disk and in every backup of it. The trash is
-//! emptied here too, of what has waited in it long enough.
+//! emptied here too, of what has waited in it long enough, and the revisions
+//! of documents are thinned out.
 
 use std::{collections::HashSet, path::Path, time::Duration};
 
@@ -19,22 +20,39 @@ const UNREFERENCED_DAYS: i64 = 7;
 
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
-pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf, trash_days: i64) {
+/// How long what the sweep thins out is kept, in days.
+#[derive(Clone, Copy)]
+pub struct Keep {
+    pub trash_days: i64,
+    pub revision_days: i64,
+}
+
+impl From<&crate::config::Config> for Keep {
+    fn from(config: &crate::config::Config) -> Self {
+        Self {
+            trash_days: config.trash_days,
+            revision_days: config.revision_days,
+        }
+    }
+}
+
+pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf, keep: Keep) {
     crate::tasks::supervise("the uploads sweep", move || {
         let (db, uploads) = (db.clone(), uploads.clone());
-        sweep_forever(db, uploads, trash_days)
+        sweep_forever(db, uploads, keep)
     });
 }
 
-async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf, trash_days: i64) {
+async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf, keep: Keep) {
     {
         let mut ticker = tokio::time::interval(EVERY);
         loop {
             ticker.tick().await;
-            match run(&db, &uploads, trash_days).await {
+            match run(&db, &uploads, keep).await {
                 Ok(swept) if swept.any() => tracing::info!(
-                    "swept: {} out of the trash; uploads: {} partial, {} without a row, {} that nothing embeds",
+                    "swept: {} out of the trash, {} old revisions; uploads: {} partial, {} without a row, {} that nothing embeds",
                     swept.trashed,
+                    swept.revisions,
                     swept.partial,
                     swept.stray,
                     swept.unreferenced
@@ -50,6 +68,8 @@ async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf, trash_days: 
 pub struct Swept {
     /// Things deleted long enough ago to be purged from the trash.
     pub trashed: usize,
+    /// Revisions older than they are kept for.
+    pub revisions: u64,
     pub partial: usize,
     pub stray: usize,
     pub unreferenced: usize,
@@ -57,19 +77,23 @@ pub struct Swept {
 
 impl Swept {
     fn any(&self) -> bool {
-        self.trashed + self.partial + self.stray + self.unreferenced > 0
+        self.trashed + self.revisions as usize + self.partial + self.stray + self.unreferenced > 0
     }
 }
 
-pub async fn run(db: &SqlitePool, uploads: &Path, trash_days: i64) -> anyhow::Result<Swept> {
-    // First, so the files only the purged nodes held are released and go in
-    // this same pass.
+pub async fn run(db: &SqlitePool, uploads: &Path, keep: Keep) -> anyhow::Result<Swept> {
+    // First, so the files only the purged nodes and the forgotten revisions
+    // held are released and go in this same pass.
     let trashed =
-        crate::routes::trash::purge_older(db, uploads, crate::now() - trash_days * 86_400)
+        crate::routes::trash::purge_older(db, uploads, crate::now() - keep.trash_days * 86_400)
             .await
             .map_err(|e| anyhow::anyhow!("emptying the trash: {e:?}"))?;
+    let revisions =
+        crate::routes::revisions::forget_older(db, crate::now() - keep.revision_days * 86_400)
+            .await?;
     let mut swept = Swept {
         trashed,
+        revisions,
         ..Swept::default()
     };
 
@@ -89,7 +113,9 @@ pub async fn run(db: &SqlitePool, uploads: &Path, trash_days: i64) -> anyhow::Re
            -- Belt and braces: a body or a card that names the file keeps it,
            -- whatever the link table says.
            AND NOT EXISTS (SELECT 1 FROM nodes n WHERE instr(n.body, m.id) > 0)
-           AND NOT EXISTS (SELECT 1 FROM cards c WHERE instr(c.body, m.id) > 0)",
+           AND NOT EXISTS (SELECT 1 FROM cards c WHERE instr(c.body, m.id) > 0)
+           -- An earlier version of a document brings its pictures back with it.
+           AND NOT EXISTS (SELECT 1 FROM revisions r WHERE instr(r.body, m.id) > 0)",
     )
     .bind(cutoff)
     .fetch_all(db)
@@ -141,7 +167,7 @@ pub async fn run(db: &SqlitePool, uploads: &Path, trash_days: i64) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
-    use super::{run, Swept};
+    use super::{run, Keep, Swept};
 
     #[tokio::test]
     async fn only_what_nothing_knows_about_goes() {
@@ -158,7 +184,8 @@ mod tests {
         let embedded = "22222222-2222-4222-8222-222222222222";
         let forgotten = "33333333-3333-4333-8333-333333333333";
         let stray = "44444444-4444-4444-8444-444444444444";
-        for id in [kept, embedded, forgotten] {
+        let remembered = "66666666-6666-4666-8666-666666666666";
+        for id in [kept, embedded, forgotten, remembered] {
             sqlx::query("INSERT INTO media (id, filename, mime, size, created_at) VALUES (?1, 'x', 'image/png', 1, ?2)")
                 .bind(id)
                 .bind(old)
@@ -187,9 +214,26 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
+        // `remembered` only by an earlier version of that document.
+        sqlx::query(
+            "INSERT INTO revisions (node_id, name, body, saved_at, reason)
+             SELECT id, 'a', ?1, 0, 'edit' FROM nodes WHERE slug = 'a'",
+        )
+        .bind(format!("![](/api/media/{remembered})"))
+        .execute(&db)
+        .await
+        .unwrap();
 
         let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
-        for name in [kept, embedded, forgotten, stray, "x.part", "notes.txt"] {
+        for name in [
+            kept,
+            embedded,
+            remembered,
+            forgotten,
+            stray,
+            "x.part",
+            "notes.txt",
+        ] {
             let path = dir.path().join(name);
             std::fs::write(&path, b"x").unwrap();
             std::fs::File::options()
@@ -202,11 +246,21 @@ mod tests {
         let fresh = "55555555-5555-4555-8555-555555555555.part";
         std::fs::write(dir.path().join(fresh), b"x").unwrap();
 
-        let swept = run(&db, dir.path(), 30).await.unwrap();
+        let swept = run(
+            &db,
+            dir.path(),
+            Keep {
+                trash_days: 30,
+                revision_days: 90,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(
             swept,
             Swept {
                 trashed: 0,
+                revisions: 0,
                 partial: 1,
                 stray: 2,
                 unreferenced: 1
@@ -217,10 +271,11 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        let expected: std::collections::BTreeSet<String> = [kept, embedded, "notes.txt", fresh]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let expected: std::collections::BTreeSet<String> =
+            [kept, embedded, remembered, "notes.txt", fresh]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         assert_eq!(left, expected);
     }
 }

@@ -120,7 +120,11 @@ async fn main() -> Result<()> {
     let notify = notify::Notifier::new(db.clone(), Arc::clone(&config))?;
     notify::spawn(Arc::clone(&notify));
 
-    sweep::spawn(db.clone(), config.uploads_dir(), config.trash_days);
+    sweep::spawn(
+        db.clone(),
+        config.uploads_dir(),
+        sweep::Keep::from(&*config),
+    );
 
     let epoch = auth::Epoch::load(&db, &config).await?;
     let sessions = Arc::new(auth::Sessions::load(&db).await?);

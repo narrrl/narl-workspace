@@ -11,11 +11,13 @@ import {
   type WorkspaceNode,
   type MediaFile,
   type NodeSummary,
+  type Revision,
+  type RevisionSummary,
   type SpaceOverview,
   type TrashItem,
   type VaultStatus,
 } from './api'
-import { formatBytes, isTouchDevice, sealedNote, type Heading } from './util'
+import { formatBytes, formatStamp, isTouchDevice, sealedNote, type Heading } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -279,7 +281,7 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash' | 'history'>('none')
   /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
   outline = $state.raw<Heading[]>([])
   outlineCursor = $state(0)
@@ -311,6 +313,10 @@ class Workspace {
   trashCursor = $state(0)
   /** The last thing deleted here, which `u` puts back. */
   lastDeleted = $state<number | null>(null)
+  /** `:history`: the open document's earlier versions, and the one shown. */
+  history = $state<RevisionSummary[]>([])
+  historyCursor = $state(0)
+  revision = $state.raw<Revision | null>(null)
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
@@ -961,7 +967,7 @@ class Workspace {
    * since it was opened here — another tab, the phone, the SFTP mount —
    * unless `force`, which is `:w!`.
    */
-  async save({ quiet = false, force = false, tile = this.tile } = {}) {
+  async save({ quiet = false, force = false, restore = false, tile = this.tile } = {}) {
     if (!tile.open) return
     // Snapshot what goes over the wire: an autosave races the typing that
     // triggered it, and anything typed since must stay marked unsaved.
@@ -969,6 +975,7 @@ class Workspace {
     const saved = await api.updateNode(tile.open.id, {
       ...sent,
       base_updated_at: force ? undefined : tile.open.updated_at,
+      restore,
     })
 
     tile.open = saved
@@ -1046,6 +1053,47 @@ class Workspace {
       this.say(elsewhere ? `restored ${name} to ${where} — the folder it was in is gone` : `restored ${name} to ${where}`)
     }
     if (this.overlay === 'trash') await this.loadTrash()
+  }
+
+  /** `:history`: the open document's earlier versions, the newest first. */
+  async loadHistory() {
+    const open = this.open
+    if (!open) return
+    // What is typed and not yet written is part of what a revision is
+    // compared with, and of what a restore must not lose.
+    await this.flushTile()
+    this.history = await api.revisions(open.id)
+    this.historyCursor = 0
+    this.revision = null
+    await this.showRevision(0)
+  }
+
+  /** Read the revision at `index`, for the overlay to compare with the draft. */
+  async showRevision(index: number) {
+    const open = this.open
+    const summary = this.history[index]
+    this.historyCursor = index
+    if (!open || !summary) return
+    const revision = await api.revision(open.id, summary.id)
+    // A later j may have moved on while this one was being read.
+    if (this.history[this.historyCursor]?.id === revision.id) this.revision = revision
+  }
+
+  /**
+   * Bring a revision back: it becomes the document again, and what it
+   * replaces is kept as a revision of its own, so a restore is undone the
+   * same way. The editor reads the draft when it opens, so this leaves it.
+   */
+  async restoreRevision(revision: Revision) {
+    const tile = this.tile
+    if (!tile.open) return
+    await this.flushTile(tile)
+    tile.editing = false
+    tile.draft = { ...tile.draft, name: revision.name, body: revision.body }
+    tile.dirty = true
+    await this.save({ quiet: true, restore: true, tile })
+    this.overlay = 'none'
+    this.say(`restored the version from ${formatStamp(revision.saved_at)} — :history has the one it replaced`)
   }
 
   async loadTrash() {

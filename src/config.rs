@@ -24,6 +24,9 @@ pub struct Config {
     pub vault_idle: std::time::Duration,
     /// How many days a deleted node waits in the trash before it is purged.
     pub trash_days: i64,
+    /// How many days a document's earlier versions are kept, past the newest
+    /// few that always are.
+    pub revision_days: i64,
     pub backup: BackupConfig,
     pub mail: MailConfig,
     pub sftp: SftpConfig,
@@ -44,6 +47,7 @@ impl std::fmt::Debug for Config {
             .field("secure_cookie", &self.secure_cookie)
             .field("vault_idle", &self.vault_idle)
             .field("trash_days", &self.trash_days)
+            .field("revision_days", &self.revision_days)
             .field("backup", &self.backup)
             .field("mail", &self.mail)
             .field("sftp", &self.sftp)
@@ -293,6 +297,7 @@ impl Config {
         // A day at least, so an undo is never raced by the sweep; ten years
         // at most, as for the sessions.
         let trash_days = number("TRASH_DAYS", 30, 1..=3650)? as i64;
+        let revision_days = number("REVISION_DAYS", 90, 1..=3650)? as i64;
         let secure_cookie = flag("SECURE_COOKIE")?;
 
         Ok(Self {
@@ -306,6 +311,7 @@ impl Config {
             secure_cookie,
             vault_idle,
             trash_days,
+            revision_days,
             backup: BackupConfig::from_env()?,
             mail: MailConfig::from_env()?,
             sftp: SftpConfig::from_env()?,
@@ -344,6 +350,7 @@ impl Config {
             secure_cookie: false,
             vault_idle: std::time::Duration::from_secs(60),
             trash_days: 30,
+            revision_days: 90,
             backup: BackupConfig {
                 device_name: "narl-diary".into(),
                 interval: None,

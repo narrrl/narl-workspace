@@ -85,6 +85,7 @@ it; in the document pane it is that document. In the browse pane:
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |
+| `gh` | the open document's earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
@@ -254,6 +255,21 @@ other version, and `:w!` writes this one anyway. Search results say which
 space and folder each match is in. A document made with `o` and left with neither a name nor a word in
 it is removed again on the way out, so abandoned starts do not pile up. If a tab dies mid-document, opening it again restores the draft and
 says so — `:e!` throws it away, the way vim handles a swap file.
+
+A save keeps what it replaces. `gh` or `:history` lists the open document's
+earlier versions, the newest first, and shows the highlighted one as a diff
+against the text as it is now: `-` is what bringing it back would take out,
+`+` what it would put back. `Enter` brings it back, and the text it replaces
+becomes a version of its own, so a restore is undone the same way. Autosave
+writes every few seconds, so an ordinary save keeps a version at most every
+ten minutes; `:w!`, a save over the SFTP mount and a restore always keep one,
+because each of them may undo something. A rename alone keeps nothing. The
+daily sweep forgets versions older than `WORKSPACE_REVISION_DAYS` (90 by
+default), but never the newest 20 of a document, and an upload stays as long
+as a version still embeds it. A file that has been sealed since is gone from
+the old version — sealing deletes the plaintext on purpose. Versions are not
+in the export, the mount or the readable view on Proton Drive; they are in
+`diary.db`, and so in its mirror.
 
 A delete is not the end of anything. `x`, `dd`, `:delete` and `:rmspace`
 put what they delete in the trash, with everything inside it, and `u` puts
@@ -674,6 +690,8 @@ sealed or not.
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |
 | `POST` | `/api/import` | import an export at the root: directories become spaces |
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |
+| `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
+| `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |

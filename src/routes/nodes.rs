@@ -10,7 +10,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{media, trash},
+    routes::{media, revisions, trash},
     state::AppState,
 };
 
@@ -162,6 +162,10 @@ pub struct UpdateInput {
     /// write goes through whatever happened in between.
     #[serde(default)]
     pub base_updated_at: Option<i64>,
+    /// The text sent is a revision brought back: what it replaces is kept
+    /// as a revision of its own, however recently the last one was.
+    #[serde(default)]
+    pub restore: bool,
 }
 
 #[derive(Deserialize)]
@@ -702,6 +706,14 @@ pub async fn update(
     } else {
         input.body.as_str()
     };
+    let reason = if input.restore {
+        revisions::Reason::Restore
+    } else if input.base_updated_at.is_none() {
+        revisions::Reason::Force
+    } else {
+        revisions::Reason::Edit
+    };
+    revisions::keep(&mut tx, id, body, reason).await?;
     if kind == FILE {
         sqlx::query(
             "UPDATE media SET filename = ?1 WHERE id = (SELECT media_id FROM nodes WHERE id = ?2)",

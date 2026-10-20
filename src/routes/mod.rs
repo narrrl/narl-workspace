@@ -6,6 +6,7 @@ pub mod inspect;
 pub mod manifest;
 pub mod media;
 pub mod nodes;
+pub mod revisions;
 pub mod seal;
 pub mod session;
 pub mod share;
@@ -69,6 +70,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/nodes/{id}", get(nodes::get))
         .route("/nodes/{id}", put(nodes::update))
         .route("/nodes/{id}", delete(nodes::remove))
+        .route("/nodes/{id}/revisions", get(revisions::list))
+        .route("/nodes/{id}/revisions/{rev}", get(revisions::get))
         .route("/nodes/move", post(nodes::move_many))
         .route("/nodes/{id}/move", post(nodes::move_node))
         .route("/import", post(import::import_root).layer(uploads))

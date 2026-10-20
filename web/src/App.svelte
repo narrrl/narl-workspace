@@ -15,6 +15,7 @@
   import Overview from './lib/Overview.svelte'
   import MediaBrowser, { copyMedia, insertMedia, removeMedia } from './lib/MediaBrowser.svelte'
   import Trash, { purgeTrashed, restoreTrashed } from './lib/Trash.svelte'
+  import History, { moveHistory, restoreShown } from './lib/History.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
   import SecretPrompt from './lib/SecretPrompt.svelte'
@@ -421,6 +422,28 @@
     }
   }
 
+  /** The history's keys: j/k through the versions, Enter brings the one shown back. */
+  function historyKey(event: KeyboardEvent): boolean {
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        moveHistory(1)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        moveHistory(-1)
+        return true
+      case 'G':
+        moveHistory(workspace.history.length)
+        return true
+      case 'Enter':
+        void restoreShown()
+        return true
+      default:
+        return false
+    }
+  }
+
   /*
    * `F`: the hints are pinned where the targets are, so a pane still sliding
    * in — a space switch, the board just opened — is let settle first.
@@ -608,6 +631,12 @@
         return
       }
     }
+    if (workspace.overlay === 'history' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (historyKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'trash' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (trashKey(event)) {
         event.preventDefault()
@@ -757,6 +786,11 @@
     if (previous === 'g' && key === 'O') {
       event.preventDefault()
       void runCommand('outline')
+      return
+    }
+    if (previous === 'g' && key === 'h') {
+      event.preventDefault()
+      void runCommand('history')
       return
     }
     if (previous === 'g' && key === 'x') {
@@ -1041,7 +1075,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

@@ -777,6 +777,19 @@ export const commands: CommandSpec[] = [
     },
   },
   {
+    name: 'history',
+    aliases: ['hist'],
+    group: 'documents',
+    help: "the open document's earlier versions as diffs — j/k, Enter brings one back (gh)",
+    run: async () => {
+      if (!requireOpen()) return
+      await workspace.guard(async () => {
+        await workspace.loadHistory()
+        workspace.overlay = 'history'
+      })
+    },
+  },
+  {
     name: 'trash',
     args: '[purge]',
     group: 'tree',

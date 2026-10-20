@@ -35,7 +35,7 @@ use crate::{
         Backup,
     },
     error::{AppError, AppResult},
-    routes::{media, nodes, seal, trash},
+    routes::{media, nodes, revisions, seal, trash},
     state::AppState,
     vault,
 };
@@ -757,6 +757,14 @@ impl SpaceFs {
         let (title, body) = split_heading(&text);
         let now = crate::now();
         self.own_writes.insert(id, now);
+        // One transaction, so the text this replaces is kept as a revision
+        // exactly when it is replaced.
+        let mut tx = crate::db::begin_write(&self.db)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
+        revisions::keep(&mut tx, id, &body, revisions::Reason::Sftp)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
         sqlx::query(
             "UPDATE nodes SET name = COALESCE(?1, name), body = ?2, updated_at = ?3 WHERE id = ?4",
         )
@@ -764,12 +772,13 @@ impl SpaceFs {
         .bind(&body)
         .bind(now)
         .bind(id)
-        .execute(&self.db)
+        .execute(&mut *tx)
         .await
         .map_err(|_| StatusCode::Failure)?;
-        media::link_to_node(&mut *self.conn().await?, id, &body)
+        media::link_to_node(&mut tx, id, &body)
             .await
             .map_err(|_| StatusCode::Failure)?;
+        tx.commit().await.map_err(|_| StatusCode::Failure)?;
         self.changed();
         Ok(())
     }
@@ -2483,6 +2492,15 @@ mod tests {
             (id, "Renamed", "v2\n")
         );
         assert!(fs.scratch.is_empty());
+
+        // The save over the mount kept what it replaced.
+        let kept: Vec<(String, String)> =
+            sqlx::query_as("SELECT body, reason FROM revisions WHERE node_id = ?1 ORDER BY id")
+                .bind(id)
+                .fetch_all(&fs.db)
+                .await
+                .expect("revisions");
+        assert_eq!(kept, [("v1\n".to_string(), "sftp".to_string())]);
     }
 
     #[tokio::test]
