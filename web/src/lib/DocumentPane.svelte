@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { followLink, hooks, runCommand, type ScrollAmount } from './commands'
+  import { followLink, hooks, runCommand, type ScrollAmount, type SidewaysAmount } from './commands'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
   import { workspace, type Tile } from './store.svelte'
@@ -13,6 +13,7 @@
     readerHeadings,
     relative,
     scrollPage,
+    scrollWide,
   } from './util'
 
   /** The tile this pane draws; the keys only reach it while it has focus. */
@@ -81,13 +82,16 @@
     const list = () => readerHeadings(scroller, root)
     // The outline in the margin is links too, so `F` reaches it as well.
     const hints = () => scroller
+    const sideways = (amount: SidewaysAmount) => scrollWide(scroller, root, amount)
     hooks.jumpHeading = jump
     hooks.headings = list
     hooks.hintRoot = hints
+    hooks.scrollWide = sideways
     return () => {
       if (hooks.jumpHeading === jump) hooks.jumpHeading = () => false
       if (hooks.headings === list) hooks.headings = () => ({ headings: [], current: 0 })
       if (hooks.hintRoot === hints) hooks.hintRoot = () => null
+      if (hooks.scrollWide === sideways) hooks.scrollWide = () => false
     }
   })
 

@@ -131,6 +131,27 @@ export function scrollPage(el: HTMLElement, amount: ScrollAmount) {
   }
 }
 
+/** `zl` / `zh` a few columns, `zL` / `zH` half a width, as vim scrolls sideways. */
+export type SidewaysAmount = 1 | -1 | 'halfright' | 'halfleft'
+
+/**
+ * Scroll whatever is too wide for the column — a table, a code block, a
+ * formula — sideways: the first one that reaches down past the top of the
+ * view, the one being read. False when there is none on screen.
+ */
+export function scrollWide(scroller: HTMLElement, root: HTMLElement, amount: SidewaysAmount): boolean {
+  const view = scroller.getBoundingClientRect()
+  const wide = [...root.querySelectorAll<HTMLElement>('table, pre, .katex-display, .table')].find((el) => {
+    if (el.scrollWidth <= el.clientWidth + 1) return false
+    const box = el.getBoundingClientRect()
+    return box.bottom > view.top + 8 && box.top < view.bottom
+  })
+  if (!wide) return false
+  const step = typeof amount === 'number' ? amount * 80 : (amount === 'halfright' ? 1 : -1) * (wide.clientWidth / 2)
+  wide.scrollBy({ left: step })
+  return true
+}
+
 /** A heading to jump to: the reader's, or a line of the text being written. */
 export interface Heading {
   text: string

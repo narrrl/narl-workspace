@@ -81,6 +81,7 @@ it; in the document pane it is that document. In the browse pane:
 | `j` / `k` | move down / up, or scroll the document when it has focus |
 | `gg` / `G` | first / last entry, or top / bottom of the document; a first `g`, `d`, `]` or `[` shows in the status line for a second while it waits for the second key |
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
+| `zl` / `zh`, `zL` / `zH` | scroll the table, code block or formula at the top of the view sideways, a little or by half its width |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
 | `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |

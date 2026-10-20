@@ -1,9 +1,9 @@
 import { tick } from 'svelte'
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount } from './util'
+import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
 
-export type { ScrollAmount }
+export type { ScrollAmount, SidewaysAmount }
 
 /** Filled in by App.svelte so ex-commands can reach the DOM-bound bits. */
 export const hooks = {
@@ -21,6 +21,9 @@ export const hooks = {
   /* Filled in while a document is on screen and not being edited: the reading
      pane owns the scrollback, so the list keys have somewhere to send it. */
   scrollReader: (_amount: ScrollAmount): boolean => false,
+  /* `zh` / `zl`: the wide table or code block at the top of the view,
+     sideways; false when nothing on screen is wider than the column. */
+  scrollWide: (_amount: SidewaysAmount): boolean => false,
   /* `F`: what holds the links and buttons on screen, null when nothing does. */
   hintRoot: (): HTMLElement | null => null,
   /* Filled in by the file pane: what Enter does there, false when nothing. */

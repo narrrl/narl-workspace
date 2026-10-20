@@ -713,13 +713,19 @@
       void runCommand('d')
       return
     }
+    if (previous === 'z' && ['h', 'l', 'H', 'L'].includes(key)) {
+      event.preventDefault()
+      const amount = ({ h: -1, l: 1, H: 'halfleft', L: 'halfright' } as const)[key as 'h' | 'l' | 'H' | 'L']
+      if (!reading || !hooks.scrollWide(amount)) workspace.say('nothing wider than the column in view', 'error')
+      return
+    }
     if ((previous === ']' && key === ']') || (previous === '[' && key === '[')) {
       event.preventDefault()
       // Past the last heading there is still the end, as in vim.
       if (reading && !hooks.jumpHeading(key === ']' ? 1 : -1)) hooks.scrollReader(key === ']' ? 'bottom' : 'top')
       return
     }
-    if (key === 'g' || key === 'd' || key === ']' || key === '[') {
+    if (key === 'g' || key === 'd' || key === ']' || key === '[' || key === 'z') {
       pending = key
       return
     }

@@ -16,6 +16,7 @@
     ['j / k · ↓ ↑', 'move down / up the list — scroll the document when it has focus'],
     ['gg / G', 'first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line'],
     ['Ctrl-D / Ctrl-U', 'half a page down / up the open document'],
+    ['zl / zh · zL / zH', 'the wide table or code block at the top of the view, sideways — a little, or half its width'],
     [']] / [[', 'next / previous heading of the document — in the editor too'],
     ['gO', 'the headings as a list: j/k, Enter jumps there'],
     ['F', 'hints over the links and buttons in view — type one to follow it'],

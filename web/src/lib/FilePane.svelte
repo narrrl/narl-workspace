@@ -1,11 +1,11 @@
 <script lang="ts">
   import CertView from './CertView.svelte'
-  import { hooks, runCommand, type ScrollAmount } from './commands'
+  import { hooks, runCommand, type ScrollAmount, type SidewaysAmount } from './commands'
   import Icon from './Icon.svelte'
   import { renderMarkdown } from './markdown'
   import { looksLikeText, parseTable, previewKind, separatorOf } from './preview'
   import { workspace, type Tile } from './store.svelte'
-  import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage } from './util'
+  import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage, scrollWide } from './util'
 
   /** The tile this pane draws; the keys only reach it while it has focus. */
   const { tile }: { tile: Tile } = $props()
@@ -91,6 +91,8 @@
       return cert?.act() ?? false
     }
     const hints = () => reader ?? null
+    // A CSV's table or a long line of text is what runs off the side here.
+    const sideways = (amount: SidewaysAmount) => !!reader && scrollWide(reader, reader, amount)
     const flip = () => {
       if (kind !== 'markdown' || text === null) return false
       source = !source
@@ -100,7 +102,9 @@
     hooks.fileAction = act
     hooks.hintRoot = hints
     hooks.toggleSource = flip
+    hooks.scrollWide = sideways
     return () => {
+      if (hooks.scrollWide === sideways) hooks.scrollWide = () => false
       if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
       if (hooks.fileAction === act) hooks.fileAction = () => false
       if (hooks.hintRoot === hints) hooks.hintRoot = () => null
