@@ -443,6 +443,15 @@
 
     if (cmdline !== null || isTypingTarget(event.target)) return
 
+    // While writing, the status line says the editor is listening. A key that
+    // lands anywhere else — the focus left behind by a prompt, a click on the
+    // header — hands the focus back to it instead of walking the list unseen.
+    if (workspace.editing && workspace.pane === 'document' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault()
+      hooks.focusEditor()
+      return
+    }
+
     // Ctrl-P: find anything, in any space — the one search that is not
     // confined to where you are.
     if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'p') {

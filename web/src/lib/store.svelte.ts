@@ -276,6 +276,8 @@ class Workspace {
     if (this.vault.unlocked) return true
     const password = await this.askSecret('vault password')
     if (password === null) return false
+    // The key is stretched on purpose, which takes a moment worth saying.
+    this.say('unlocking …')
     this.vault = await api.unlockVault(password)
     this.say('vault unlocked')
     return true
@@ -583,7 +585,8 @@ class Workspace {
     }
     if (spot && this.parentId === spot.parentId) {
       if (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId)) {
-        await this.openNode(spot.openId)
+        // Reopened under the board, if that is what is on screen.
+        await this.openNode(spot.openId, false, true)
         this.pane = spot.pane
       } else {
         this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
@@ -637,6 +640,8 @@ class Workspace {
   }
 
   async search(query: string, global = this.globalSearch) {
+    // The results are rows in the list, which the board would hide.
+    if (query && this.view === 'board') this.closeBoard()
     this.query = query
     this.globalSearch = global && query !== ''
     this.cursor = 0
@@ -648,10 +653,19 @@ class Workspace {
     this.cursor = Math.min(Math.max(this.cursor + delta, 0), this.nodes.length - 1)
   }
 
-  async openNode(id: number, edit = false) {
+  async openNode(id: number, edit = false, underBoard = false) {
     if (this.open?.id !== id) await this.flush()
 
     const node = await api.getNode(id)
+    // What is asked for from the board — `:12`, `T`, a search — is shown, not
+    // opened behind it; closing a document goes back to the board.
+    if (this.view === 'board' && !underBoard) {
+      if (isContainer(node)) this.closeBoard()
+      else {
+        this.view = 'tree'
+        this.returnTo = 'board'
+      }
+    }
     if (isContainer(node)) {
       await this.goTo(node.id)
       return

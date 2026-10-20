@@ -10,15 +10,34 @@
    * field alone: it is not the login, and their menus redrawn on every key
    * are a flicker of their own.
    */
+  import { untrack } from 'svelte'
+  import { hooks } from './commands'
   import { workspace } from './store.svelte'
 
   let value = $state('')
   let input = $state<HTMLInputElement>()
+  /*
+   * Where the keys went before the question took them. Putting the field away
+   * would otherwise leave the focus nowhere, and the next keys — meant for the
+   * editor the status line still says is listening — would walk the list.
+   */
+  let returnTo: HTMLElement | null = null
+  let asking = false
 
   $effect(() => {
     if (workspace.secret) {
       value = ''
+      if (!asking) returnTo = document.activeElement as HTMLElement | null
+      asking = true
       input?.focus()
+    } else if (asking) {
+      asking = false
+      untrack(() => {
+        if (returnTo?.isConnected && returnTo !== document.body) returnTo.focus()
+        else if (workspace.editing && workspace.pane === 'document') hooks.focusEditor()
+        else hooks.focusList()
+      })
+      returnTo = null
     }
   })
 
