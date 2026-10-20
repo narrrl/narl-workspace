@@ -365,6 +365,68 @@ impl OptionalFromRequestParts<AppState> for Session {
     }
 }
 
+/// What a capture token is stored as: its SHA-256, the way a share key is.
+/// A token is 32 random bytes, so a hash with no salt and no stretching is
+/// enough — there is nothing to guess it from.
+pub(crate) fn token_hash(token: &str) -> String {
+    use sha2::Digest;
+    B64.encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Who may capture: a logged-in browser, or an `Authorization: Bearer` token
+/// from `:token add`. Only `POST /api/capture` takes this extractor, and
+/// [`Session`] never looks at the header, so a token opens nothing else.
+pub enum Capturer {
+    Session,
+    /// The `api_tokens` row.
+    Token(i64),
+}
+
+impl FromRequestParts<AppState> for Capturer {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let Some(bearer) = parts.headers.get(header::AUTHORIZATION) else {
+            return <Session as FromRequestParts<AppState>>::from_request_parts(parts, state)
+                .await
+                .map(|_| Capturer::Session);
+        };
+        // Wrong tokens slow down the way wrong passwords do, on a line of
+        // their own, so a script guessing at them does not hold up the login.
+        let attempt = state.token_throttle.begin().map_err(|wait| {
+            tracing::warn!("capture token refused, {wait}s of backoff remaining");
+            AppError::TooManyRequests(wait)
+        })?;
+        let token = bearer
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .map(str::trim)
+            .unwrap_or_default();
+        let found: Option<i64> = sqlx::query_scalar(
+            "UPDATE api_tokens SET last_used_at = ?1 WHERE hash = ?2 RETURNING id",
+        )
+        .bind(crate::now())
+        .bind(token_hash(token))
+        .fetch_optional(&state.db)
+        .await?;
+        match found {
+            Some(id) => {
+                attempt.succeeded();
+                Ok(Capturer::Token(id))
+            }
+            None => {
+                let failures = attempt.failed();
+                tracing::warn!(failures, "a capture with a token that does not exist");
+                Err(AppError::Unauthorized)
+            }
+        }
+    }
+}
+
 /// Refuse a write that another site's page asked the browser to make.
 /// `SameSite=Lax` already keeps the cookie off a cross-site POST, but not off
 /// one from a sibling subdomain, which counts as the same site — and a

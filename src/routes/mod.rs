@@ -1,5 +1,6 @@
 pub mod backup;
 pub mod boards;
+pub mod capture;
 pub mod export;
 pub mod import;
 pub mod inspect;
@@ -12,6 +13,7 @@ pub mod seal;
 pub mod session;
 pub mod share;
 pub mod ssh_keys;
+pub mod tokens;
 pub mod trash;
 pub mod vault;
 
@@ -54,6 +56,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/spaces", get(nodes::spaces).post(nodes::create_space))
         .route("/spaces/overview", get(nodes::overview))
         .route("/agenda", get(boards::agenda))
+        .route("/capture", post(capture::capture))
         .route("/spaces/{id}/board", get(boards::board))
         .route("/spaces/{id}/lists", post(boards::create_list))
         .route(
@@ -107,6 +110,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
             "/ssh-keys/{id}",
             delete(ssh_keys::remove).patch(ssh_keys::update),
         )
+        .route("/tokens", get(tokens::list).post(tokens::add))
+        .route("/tokens/{id}", delete(tokens::remove))
         .layer(DefaultBodyLimit::max(JSON_LIMIT))
 }
 
@@ -154,6 +159,7 @@ pub(crate) mod tests {
             login_throttle: Arc::default(),
             vault_throttle: Arc::default(),
             proton_throttle: Arc::default(),
+            token_throttle: Arc::default(),
             epoch: Arc::new(AtomicI64::new(0)),
             sessions: Arc::default(),
             config,

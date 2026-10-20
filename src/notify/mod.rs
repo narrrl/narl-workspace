@@ -509,7 +509,7 @@ fn local_instant(tz: Tz, day: NaiveDate, hour: u32, minute: u32) -> i64 {
 }
 
 /// Start (inclusive) and end (exclusive) of a local day, in Unix seconds.
-fn day_bounds(tz: Tz, day: NaiveDate) -> (i64, i64) {
+pub(crate) fn day_bounds(tz: Tz, day: NaiveDate) -> (i64, i64) {
     (
         local_instant(tz, day, 0, 0),
         local_instant(tz, day + ChronoDuration::days(1), 0, 0),

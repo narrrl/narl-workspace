@@ -635,13 +635,25 @@ pub async fn create_card(
     Json(input): Json<CardInput>,
 ) -> AppResult<Json<Card>> {
     let space_id = list_space(&state.db, list_id).await?;
+    let id = insert_card(&state.db, space_id, list_id, &input).await?;
+    state.backup.signal();
+    card(&state.db, id).await.map(Json)
+}
+
+/// A new card at the bottom of a list, which must be on `space_id`'s board.
+pub(crate) async fn insert_card(
+    db: &SqlitePool,
+    space_id: i64,
+    list_id: i64,
+    input: &CardInput,
+) -> AppResult<i64> {
     let title = input.title.trim();
     if title.is_empty() {
         return Err(AppError::BadRequest("a card needs a title".into()));
     }
-    linkable(&state.db, input.node_id).await?;
+    linkable(db, input.node_id).await?;
 
-    let mut tx = crate::db::begin_write(&state.db).await?;
+    let mut tx = crate::db::begin_write(db).await?;
     let position: i64 =
         sqlx::query("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM cards WHERE list_id = ?1")
             .bind(list_id)
@@ -668,9 +680,50 @@ pub async fn create_card(
     // A card made straight into the done list is finished as it lands.
     settle(&mut tx, space_id).await?;
     tx.commit().await?;
+    Ok(id)
+}
 
-    state.backup.signal();
-    card(&state.db, id).await.map(Json)
+/// Where a card goes that is written down from somewhere else.
+pub struct Inbox {
+    pub space_id: i64,
+    pub space_slug: String,
+    pub list_id: i64,
+    pub list_name: String,
+}
+
+/// The inbox — the first list — of the board of the space with that slug, or
+/// of the first space in the switcher that has a board: the rule `:card`
+/// follows away from the board, for a capture that has no screen to ask on.
+pub(crate) async fn inbox_of(db: &SqlitePool, space: Option<&str>) -> AppResult<Inbox> {
+    let found: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, slug FROM nodes
+         WHERE parent_id IS NULL AND kind = 'space' AND has_board = 1
+           AND (?1 IS NULL OR slug = ?1)
+         ORDER BY position, name
+         LIMIT 1",
+    )
+    .bind(space)
+    .fetch_optional(db)
+    .await?;
+    let (space_id, space_slug) = found.ok_or_else(|| {
+        AppError::BadRequest(match space {
+            Some(slug) => format!("no space {slug} with a board"),
+            None => "no space has a board — :set board turns one on".into(),
+        })
+    })?;
+    ensure_lists(db, space_id).await?;
+    let (list_id, list_name): (i64, String) = sqlx::query_as(
+        "SELECT id, name FROM board_lists WHERE space_id = ?1 ORDER BY position, id LIMIT 1",
+    )
+    .bind(space_id)
+    .fetch_one(db)
+    .await?;
+    Ok(Inbox {
+        space_id,
+        space_slug,
+        list_id,
+        list_name,
+    })
 }
 
 pub async fn update_card(

@@ -153,6 +153,9 @@ const folderNames = () => [
 
 const spaceNames = () => workspace.spaces.map((space) => space.slug)
 
+/** The capture tokens' names, for Tab after `:token rm`; null until fetched. */
+let tokenNames: string[] | null = null
+
 /** `:encrypt` and `:decrypt`: a file, or everything under a folder. */
 const sealTarget = (encrypt: boolean) =>
   workspace.guard(async () => {
@@ -1167,6 +1170,56 @@ export const commands: CommandSpec[] = [
           )
         }
         workspace.say('usage: :sshkey [add <name> <key> | rm <name> | vault <name> on|off]', 'error')
+      }),
+  },
+  {
+    name: 'token',
+    args: '[add <name> | rm <name>]',
+    group: 'view',
+    help: 'list, add or remove tokens that capture into the workspace from outside it — add shows the token once and copies it',
+    complete: (arg) => {
+      // Tab cannot wait for the server, so the names are fetched the first
+      // time it is pressed here and offered from then on.
+      if (tokenNames === null) {
+        tokenNames = []
+        void api.listTokens().then((tokens) => (tokenNames = tokens.map((t) => t.name)), () => (tokenNames = null))
+      }
+      return arg.startsWith('rm ') ? tokenNames.map((name) => `rm ${name}`) : ['add ', 'rm ']
+    },
+    run: (arg) =>
+      workspace.guard(async () => {
+        const trimmed = arg.trim()
+        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
+          const tokens = await api.listTokens()
+          tokenNames = tokens.map((t) => t.name)
+          if (tokens.length === 0) return workspace.say('no tokens — :token add <name> makes one')
+          return workspace.say(
+            tokens
+              .map((t) => `${t.name}, ${t.last_used_at === null ? 'never used' : `used ${relative(t.last_used_at)}`}`)
+              .join(' · '),
+          )
+        }
+        const addMatch = /^add\s+(.+)$/.exec(trimmed)
+        if (addMatch) {
+          const added = await api.addToken(addMatch[1].trim())
+          tokenNames = null
+          const copied = await workspace.copy(added.token)
+          return workspace.say(
+            `token ${added.name}: ${added.token} — ${copied ? 'copied; ' : ''}shown this once, the server keeps only its hash`,
+            'info',
+            true,
+          )
+        }
+        const rmMatch = /^rm\s+(.+)$/.exec(trimmed)
+        if (rmMatch) {
+          const tokens = await api.listTokens()
+          const target = tokens.find((t) => t.name === rmMatch[1].trim())
+          if (!target) return workspace.say(`no token named ${rmMatch[1].trim()}`, 'error')
+          await api.removeToken(target.id)
+          tokenNames = null
+          return workspace.say(`removed ${target.name} — it captures nothing from now on`)
+        }
+        workspace.say('usage: :token [add <name> | rm <name>]', 'error')
       }),
   },
   {

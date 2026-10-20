@@ -137,6 +137,7 @@ async fn main() -> Result<()> {
         login_throttle: Arc::default(),
         vault_throttle: Arc::default(),
         proton_throttle: Arc::default(),
+        token_throttle: Arc::default(),
         backup,
         notify,
         epoch: Arc::new(std::sync::atomic::AtomicI64::new(epoch)),

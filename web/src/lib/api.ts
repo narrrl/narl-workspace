@@ -91,6 +91,21 @@ export interface SshKey {
   vault: boolean
 }
 
+/** A token that may capture from outside the browser; the token itself is shown once. */
+export interface ApiToken {
+  id: number
+  name: string
+  created_at: number
+  last_used_at: number | null
+}
+
+/** Where `POST /api/capture` put the text. */
+export interface Captured {
+  to: 'card' | 'diary'
+  id: number
+  where: string
+}
+
 /** What a document said before a save replaced it. */
 export interface RevisionSummary {
   id: number
@@ -582,4 +597,11 @@ export const api = {
 
   setSshKeyVault: (id: number, vault: boolean) =>
     request<{ ok: true }>(`/ssh-keys/${id}`, { method: 'PATCH', body: body({ vault }) }),
+
+  listTokens: () => request<ApiToken[]>('/tokens'),
+
+  addToken: (name: string) =>
+    request<ApiToken & { token: string }>('/tokens', { method: 'POST', body: body({ name }) }),
+
+  removeToken: (id: number) => request<{ ok: true }>(`/tokens/${id}`, { method: 'DELETE' }),
 }

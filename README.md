@@ -125,7 +125,8 @@ list (`:bn` and `:bp` walk the tiles), `:delete [id]` deletes, `:copy` puts the 
 `:clear` drops the search, `:trash` lists what was deleted, `:reload` re-reads the folder, `:stats` counts words
 and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
-session, `:logout!` every session and `:sessions rm <n>` one other. The tree has its own: `:space [name]` switches (`:space! <name>`
+session, `:logout!` every session and `:sessions rm <n>` one other, and
+`:token` manages the tokens that capture from outside (see below). The tree has its own: `:space [name]` switches (`:space! <name>`
 makes one, `:rmspace [name]` puts one in the trash with everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..|/>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
@@ -240,6 +241,41 @@ it stands, `D` sets its due date (`:due` on the line), `H` / `L` send it to
 the list left / right on its board, and `T` writes today's entry. The bar shows `late` and `today` counts
 whenever either is above zero, and the agenda opens by itself once a day when
 something is late or due, so nothing has to be remembered to be looked at.
+
+## Capturing from elsewhere
+
+A thought arrives when no tab is open. `POST /api/capture` writes it down from
+anything that can send a request — a phone shortcut, a script, `curl` — with a
+token in place of a session:
+
+```text
+:token add phone     makes one, shows it once and copies it
+:token               lists them, with when each was last used
+:token rm phone      and that one captures nothing from the next request on
+```
+
+```sh
+curl -H "Authorization: Bearer nwc_…" -H 'content-type: application/json' \
+  -d '{"text":"call the bank"}' https://your-host/api/capture
+```
+
+`"to": "card"`, the default, puts a card in an inbox: the one of the space
+named by `"space": "<slug>"`, or else of the first space that has a board,
+the same as `:card` outside the board. The first line is the card's title and
+the rest its notes. `"to": "diary"` adds `- 14:05 call the bank` to the end of
+today's entry, in `WORKSPACE_TIMEZONE`, and starts the entry when there is
+none yet. The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
+
+A token opens this one route and nothing else — it reads nothing, not even the
+list of spaces — and only its SHA-256 is kept, the way a share key is. Wrong
+tokens slow down like wrong passwords, on a line of their own, so guessing at
+them does not hold up the login.
+
+On an iPhone, a Shortcut with *Ask for Input* followed by *Get Contents of
+URL* does it: method `POST`, a header `Authorization` of `Bearer nwc_…`, and a
+JSON body with `text` set to the input. On Android, *HTTP Shortcuts* does the
+same with a text-input variable in the body. Either one goes on the home
+screen, or behind the share sheet.
 
 ## Not losing things
 
@@ -689,7 +725,7 @@ both halves.
 ## API
 
 Everything except the login, the health check and the two share routes
-requires the session cookie. Media answers `Range` requests, so a video seeks,
+requires the session cookie; `/api/capture` takes a token instead. Media answers `Range` requests, so a video seeks,
 sealed or not.
 
 | method | path | purpose |
@@ -707,6 +743,9 @@ sealed or not.
 | `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
 | `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, and whether the diary has today |
+| `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |
+| `GET`/`POST` | `/api/tokens` | the capture tokens / make one, `{ name }`, answered with the token this once |
+| `DELETE` | `/api/tokens/{id}` | remove a capture token |
 | `POST` | `/api/spaces/{id}/lists` | add a list |
 | `PUT`/`DELETE` | `/api/lists/{id}` | rename / delete a list and its cards |
 | `POST` | `/api/lists/{id}/cards` | add a card |

@@ -498,9 +498,13 @@ class Workspace {
     })
   }
 
-  say(text: string, kind: 'info' | 'error' = 'info') {
+  /**
+   * A line in the status bar. Information fades after a few seconds, unless
+   * `keep`: for what is shown only once, and may have to be copied by hand.
+   */
+  say(text: string, kind: 'info' | 'error' = 'info', keep = false) {
     this.flash = { text, kind }
-    if (kind === 'info') {
+    if (kind === 'info' && !keep) {
       const current = this.flash
       setTimeout(() => {
         if (this.flash === current) this.flash = null
