@@ -57,6 +57,23 @@ function tex(source: string, display: boolean): string {
   return katex.renderToString(source, { displayMode: display, throwOnError: false })
 }
 
+/*
+ * A link that opens another window leaves it no handle on this one. Only
+ * `_blank` is kept as a target: a named one reuses whatever window has that
+ * name, and browsers give `noopener` to `_blank` alone.
+ */
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName !== 'A' || !node.hasAttribute('target')) return
+  if (node.getAttribute('target') === '_blank') node.setAttribute('rel', 'noopener noreferrer')
+  else node.removeAttribute('target')
+})
+
+const SANITIZE = {
+  // `semantics` and `annotation` carry KaTeX's MathML, for screen readers.
+  ADD_TAGS: ['video', 'audio', 'source', 'semantics', 'annotation'],
+  ADD_ATTR: ['controls', 'target', 'loading', 'playsinline', 'preload', 'encoding'],
+}
+
 function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 }
@@ -65,7 +82,9 @@ function escapeHtml(text: string): string {
  * Render entry markdown to sanitised HTML. When share credentials are given,
  * media URLs are rewritten to the public route — token and key both, since that
  * route demands the same pair the entry itself did — so the page works for a
- * reader who has no session.
+ * reader who has no session, and a link to another document, an address inside
+ * the private workspace that would lead the reader to its login page, is kept
+ * as its text.
  */
 export function renderMarkdown(source: string, share?: { token: string; key: string }): string {
   const md = share
@@ -76,12 +95,21 @@ export function renderMarkdown(source: string, share?: { token: string; key: str
     : source
 
   const html = marked.parse(md, { async: false }) as string
+  if (!share) return DOMPurify.sanitize(html, SANITIZE)
 
-  return DOMPurify.sanitize(html, {
-    // `semantics` and `annotation` carry KaTeX's MathML, for screen readers.
-    ADD_TAGS: ['video', 'audio', 'source', 'semantics', 'annotation'],
-    ADD_ATTR: ['controls', 'target', 'loading', 'playsinline', 'preload', 'encoding'],
-  })
+  // On the parsed page, not on its text: a pattern over HTML can end inside
+  // an attribute and turn what was quoted there into markup.
+  const page = DOMPurify.sanitize(html, { ...SANITIZE, RETURN_DOM_FRAGMENT: true })
+  for (const link of page.querySelectorAll('a[href^="/n/"]')) {
+    const text = document.createElement('span')
+    text.className = 'private-link'
+    text.title = 'a page of the private workspace'
+    text.append(...link.childNodes)
+    link.replaceWith(text)
+  }
+  const holder = document.createElement('div')
+  holder.append(page)
+  return holder.innerHTML
 }
 
 /** The markdown snippet that embeds a freshly uploaded file. */

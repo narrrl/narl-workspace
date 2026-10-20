@@ -18,18 +18,8 @@
   let scroller = $state<HTMLElement>()
   let article = $state<HTMLElement>()
   let position = $state('All')
-  /*
-   * A link to another document is an address inside the private workspace,
-   * and leads a reader to its login page. Those links are kept as their text.
-   */
-  const html = $derived(
-    doc
-      ? renderMarkdown(doc.body, { token, key: shareKey }).replace(
-          /<a href="\/n\/[^"]*"[^>]*>(.*?)<\/a>/g,
-          '<span class="private-link" title="a page of the private workspace">$1</span>',
-        )
-      : '',
-  )
+  // Links into the private workspace come back as their text; see renderMarkdown.
+  const html = $derived(doc ? renderMarkdown(doc.body, { token, key: shareKey }) : '')
   const title = $derived(doc?.name.trim() ?? '')
   const words = $derived(doc ? doc.body.split(/\s+/).filter(Boolean).length : 0)
   // The outline gets a window of its own only when there is something to outline.
