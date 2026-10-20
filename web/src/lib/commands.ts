@@ -75,12 +75,16 @@ const sealTarget = (encrypt: boolean) =>
     if (node.file && node.file.encrypted === encrypt) {
       return workspace.say(encrypt ? 'already in the vault' : 'not in the vault')
     }
+    if (!encrypt && workspace.parentSealed) {
+      return workspace.say(`this ${node.kind} is inside a sealed folder — decrypt that folder instead`, 'error')
+    }
+    const name = node.name || node.slug
     if (isContainer(node)) {
-      const verb = encrypt ? 'seal every file in' : 'take every file in'
-      const tail = encrypt ? 'into the vault' : 'out of the vault'
-      if (!(await workspace.ask(`${verb} ${node.kind} "${node.name || node.slug}" ${tail}?`))) return
+      const question = encrypt
+        ? `seal ${node.kind} "${name}" — every file in it now, and every file added later? documents stay readable`
+        : `unseal ${node.kind} "${name}" and take every file in it out of the vault?`
+      if (!(await workspace.ask(question))) return
     } else if (!encrypt) {
-      const name = node.name || node.slug
       if (!(await workspace.ask(`store "${name}" unencrypted again, and in the readable files/ view on proton drive?`))) return
     }
     if (!(await workspace.ensureUnlocked())) return
@@ -865,14 +869,14 @@ export const commands: CommandSpec[] = [
     name: 'encrypt',
     aliases: ['seal'],
     group: 'vault',
-    help: 'seal the file under the cursor in the vault — on a folder, every file inside it',
+    help: 'seal the file under the cursor in the vault — a folder stays sealed: every file in it, and every file added later',
     run: () => sealTarget(true),
   },
   {
     name: 'decrypt',
     aliases: ['unseal'],
     group: 'vault',
-    help: 'take the file under the cursor back out of the vault — on a folder, every file inside it',
+    help: 'take the file under the cursor back out of the vault — on a sealed folder, unseal it and every file inside',
     run: () => sealTarget(false),
   },
   {

@@ -30,6 +30,8 @@ export interface NodeSummary {
   updated_at: number
   shared: boolean
   share_token: string | null
+  /** Folders and spaces only: whatever lands here is sealed in the vault. */
+  sealed: boolean
   /** Files only. */
   file: FileInfo | null
   /** Search results only: where the match sits, `work/notes`. */
@@ -433,9 +435,12 @@ export const api = {
 
   lockVault: () => request<VaultStatus>('/vault/lock', { method: 'POST' }),
 
-  /** Seal a file, or every file under a folder, into the vault — or take it back out. */
+  /**
+   * Seal a file into the vault, or a folder with everything in it and all
+   * that lands there later — or take it back out.
+   */
   seal: (id: number, encrypt: boolean) =>
-    request<{ files: number; unchanged: number; failed: number; shared: number }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
+    request<{ files: number; unchanged: number; failed: number; shared: number; sealed: boolean }>(`/nodes/${id}/${encrypt ? 'encrypt' : 'decrypt'}`, {
       method: 'POST',
     }),
 

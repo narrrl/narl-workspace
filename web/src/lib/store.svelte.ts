@@ -39,6 +39,8 @@ class Workspace {
   parentId = $state<number | null>(null)
   /** Ancestors of the current folder, the space first and the folder last. */
   path = $state<Crumb[]>([])
+  /** The current folder is sealed: uploads into it go into the vault. */
+  parentSealed = $state(false)
 
   /** Children of the current folder, or the results of a search. */
   nodes = $state<NodeSummary[]>([])
@@ -250,14 +252,15 @@ class Workspace {
 
   /** Seal what is under the cursor, or take it back out, and show the result. */
   async seal(id: number, encrypt: boolean) {
-    const { files, unchanged, failed, shared } = await api.seal(id, encrypt)
+    const { files, unchanged, failed, shared, sealed } = await api.seal(id, encrypt)
     const verb = encrypt ? 'encrypted' : 'decrypted'
     const already = unchanged > 0 ? `, ${unchanged} already were` : ''
     const broken = failed > 0 ? `, ${failed} could not be` : ''
+    const later = sealed ? ' — what lands in the folder from now on is sealed too' : ''
     const readers =
       shared > 0 ? ` — ${shared} shared document${shared === 1 ? '' : 's'} embed it, and their readers no longer see it` : ''
     this.say(
-      `${verb} ${files} file${files === 1 ? '' : 's'}${already}${broken}${readers}`,
+      `${verb} ${files} file${files === 1 ? '' : 's'}${already}${broken}${later}${readers}`,
       failed > 0 || shared > 0 ? 'error' : undefined,
     )
     await this.refresh()
@@ -573,6 +576,7 @@ class Workspace {
     // Walking into another space by a link leaves this one where it was.
     if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
     this.parentId = id
+    this.parentSealed = folder.sealed
     this.query = ''
     this.globalSearch = false
     this.path = folder.path
@@ -1199,6 +1203,7 @@ class Workspace {
   async importFolder(files: File[], root = false) {
     const parent = this.parentId
     if (parent === null && !root) return
+    if (!root && this.parentSealed && !(await this.ensureUnlocked())) return
     this.say(`importing ${files.length} file${files.length === 1 ? '' : 's'} …`)
 
     const report = root ? await api.importRoot(files) : await api.importFolder(parent!, files)
@@ -1224,6 +1229,11 @@ class Workspace {
   async putFiles(files: File[], encrypt = false) {
     const parent = this.parentId
     if (parent === null) return
+    // A sealed folder seals them anyway, and needs the vault open for it.
+    if (this.parentSealed) {
+      if (!(await this.ensureUnlocked())) return
+      encrypt = true
+    }
     const total = files.reduce((sum, file) => sum + file.size, 0)
     const what = files.length === 1 ? files[0].name : `${files.length} files`
     this.say(`uploading ${what} (${formatBytes(total)})${encrypt ? ' into the vault' : ''} …`)

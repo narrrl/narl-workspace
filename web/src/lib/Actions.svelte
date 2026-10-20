@@ -15,7 +15,7 @@
 
   const actions = $derived.by((): Action[] => {
     if (!node) return []
-    const sealed = node.file?.encrypted ?? false
+    const sealed = node.file?.encrypted ?? node.sealed
     const holdsFiles = isContainer(node) || node.kind === 'file'
     const list: Action[] = [
       { label: isContainer(node) ? 'open' : 'read', run: () => workspace.guard(() => workspace.openSelected()) },
@@ -32,11 +32,12 @@
       )
       if (node.shared) list.push({ label: 'new share link — the old one stops working', run: () => runCommand('link') })
     }
-    if (holdsFiles && node.kind !== 'space') {
+    // Inside a sealed folder only that folder opens, as a whole.
+    if (holdsFiles && node.kind !== 'space' && !(sealed && workspace.parentSealed)) {
       list.push(
         sealed
-          ? { label: 'take out of the vault', run: () => runCommand('decrypt') }
-          : { label: node.kind === 'file' ? 'seal in the vault' : 'seal every file in it', run: () => runCommand('encrypt') },
+          ? { label: node.kind === 'file' ? 'take out of the vault' : 'unseal — take every file out', run: () => runCommand('decrypt') }
+          : { label: node.kind === 'file' ? 'seal in the vault' : 'seal it — now and what lands later', run: () => runCommand('encrypt') },
       )
     }
     list.push({ label: 'delete', run: () => runCommand('delete'), danger: true })

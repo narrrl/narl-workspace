@@ -3,6 +3,13 @@
 //! `POST /api/nodes/{id}/encrypt` seals a file node, or every file node under
 //! a folder or space; `/decrypt` does the opposite. Either needs the vault open.
 //!
+//! A folder or space that is encrypted stays sealed: it and every folder under
+//! it carry `sealed`, and whatever lands there later — an upload, an import, an
+//! SFTP write, a file moved in — is sealed on the way in, or refused while the
+//! vault is shut. `enter` is that step for a move. Decrypting the folder lifts
+//! it; a file or folder inside a sealed one cannot be decrypted on its own.
+//! Documents are not files and stay as they are.
+//!
 //! A file is re-written under a **new** media id rather than in place. The
 //! mirror treats `uploads/<uuid>` as immutable, so rewriting one would leave
 //! the old bytes on Drive as the previous revision of the same file — the
@@ -27,7 +34,7 @@ use crate::{
     vault,
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct Resealed {
     /// How many files changed.
     pub files: usize,
@@ -38,6 +45,8 @@ pub struct Resealed {
     /// Shared documents that embed a file just sealed: their readers now see
     /// a gap where it was, because a share link never serves a sealed file.
     pub shared: usize,
+    /// Whether what was asked about is now a sealed folder or space.
+    pub sealed: bool,
 }
 
 pub async fn encrypt(
@@ -45,7 +54,7 @@ pub async fn encrypt(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Resealed>> {
-    reseal(&state, id, true).await.map(Json)
+    seal_node(&state, id).await.map(Json)
 }
 
 pub async fn decrypt(
@@ -53,7 +62,119 @@ pub async fn decrypt(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Resealed>> {
-    reseal(&state, id, false).await.map(Json)
+    open_node(&state, id).await.map(Json)
+}
+
+async fn seal_node(state: &AppState, id: i64) -> AppResult<Resealed> {
+    let (kind, _) = place(state, id).await?;
+    if !nodes::is_container(&kind) {
+        return reseal(state, id, true).await;
+    }
+    state.vault.key().ok_or(AppError::Locked)?;
+    // Flagged first, so nothing that lands while the files are re-written
+    // slips in as plaintext; and an empty folder is worth sealing too.
+    mark(state, id, true).await?;
+    let mut done = reseal(state, id, true).await?;
+    done.sealed = true;
+    Ok(done)
+}
+
+async fn open_node(state: &AppState, id: i64) -> AppResult<Resealed> {
+    let (kind, parent) = place(state, id).await?;
+    if let Some(parent) = parent {
+        if sealed(state, parent).await? {
+            let what = if kind == nodes::FILE {
+                "file"
+            } else {
+                "folder"
+            };
+            return Err(AppError::BadRequest(format!(
+                "this {what} is inside a sealed folder — decrypt that folder instead"
+            )));
+        }
+    }
+    if !nodes::is_container(&kind) {
+        return reseal(state, id, false).await;
+    }
+    state.vault.key().ok_or(AppError::Locked)?;
+    mark(state, id, false).await?;
+    reseal(state, id, false).await
+}
+
+/// Put `id` under `parent`'s rules before it moves there: when `parent` is
+/// sealed, flag the folders of `id` and seal its files. The caller moves it
+/// only if this succeeds — the triggers of 0015 refuse it otherwise.
+pub async fn enter(state: &AppState, id: i64, parent: i64) -> AppResult<()> {
+    if !sealed(state, parent).await? {
+        return Ok(());
+    }
+    // Already sealed — a rename inside the folder, or a move between two
+    // sealed ones — needs nothing, not even the vault open.
+    let ready: Option<bool> = sqlx::query_scalar(
+        "SELECT CASE WHEN n.kind = 'file' THEN m.encrypted
+                     WHEN n.kind = 'document' THEN 1
+                     ELSE n.sealed END
+         FROM nodes n LEFT JOIN media m ON m.id = n.media_id WHERE n.id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?;
+    match ready {
+        None => return Err(AppError::NotFound),
+        // A document is not sealed; it moves in as it is.
+        Some(true) => return Ok(()),
+        Some(false) => {}
+    }
+    state.vault.key().ok_or(AppError::Locked)?;
+    let (kind, _) = place(state, id).await?;
+    if nodes::is_container(&kind) {
+        mark(state, id, true).await?;
+    }
+    let done = reseal(state, id, true).await?;
+    if done.failed > 0 {
+        return Err(AppError::BadRequest(format!(
+            "{} file(s) would not seal, so nothing moved into the sealed folder",
+            done.failed
+        )));
+    }
+    Ok(())
+}
+
+/// Whether files that land in this folder or space are sealed.
+pub async fn sealed(state: &AppState, id: i64) -> AppResult<bool> {
+    Ok(sqlx::query_scalar("SELECT sealed FROM nodes WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .unwrap_or(false))
+}
+
+async fn place(state: &AppState, id: i64) -> AppResult<(String, Option<i64>)> {
+    let row = sqlx::query("SELECT kind, parent_id FROM nodes WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok((row.get("kind"), row.get("parent_id")))
+}
+
+/// Set or lift `sealed` on a folder or space and every folder under it.
+async fn mark(state: &AppState, id: i64, on: bool) -> AppResult<()> {
+    let mut tx = crate::db::begin_write(&state.db).await?;
+    let list = nodes::descendants(&mut tx, id)
+        .await?
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    sqlx::query(&format!(
+        "UPDATE nodes SET sealed = ?1 WHERE kind IN ('space', 'folder') AND id IN ({list})"
+    ))
+    .bind(on)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 struct Target {
@@ -90,6 +211,11 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     .collect();
 
     if targets.is_empty() {
+        // An empty folder is nothing to re-write, but it is no mistake either.
+        let (kind, _) = place(state, id).await?;
+        if nodes::is_container(&kind) {
+            return Ok(Resealed::default());
+        }
         return Err(AppError::BadRequest("there are no files there".into()));
     }
 
@@ -136,6 +262,7 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
         unchanged,
         failed: failed.len(),
         shared: shared as usize,
+        sealed: false,
     })
 }
 
@@ -261,4 +388,145 @@ async fn rewrite(state: &AppState, key: &vault::Key, target: &Target, seal: bool
     let _ = tokio::fs::remove_file(&source).await;
     tracing::info!(node = target.node_id, from = %old, to = %new, sealed = seal, "file re-written");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zeroize::Zeroizing;
+
+    use crate::{error::AppError, routes::media};
+
+    struct World {
+        state: AppState,
+        _dir: tempfile::TempDir,
+        space: i64,
+        folder: i64,
+    }
+
+    /// A space with a folder in it, and a vault that is open.
+    async fn world() -> World {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("uploads")).unwrap();
+        let state = crate::routes::tests::state_in(dir.path().into()).await;
+        state.vault.open_with(Zeroizing::new([7u8; 32]));
+        let space = node(&state, None, "space", "vaulted").await;
+        let folder = node(&state, Some(space), "folder", "keys").await;
+        World {
+            state,
+            _dir: dir,
+            space,
+            folder,
+        }
+    }
+
+    async fn node(state: &AppState, parent: Option<i64>, kind: &str, name: &str) -> i64 {
+        sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3, 1, 1) RETURNING id",
+        )
+        .bind(parent)
+        .bind(kind)
+        .bind(name)
+        .fetch_one(&state.db)
+        .await
+        .unwrap()
+    }
+
+    /// A plaintext file, written the way an upload writes one.
+    async fn plain_file(state: &AppState, parent: i64, name: &str) -> AppResult<i64> {
+        let id = Uuid::new_v4().to_string();
+        std::fs::write(state.config.uploads_dir().join(&id), b"secret bytes").unwrap();
+        media::insert_file(&state.db, parent, &id, name, "text/plain", 12, false).await
+    }
+
+    async fn encrypted(state: &AppState, node: i64) -> bool {
+        sqlx::query_scalar(
+            "SELECT m.encrypted FROM nodes n JOIN media m ON m.id = n.media_id WHERE n.id = ?1",
+        )
+        .bind(node)
+        .fetch_one(&state.db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_sealed_folder_stays_sealed() {
+        let w = world().await;
+        let file = plain_file(&w.state, w.folder, "a.txt").await.unwrap();
+
+        let done = seal_node(&w.state, w.folder).await.unwrap();
+        assert!(done.sealed);
+        assert_eq!(done.files, 1);
+        assert!(encrypted(&w.state, file).await);
+        assert!(sealed(&w.state, w.folder).await.unwrap());
+        assert!(!sealed(&w.state, w.space).await.unwrap());
+
+        // A folder made in it later is sealed from the start.
+        let inner = node(&w.state, Some(w.folder), "folder", "inner").await;
+        assert!(sealed(&w.state, inner).await.unwrap());
+
+        // And no path puts plaintext in it: the database refuses.
+        let refused = plain_file(&w.state, inner, "b.txt").await.unwrap_err();
+        assert!(
+            matches!(&refused, AppError::BadRequest(m) if m.contains("sealed")),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_folder_can_be_sealed() {
+        let w = world().await;
+        let done = seal_node(&w.state, w.folder).await.unwrap();
+        assert_eq!((done.files, done.sealed), (0, true));
+    }
+
+    #[tokio::test]
+    async fn moving_in_seals_and_a_shut_vault_refuses() {
+        let w = world().await;
+        seal_node(&w.state, w.folder).await.unwrap();
+        let outside = node(&w.state, Some(w.space), "folder", "outside").await;
+        let file = plain_file(&w.state, outside, "c.txt").await.unwrap();
+
+        w.state.vault.lock();
+        assert!(matches!(
+            enter(&w.state, file, w.folder).await,
+            Err(AppError::Locked)
+        ));
+        assert!(!encrypted(&w.state, file).await);
+
+        w.state.vault.open_with(Zeroizing::new([7u8; 32]));
+        enter(&w.state, outside, w.folder).await.unwrap();
+        assert!(encrypted(&w.state, file).await);
+        assert!(sealed(&w.state, outside).await.unwrap());
+
+        // Already sealed, it moves about inside without the vault.
+        w.state.vault.lock();
+        enter(&w.state, file, w.folder).await.unwrap();
+        // A document is no file and goes in as it is.
+        let doc = node(&w.state, Some(w.space), "document", "notes").await;
+        enter(&w.state, doc, w.folder).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_the_sealed_folder_itself_opens() {
+        let w = world().await;
+        let inner = node(&w.state, Some(w.folder), "folder", "inner").await;
+        let file = plain_file(&w.state, inner, "d.txt").await.unwrap();
+        seal_node(&w.state, w.folder).await.unwrap();
+
+        for id in [inner, file] {
+            assert!(matches!(
+                open_node(&w.state, id).await,
+                Err(AppError::BadRequest(m)) if m.contains("inside a sealed folder")
+            ));
+        }
+
+        let done = open_node(&w.state, w.folder).await.unwrap();
+        assert_eq!(done.files, 1);
+        assert!(!encrypted(&w.state, file).await);
+        assert!(!sealed(&w.state, w.folder).await.unwrap());
+        assert!(!sealed(&w.state, inner).await.unwrap());
+        plain_file(&w.state, inner, "e.txt").await.unwrap();
+    }
 }

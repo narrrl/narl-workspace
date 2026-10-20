@@ -61,6 +61,8 @@ pub struct NodeSummary {
     pub updated_at: i64,
     pub shared: bool,
     pub share_token: Option<String>,
+    /// Folders and spaces only: what lands here is sealed in the vault.
+    pub sealed: bool,
     /// Files only.
     pub file: Option<FileInfo>,
     /// Search results only: where the match sits, `work/notes`, so two
@@ -88,6 +90,7 @@ pub struct Node {
     pub updated_at: i64,
     pub shared: bool,
     pub share_token: Option<String>,
+    pub sealed: bool,
     pub file: Option<FileInfo>,
     /// This node's ancestors, the space first and the node itself last — the
     /// breadcrumb, and everything needed to build its /n/... path.
@@ -176,7 +179,7 @@ const EXCERPT_CHARS: usize = 180;
 /// The columns every list query selects, so a row always converts the same way.
 const SUMMARY_COLUMNS: &str =
     "n.id, n.parent_id, n.kind, n.name, n.slug, n.position, n.has_board, n.role,
-     n.created_at, n.updated_at, n.share_token, n.media_id,
+     n.created_at, n.updated_at, n.share_token, n.media_id, n.sealed,
      (SELECT COUNT(*) FROM nodes c WHERE c.parent_id = n.id) AS child_count,
      (SELECT m.mime FROM media m WHERE m.id = n.media_id) AS file_mime,
      (SELECT m.size FROM media m WHERE m.id = n.media_id) AS file_size,
@@ -329,6 +332,7 @@ fn row_to_summary(row: &sqlx::sqlite::SqliteRow, head: &str) -> NodeSummary {
         updated_at: row.get("updated_at"),
         shared: share_token.is_some(),
         share_token,
+        sealed: row.get("sealed"),
         file,
         location: None,
     }
@@ -762,6 +766,18 @@ pub async fn move_node(
     if input.parent_id == id {
         return Err(AppError::BadRequest("a node cannot contain itself".into()));
     }
+    // Into a sealed folder, the files go sealed or not at all — and only
+    // into a place it may go at all, which the transaction checks again.
+    {
+        let mut conn = state.db.acquire().await?;
+        container(&mut conn, input.parent_id).await?;
+        if descendants(&mut conn, id).await?.contains(&input.parent_id) {
+            return Err(AppError::BadRequest(
+                "a folder cannot be moved into itself".into(),
+            ));
+        }
+    }
+    crate::routes::seal::enter(&state, id, input.parent_id).await?;
 
     let mut tx = crate::db::begin_write(&state.db).await?;
 
@@ -898,6 +914,7 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         updated_at: summary.updated_at,
         shared: summary.shared,
         share_token: summary.share_token,
+        sealed: summary.sealed,
         file: summary.file,
         path: path_of(&state.db, id).await?,
     })

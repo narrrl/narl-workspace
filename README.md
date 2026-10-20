@@ -266,7 +266,8 @@ The SFTP mount shows files beside the documents, under their own names — a
 later file that shares one is told apart by its id, `slides (42).pdf` — and
 anything copied in that is not a `.md` becomes a file in the tree, streamed to
 disk under the same size limit. A sealed file is listed but does not open
-there. Editor droppings — swap files, `~` backups, dotted temp files — stay in
+there. A file copied into a sealed folder is sealed while the vault is open in
+the browser, and refused while it is shut. Editor droppings — swap files, `~` backups, dotted temp files — stay in
 memory for the session, and a dotted temp file renamed onto a real name is kept
 as that file, which is how `rsync` and most editors save.
 
@@ -286,10 +287,21 @@ shut — to anyone, in short, who does not know the vault password.
 `:vault` sets the password the first time (ten characters at least) and says
 whether the vault is open afterwards. `:upload!` puts files into the folder
 being browsed sealed — encrypted as they stream in, so the plaintext never
-touches the disk. `:encrypt` seals the file under the cursor, or every file in
-the folder under it; `:decrypt` takes them back out. `:unlock` and `:lock` open
-and close it, `:passwd` changes the password. A sealed file carries a lock in
-the list, and the bar says `vault open` while it is.
+touches the disk. `:encrypt` seals the file under the cursor; `:decrypt` takes
+it back out. `:unlock` and `:lock` open and close it, `:passwd` changes the
+password. A sealed file carries a lock in the list, and the bar says `vault
+open` while it is.
+
+`:encrypt` on a folder or space seals it for good, not just once: every file
+in it now, and every file that lands in it later. An upload, an import, an SFTP
+write and a file or folder moved in are all sealed on the way in. While the
+vault is shut they are refused rather than stored readable, and the browser
+asks for the password instead. Folders made inside are sealed too, and a
+sealed folder carries a lock like a sealed file. `:decrypt` on that folder
+unseals it with everything in it; a file or folder inside it cannot be
+decrypted on its own. Documents are not files and stay readable, as below.
+The database holds the line as well: a file node whose bytes are not sealed
+cannot be put in a sealed folder by any path.
 
 The vault closes itself after `WORKSPACE_VAULT_IDLE_MIN` minutes of nobody
 using it (15 by default) — the key is dropped from memory then, not merely
@@ -549,7 +561,7 @@ sealed or not.
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
 | `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
 | `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
-| `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or every file under a folder, or take it out |
+| `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or a folder for good — what is in it and what lands later — or take it out |
 | `GET`/`POST`/`PUT` | `/api/vault` | status / set the password once / change it |
 | `POST` | `/api/vault/unlock`, `/api/vault/lock` | open / close the vault |
 | `GET`/`POST` | `/api/ssh-keys` | the keys that may mount over SFTP / add one |

@@ -9,7 +9,9 @@
 //! export writes, and a leading heading written back becomes the title again.
 //! A file is streamed from `uploads/` and written back to it through a
 //! `.part`, never held in memory. A sealed file is listed but cannot be
-//! opened here: the vault is opened in the browser, for the browser.
+//! opened here: the vault is opened in the browser, for the browser. A file
+//! written into a sealed folder, or moved into one, is sealed while the vault
+//! is open there and refused while it is shut.
 //!
 //! What an editor writes next to a document — vim's `.swp` and `4913` probe,
 //! a `foo.md~` backup, a dotted temp file it renames over the original — lives
@@ -29,8 +31,9 @@ use crate::{
         Backup,
     },
     error::{AppError, AppResult},
-    routes::{media, nodes},
+    routes::{media, nodes, seal},
     state::AppState,
+    vault,
 };
 
 type SftpResult<T> = Result<T, StatusCode>;
@@ -243,13 +246,21 @@ pub struct SpaceFs {
     handles: HashMap<String, OpenHandle>,
     next_handle: u64,
     scratch: HashMap<String, Scratch>,
+    /// For the vault: a file written into a sealed folder is sealed with its
+    /// key. `None` only in tests, where a sealed folder takes nothing.
+    state: Option<AppState>,
 }
 
 impl SpaceFs {
     pub fn new(state: AppState, key_id: Option<i64>) -> Self {
-        let mut fs = Self::with_db(state.db, state.config.uploads_dir(), Some(state.backup));
+        let mut fs = Self::with_db(
+            state.db.clone(),
+            state.config.uploads_dir(),
+            Some(state.backup.clone()),
+        );
         fs.key_id = key_id;
         fs.max_upload = state.config.max_upload_bytes as u64;
+        fs.state = Some(state);
         fs
     }
 
@@ -264,6 +275,39 @@ impl SpaceFs {
             handles: HashMap::new(),
             next_handle: 0,
             scratch: HashMap::new(),
+            state: None,
+        }
+    }
+
+    /// The key to seal a file written into `parent` with: none when the folder
+    /// is not sealed, and a refusal when it is and the vault is shut.
+    async fn seal_key(&self, parent: i64) -> SftpResult<Option<Arc<vault::Key>>> {
+        let sealed: bool = sqlx::query_scalar("SELECT sealed FROM nodes WHERE id = ?1")
+            .bind(parent)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(|_| StatusCode::Failure)?
+            .unwrap_or(false);
+        if !sealed {
+            return Ok(None);
+        }
+        match self.state.as_ref().and_then(|state| state.vault.key()) {
+            Some(key) => Ok(Some(key)),
+            None => Err(StatusCode::PermissionDenied),
+        }
+    }
+
+    /// Seal what moves into a sealed folder before it moves; see `seal::enter`.
+    async fn enter(&self, node: i64, parent: i64) -> SftpResult<()> {
+        match &self.state {
+            Some(state) => seal::enter(state, node, parent).await.map_err(|e| match e {
+                AppError::Locked => StatusCode::PermissionDenied,
+                e => {
+                    tracing::warn!("sftp: could not seal what moved into a sealed folder: {e:?}");
+                    StatusCode::Failure
+                }
+            }),
+            None => self.seal_key(parent).await.map(|_| ()),
         }
     }
 
@@ -603,6 +647,8 @@ impl SpaceFs {
         replaces: Option<&FileNode>,
         truncate: bool,
     ) -> SftpResult<Upload> {
+        // Refused at the open, not at the close, when the vault is shut.
+        self.seal_key(parent).await?;
         let media_id = uuid::Uuid::new_v4().to_string();
         let partial = self.uploads.join(format!("{media_id}.part"));
         let mut size = 0;
@@ -646,17 +692,45 @@ impl SpaceFs {
             file,
             size,
         } = upload;
+        // Asked again: the vault may have locked while the bytes came in.
+        let key = match self.seal_key(parent).await {
+            Ok(key) => key,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&partial).await;
+                return Err(e);
+            }
+        };
         let landed = async {
             file.sync_all().await?;
             drop(file);
-            tokio::fs::rename(&partial, self.uploads.join(&media_id)).await?;
+            let target = self.uploads.join(&media_id);
+            match &key {
+                // The plaintext sat only in the `.part` file, which no row
+                // names and the mirror never reads.
+                Some(key) => {
+                    let (key, id, plain, sealed) =
+                        (key.clone(), media_id.clone(), partial.clone(), target);
+                    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                        vault::seal_file(&key, &id, &mut std::fs::File::open(&plain)?, &sealed)?;
+                        std::fs::remove_file(&plain)?;
+                        Ok(())
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)??;
+                }
+                None => tokio::fs::rename(&partial, target).await?,
+            }
             let mime = media::mime_of(&name, None);
+            let sealed = key.is_some();
             match replaces {
                 None => {
-                    media::insert_file(&self.db, parent, &media_id, &name, &mime, size, false)
+                    media::insert_file(&self.db, parent, &media_id, &name, &mime, size, sealed)
                         .await?;
                 }
-                Some(node) => self.replace_bytes(node, &media_id, &mime, size).await?,
+                Some(node) => {
+                    self.replace_bytes(node, &media_id, &mime, size, sealed)
+                        .await?
+                }
             }
             AppResult::Ok(())
         }
@@ -677,6 +751,7 @@ impl SpaceFs {
         media_id: &str,
         mime: &str,
         size: u64,
+        encrypted: bool,
     ) -> AppResult<()> {
         let mut tx = crate::db::begin_write(&self.db).await?;
         let old: String = sqlx::query_scalar("SELECT media_id FROM nodes WHERE id = ?1")
@@ -684,14 +759,15 @@ impl SpaceFs {
             .fetch_one(&mut *tx)
             .await?;
         sqlx::query(
-            "INSERT INTO media (id, filename, mime, size, created_at)
-             SELECT ?1, filename, ?2, ?3, ?4 FROM media WHERE id = ?5",
+            "INSERT INTO media (id, filename, mime, size, created_at, encrypted)
+             SELECT ?1, filename, ?2, ?3, ?4, ?6 FROM media WHERE id = ?5",
         )
         .bind(media_id)
         .bind(mime)
         .bind(size as i64)
         .bind(crate::now())
         .bind(&old)
+        .bind(encrypted)
         .execute(&mut *tx)
         .await?;
         sqlx::query("UPDATE nodes SET media_id = ?1, updated_at = ?2 WHERE id = ?3")
@@ -752,6 +828,7 @@ impl SpaceFs {
         leaf: &str,
         shown: &str,
     ) -> SftpResult<()> {
+        self.enter(file.id, parent).await?;
         let mut tx = crate::db::begin_write(&self.db)
             .await
             .map_err(|_| StatusCode::Failure)?;
@@ -1320,6 +1397,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                         if below.contains(&parent) {
                             return Err(StatusCode::Failure);
                         }
+                        self.enter(node, parent).await?;
                     }
                 }
                 let new_slug = nodes::unique_slug(
@@ -1647,6 +1725,66 @@ mod tests {
             fs.opendir(0, "/".into()).await.err(),
             Some(StatusCode::PermissionDenied)
         );
+    }
+
+    /// A write into a sealed folder lands sealed while the vault is open, and
+    /// is refused at the open while it is shut; a file moved in is sealed.
+    #[tokio::test]
+    async fn a_sealed_folder_takes_only_sealed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("uploads")).unwrap();
+        let state = crate::routes::tests::state_in(dir.path().into()).await;
+        state.vault.open_with(zeroize::Zeroizing::new([9u8; 32]));
+        let mut fs = SpaceFs::new(state.clone(), None);
+        fs.max_upload = 1024;
+        for path in ["/proj", "/proj/vault", "/proj/open"] {
+            fs.mkdir(0, path.into(), FileAttributes::empty())
+                .await
+                .expect("mkdir");
+        }
+        sqlx::query("UPDATE nodes SET sealed = 1 WHERE slug = 'vault'")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let sealed_files = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM nodes n JOIN media m ON m.id = n.media_id
+                 WHERE m.encrypted = 1",
+            )
+            .fetch_one(&state.db)
+            .await
+            .unwrap()
+        };
+
+        put(&mut fs, "/proj/vault/key.pem", "-----BEGIN-----").await;
+        assert_eq!(sealed_files().await, 1);
+        let on_disk = std::fs::read_dir(dir.path().join("uploads"))
+            .unwrap()
+            .map(|e| std::fs::read(e.unwrap().path()).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(on_disk.len(), 1);
+        assert!(!on_disk[0].windows(5).any(|w| w == b"BEGIN"));
+
+        put(&mut fs, "/proj/open/notes.txt", "plain").await;
+        fs.rename(
+            0,
+            "/proj/open/notes.txt".into(),
+            "/proj/vault/notes.txt".into(),
+        )
+        .await
+        .expect("move in");
+        assert_eq!(sealed_files().await, 2);
+
+        state.vault.lock();
+        let refused = fs
+            .open(
+                0,
+                "/proj/vault/more.txt".into(),
+                CREATE,
+                FileAttributes::empty(),
+            )
+            .await;
+        assert!(matches!(refused, Err(StatusCode::PermissionDenied)));
     }
 
     const CREATE: OpenFlags = OpenFlags::WRITE

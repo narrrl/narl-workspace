@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::nodes,
+    routes::{nodes, seal},
     state::AppState,
     vault,
 };
@@ -263,7 +263,8 @@ pub async fn upload_into(
     mut multipart: Multipart,
 ) -> AppResult<Json<Vec<nodes::Node>>> {
     nodes::container(&mut *state.db.acquire().await?, parent).await?;
-    let key = if query.encrypt {
+    // A sealed folder seals what lands in it, asked or not.
+    let key = if query.encrypt || seal::sealed(&state, parent).await? {
         Some(state.vault.key().ok_or(AppError::Locked)?)
     } else {
         None

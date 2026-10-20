@@ -119,6 +119,7 @@
           {#if workspace.marked?.id === node.id}<span class="badge" title="marked — p drops it in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
           {#if node.file?.encrypted}<span class="sealed" title="in the vault"><Icon name="lock" size={12} /></span>{/if}
+          {#if node.sealed}<span class="sealed" title="sealed — files added here go into the vault"><Icon name="lock" size={12} /></span>{/if}
           <span class="aside">{aside(node)}</span>
         </button>
         {#if isTouchDevice}

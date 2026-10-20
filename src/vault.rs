@@ -450,6 +450,16 @@ impl Vault {
         *self.slot() = None;
     }
 
+    /// Open with a key as it is, skipping Argon2, for tests of what an open
+    /// vault allows.
+    #[cfg(test)]
+    pub fn open_with(&self, key: Key) {
+        *self.slot() = Some(Unlocked {
+            key: Arc::new(key),
+            touched: Instant::now(),
+        });
+    }
+
     /// Drop the key once it has gone unused past the idle time. Without this
     /// a vault nobody looks at would only notice it should be shut on the
     /// next look, with the key sitting in memory all the while.

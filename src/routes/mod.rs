@@ -93,7 +93,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::{atomic::AtomicI64, Arc};
 
     use axum::{body::Body, http::Request};
@@ -113,13 +113,22 @@ mod tests {
     ];
 
     async fn state() -> AppState {
+        state_in(".".into()).await
+    }
+
+    /// A whole `AppState` on an in-memory database, with its uploads under
+    /// `data_dir`.
+    pub(crate) async fn state_in(data_dir: std::path::PathBuf) -> AppState {
         let db = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
         sqlx::migrate!("./migrations").run(&db).await.unwrap();
-        let config = Arc::new(Config::for_tests(30));
+        let config = Arc::new(Config {
+            data_dir,
+            ..Config::for_tests(30)
+        });
         AppState {
             vault: Vault::new(db.clone(), config.vault_idle),
             backup: Backup::unavailable(db.clone(), Arc::clone(&config), "tests".into()),

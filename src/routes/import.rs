@@ -29,6 +29,7 @@ use crate::{
         nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
     },
     state::AppState,
+    vault,
 };
 
 /// Markdown inline links and images: `[text](target)`, `![alt](target "title")`,
@@ -528,11 +529,20 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
     // nothing to the database; the orphans are swept up on the way out.
     let mut skipped = Vec::new();
     let mut written: Vec<String> = Vec::new();
+    // Into a sealed folder, everything that is not a document goes sealed,
+    // and with the vault shut nothing is read at all.
+    let key = match &into {
+        Into::Node(target) if target.sealed => Some(state.vault.key().ok_or(AppError::Locked)?),
+        _ => None,
+    };
     let result = async {
         let mut uploads = collect(state, multipart, &mut skipped, &mut written).await?;
         let manifest = take_manifest(&mut uploads)?;
         if let Some(manifest) = &manifest {
             files_as_they_were(state, manifest, &mut uploads, &mut written).await?;
+        }
+        if let Some(key) = &key {
+            seal_in_place(state, key, &uploads).await?;
         }
         if uploads.is_empty() {
             return Err(AppError::BadRequest(
@@ -551,6 +561,32 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
     let report = result?;
     state.backup.signal();
     Ok(report)
+}
+
+/// Seal every file of the upload where it lies, under the id it already has.
+/// They were written plain, an archive's contents can only be — but no row
+/// names them yet, so neither the app nor the mirror has seen them.
+async fn seal_in_place(state: &AppState, key: &vault::Key, uploads: &[Upload]) -> AppResult<()> {
+    let ids: Vec<String> = uploads
+        .iter()
+        .filter_map(|upload| match &upload.content {
+            Content::File { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    let (key, dir) = (key.clone(), state.config.uploads_dir());
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        for id in ids {
+            let plain = dir.join(&id);
+            let sealed = dir.join(format!("{id}.part"));
+            vault::seal_file(&key, &id, &mut std::fs::File::open(&plain)?, &sealed)?;
+            std::fs::rename(&sealed, &plain)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(anyhow::Error::from)??;
+    Ok(())
 }
 
 /// A file that happens to end in `.md` was a file, not a document, when it
@@ -830,14 +866,15 @@ async fn build(
                 .or(dated.map(|m| m.name.as_str()))
                 .unwrap_or(file_name(&upload.path));
             sqlx::query(
-                "INSERT INTO media (id, filename, mime, size, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO media (id, filename, mime, size, created_at, encrypted)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )
             .bind(media_id)
             .bind(filename)
             .bind(mime)
             .bind(*size as i64)
             .bind(created)
+            .bind(matches!(into, Into::Node(target) if target.sealed))
             .execute(&mut *tx)
             .await?;
             landed.insert(
@@ -976,6 +1013,66 @@ mod tests {
         expand_zip, is_markdown, join_relative, normalize_path, percent_decode, rewrite_links,
         split_target, split_title, take_manifest, Content, Landed, Upload,
     };
+
+    /// Into a sealed folder, a file arrives sealed — readable back through
+    /// the vault — and the folders made for it are sealed too.
+    #[tokio::test]
+    async fn an_import_into_a_sealed_folder_arrives_sealed() {
+        use std::io::Read;
+
+        let dir = tempfile::tempdir().unwrap();
+        let uploads_dir = dir.path().join("uploads");
+        std::fs::create_dir_all(&uploads_dir).unwrap();
+        let state = crate::routes::tests::state_in(dir.path().into()).await;
+        let key = zeroize::Zeroizing::new([5u8; 32]);
+        let folder: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, sealed)
+             VALUES (NULL, 'space', 'locked', 'locked', 1, 1, 1) RETURNING id",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+
+        std::fs::write(uploads_dir.join("m1"), b"private bytes").unwrap();
+        let uploads = vec![
+            text(
+                "sub/a.bin",
+                Content::File {
+                    id: "m1".into(),
+                    mime: "application/octet-stream".into(),
+                    size: 13,
+                },
+            ),
+            text("notes.md", Content::Markdown("# Notes".into())),
+        ];
+        super::seal_in_place(&state, &key, &uploads).await.unwrap();
+        let target = crate::routes::nodes::load(&state, folder).await.unwrap();
+        super::build(
+            &state,
+            &super::Into::Node(Box::new(target)),
+            uploads,
+            Vec::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (encrypted, sub_sealed): (bool, bool) = sqlx::query_as(
+            "SELECT m.encrypted, p.sealed FROM nodes n
+             JOIN media m ON m.id = n.media_id JOIN nodes p ON p.id = n.parent_id
+             WHERE n.kind = 'file'",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        assert!(encrypted && sub_sealed);
+        let mut back = String::new();
+        crate::vault::Reader::open(&key, "m1", &uploads_dir.join("m1"))
+            .unwrap()
+            .read_to_string(&mut back)
+            .unwrap();
+        assert_eq!(back, "private bytes");
+    }
 
     fn text(path: &str, content: Content) -> Upload {
         Upload {

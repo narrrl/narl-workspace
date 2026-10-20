@@ -53,6 +53,14 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
-        AppError::Internal(err.into())
+        let err: anyhow::Error = err.into();
+        // The triggers of 0015 refuse plaintext in a sealed folder; that is
+        // an answer for the caller, not a fault of the server.
+        if let Some(sqlx::Error::Database(db)) = err.downcast_ref::<sqlx::Error>() {
+            if let Some(reason) = db.message().strip_prefix("sealed folder: ") {
+                return AppError::BadRequest(format!("{reason} — the folder is sealed"));
+            }
+        }
+        AppError::Internal(err)
     }
 }
