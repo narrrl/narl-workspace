@@ -12,6 +12,8 @@
     ['j / k · ↓ ↑', 'move down / up the list — scroll the document when it has focus'],
     ['gg / G', 'first / last row, or top / bottom of the document'],
     ['Ctrl-D / Ctrl-U', 'half a page down / up the open document'],
+    [']] / [[', 'next / previous heading of the document — in the editor too'],
+    ['gO', 'the headings as a list: j/k, Enter jumps there'],
     ['Enter · l', 'open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password'],
     ['h', 'from the document to the list, from the list up a level'],
     ['o', 'new document here, straight into insert mode'],

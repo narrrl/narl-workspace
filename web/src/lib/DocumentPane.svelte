@@ -4,7 +4,16 @@
   import Outline from './Outline.svelte'
   import { workspace } from './store.svelte'
   import Icon from './Icon.svelte'
-  import { formatStamp, formatWeekday, isTouchDevice, relative, scrollPage } from './util'
+  import {
+    formatStamp,
+    formatWeekday,
+    headingsIn,
+    isTouchDevice,
+    jumpHeading,
+    readerHeadings,
+    relative,
+    scrollPage,
+  } from './util'
 
   const doc = $derived(workspace.open!)
   const html = $derived(renderMarkdown(workspace.editing ? workspace.draft.body : doc.body))
@@ -55,6 +64,21 @@
     hooks.scrollReader = scroll
     return () => {
       if (hooks.scrollReader === scroll) hooks.scrollReader = () => false
+    }
+  })
+
+  // `]]`, `[[` and `gO` while reading; the editor answers them while writing.
+  $effect(() => {
+    const scroller = reader
+    const root = article
+    if (!scroller || !root) return
+    const jump = (direction: 1 | -1) => jumpHeading(scroller, headingsIn(root), direction)
+    const list = () => readerHeadings(scroller, root)
+    hooks.jumpHeading = jump
+    hooks.headings = list
+    return () => {
+      if (hooks.jumpHeading === jump) hooks.jumpHeading = () => false
+      if (hooks.headings === list) hooks.headings = () => ({ headings: [], current: 0 })
     }
   })
 

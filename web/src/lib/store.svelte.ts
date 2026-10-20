@@ -14,7 +14,7 @@ import {
   type SpaceOverview,
   type VaultStatus,
 } from './api'
-import { formatBytes, isTouchDevice, sealedNote } from './util'
+import { formatBytes, isTouchDevice, sealedNote, type Heading } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -101,7 +101,10 @@ class Workspace {
   vimMode = $state('normal')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline'>('none')
+  /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
+  outline = $state.raw<Heading[]>([])
+  outlineCursor = $state(0)
 
   /*
    * What is due or in hand on every board, kept loaded all the time: the bar

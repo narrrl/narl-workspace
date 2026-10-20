@@ -21,6 +21,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { commands, hooks, runCommand } from './commands'
   import { embedSnippet } from './markdown'
+  import { sourceHeadings } from './util'
   import { workspace } from './store.svelte'
 
   let host = $state<HTMLDivElement>()
@@ -126,6 +127,58 @@
     }
   }
 
+  /** The `#` lines being written, as `gO` lists them, and the one the cursor is under. */
+  function editorHeadings() {
+    if (!view) return { headings: [], current: 0 }
+    const editor = view
+    const at = editor.state.doc.lineAt(editor.state.selection.main.head).number
+    const found = sourceHeadings(editor.state.doc.toString())
+    let current = 0
+    found.forEach((heading, i) => {
+      if (heading.line <= at) current = i
+    })
+    const headings = found.map(({ text, level, line }) => ({ text, level, go: () => gotoLine(line) }))
+    return { headings, current }
+  }
+
+  function gotoLine(number: number) {
+    if (!view) return
+    const line = view.state.doc.line(number)
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 24 }),
+    })
+    view.focus()
+  }
+
+  /*
+   * vim's `]]` and `[[` walk sections, which in a markdown file are the
+   * headings — the same jump the reader makes, where the text is. `gO` lists
+   * them, as it does in vim's own help files.
+   */
+  function bindHeadingKeys() {
+    const step = (direction: 1 | -1) => {
+      if (!view) return
+      const at = view.state.doc.lineAt(view.state.selection.main.head).number
+      const lines = sourceHeadings(view.state.doc.toString()).map((heading) => heading.line)
+      let target: number | undefined
+      for (const line of lines) {
+        if (direction > 0 && line > at) {
+          target = line
+          break
+        }
+        if (direction < 0 && line < at) target = line
+      }
+      gotoLine(target ?? (direction > 0 ? view.state.doc.lines : 1))
+    }
+    Vim.defineAction('workspaceNextHeading', () => step(1))
+    Vim.defineAction('workspacePrevHeading', () => step(-1))
+    Vim.defineAction('workspaceOutline', () => void runCommand('outline'))
+    Vim.mapCommand(']]', 'action', 'workspaceNextHeading', {}, { context: 'normal' })
+    Vim.mapCommand('[[', 'action', 'workspacePrevHeading', {}, { context: 'normal' })
+    Vim.mapCommand('gO', 'action', 'workspaceOutline', {}, { context: 'normal' })
+  }
+
   /**
    * Media goes on its own line after the one the cursor is on, so attaching a
    * file never cuts a sentence in half.
@@ -155,6 +208,7 @@
   onMount(() => {
     bridgeExCommands()
     bindHelpKey()
+    bindHeadingKeys()
     mirrorUnnamedRegisterToClipboard()
 
     const extensions = [
@@ -211,6 +265,7 @@
 
     hooks.focusEditor = focus
     hooks.insertText = insertAtCursor
+    hooks.headings = editorHeadings
     view.focus()
 
     const cm = workspace.vimEnabled ? getCM(view) : null
@@ -239,6 +294,7 @@
     if (hooks.focusEditor === focus) {
       hooks.focusEditor = () => {}
       hooks.insertText = () => {}
+      if (hooks.headings === editorHeadings) hooks.headings = () => ({ headings: [], current: 0 })
       workspace.vimMode = 'normal'
     }
   })

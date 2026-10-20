@@ -5,7 +5,7 @@
   import { renderMarkdown } from './markdown'
   import { looksLikeText, parseTable, previewKind, separatorOf } from './preview'
   import { workspace } from './store.svelte'
-  import { formatBytes, formatStamp, relative, scrollPage } from './util'
+  import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage } from './util'
 
   const node = $derived(workspace.open!)
   const file = $derived(node.file!)
@@ -92,6 +92,22 @@
       if (hooks.fileAction === act) hooks.fileAction = () => false
     }
   })
+
+  // Markdown read rendered has headings to jump between, as a document does.
+  let article = $state<HTMLElement>()
+  $effect(() => {
+    const scroller = reader
+    const root = article
+    if (!scroller || !root) return
+    const jump = (direction: 1 | -1) => jumpHeading(scroller, headingsIn(root), direction)
+    const list = () => readerHeadings(scroller, root)
+    hooks.jumpHeading = jump
+    hooks.headings = list
+    return () => {
+      if (hooks.jumpHeading === jump) hooks.jumpHeading = () => false
+      if (hooks.headings === list) hooks.headings = () => ({ headings: [], current: 0 })
+    }
+  })
 </script>
 
 <section class="pane">
@@ -161,7 +177,7 @@
       {:else if text !== null}
         {#if kind === 'markdown' && !source}
           <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
-          <article class="md">{@html html}</article>
+          <article class="md" bind:this={article}>{@html html}</article>
         {:else if kind === 'table'}
           <div class="table">
             <table>

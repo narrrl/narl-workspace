@@ -131,6 +131,86 @@ export function scrollPage(el: HTMLElement, amount: ScrollAmount) {
   }
 }
 
+/** A heading to jump to: the reader's, or a line of the text being written. */
+export interface Heading {
+  text: string
+  level: number
+  go: () => void
+}
+
+/** Every heading of a rendered article, the document's own title left out. */
+export const headingsIn = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).filter(
+    (element) => !element.classList.contains('entrytitle'),
+  )
+
+/* How far below the top of the view a heading is left by a jump: enough room
+   that it does not look cut off, little enough that it reads as the top. */
+const HEADING_GAP = 12
+
+/**
+ * `]]` / `[[`: the next heading further down than the top of the view, or the
+ * last one above it. A heading a jump has just parked at the top counts as
+ * the one being read, so pressing again moves on rather than staying put.
+ */
+export function jumpHeading(scroller: HTMLElement, headings: HTMLElement[], direction: 1 | -1): boolean {
+  const top = scroller.getBoundingClientRect().top
+  const offset = (element: HTMLElement) => element.getBoundingClientRect().top - top
+  let target: HTMLElement | undefined
+  for (const element of headings) {
+    const at = offset(element)
+    if (direction > 0 && at > HEADING_GAP + 4) {
+      target = element
+      break
+    }
+    if (direction < 0 && at < HEADING_GAP - 4) target = element
+  }
+  if (!target) return false
+  scroller.scrollBy({ top: offset(target) - HEADING_GAP })
+  return true
+}
+
+/**
+ * `gO` in the reader: its headings, and which of them is being read — the
+ * last one that has passed the upper third of the view, as the outline lights.
+ */
+export function readerHeadings(scroller: HTMLElement, root: HTMLElement): { headings: Heading[]; current: number } {
+  const elements = headingsIn(root)
+  const top = scroller.getBoundingClientRect().top
+  const line = top + scroller.clientHeight / 3
+  let current = 0
+  elements.forEach((element, i) => {
+    if (element.getBoundingClientRect().top <= line) current = i
+  })
+  const headings = elements.map((element) => ({
+    text: element.textContent?.trim() ?? '',
+    level: Number(element.tagName[1]),
+    go: () => scroller.scrollBy({ top: element.getBoundingClientRect().top - top - HEADING_GAP }),
+  }))
+  return { headings, current }
+}
+
+/**
+ * The `#` lines of markdown source, with the line each stands on. Lines inside
+ * a fenced block are code, whatever they start with.
+ */
+export function sourceHeadings(source: string): { text: string; level: number; line: number }[] {
+  const found: { text: string; level: number; line: number }[] = []
+  let fence: string | null = null
+  source.split('\n').forEach((text, i) => {
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(text)?.[1]
+    if (marker) {
+      if (fence === null) fence = marker[0]
+      else if (marker[0] === fence) fence = null
+      return
+    }
+    if (fence !== null) return
+    const heading = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(text)
+    if (heading && heading[2]) found.push({ text: heading[2], level: heading[1].length, line: i + 1 })
+  })
+  return found
+}
+
 /** What a share link's reader will miss: a share never serves a sealed file. */
 export const sealedNote = (sealed: number) =>
   sealed > 0 ? ` — ${sealed} sealed file${sealed === 1 ? '' : 's'} in it stay hidden from readers` : ''

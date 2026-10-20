@@ -7,6 +7,7 @@
   import CommandLine from './lib/CommandLine.svelte'
   import DocumentPane from './lib/DocumentPane.svelte'
   import FilePane from './lib/FilePane.svelte'
+  import Headings from './lib/Headings.svelte'
   import Help from './lib/Help.svelte'
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
@@ -298,6 +299,33 @@
     }
   }
 
+  /** `gO`'s list: j/k down the headings, Enter to the one picked. */
+  function outlineKey(event: KeyboardEvent): boolean {
+    const last = Math.max(workspace.outline.length - 1, 0)
+    switch (event.key) {
+      case 'j':
+      case 'ArrowDown':
+        workspace.outlineCursor = Math.min(workspace.outlineCursor + 1, last)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.outlineCursor = Math.max(workspace.outlineCursor - 1, 0)
+        return true
+      case 'G':
+        workspace.outlineCursor = last
+        return true
+      case 'Enter':
+      case 'l': {
+        const heading = workspace.outline[workspace.outlineCursor]
+        workspace.overlay = 'none'
+        heading?.go()
+        return true
+      }
+      default:
+        return false
+    }
+  }
+
   /** Alt+h / Alt+l: focus moves between the panes, out of the editor too. */
   function focusPane(pane: 'list' | 'document') {
     if (pane === 'document' && !workspace.open) return
@@ -413,6 +441,12 @@
     }
     if (workspace.overlay === 'agenda' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (agendaKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
+    if (workspace.overlay === 'outline' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (outlineKey(event)) {
         event.preventDefault()
         return
       }
@@ -536,11 +570,17 @@
      */
     const reading = !!workspace.open && !workspace.editing && workspace.pane === 'document'
 
-    // Two-key sequences: gg and dd.
+    // Two-key sequences: gg and dd; gO, ]] and [[ for the headings of what
+    // is being read, as in vim.
     if (previous === 'g' && key === 'g') {
       event.preventDefault()
       if (reading) hooks.scrollReader('top')
       else workspace.cursor = 0
+      return
+    }
+    if (previous === 'g' && key === 'O') {
+      event.preventDefault()
+      void runCommand('outline')
       return
     }
     if (previous === 'd' && key === 'd') {
@@ -548,7 +588,13 @@
       void runCommand('d')
       return
     }
-    if (key === 'g' || key === 'd') {
+    if ((previous === ']' && key === ']') || (previous === '[' && key === '[')) {
+      event.preventDefault()
+      // Past the last heading there is still the end, as in vim.
+      if (reading && !hooks.jumpHeading(key === ']' ? 1 : -1)) hooks.scrollReader(key === ']' ? 'bottom' : 'top')
+      return
+    }
+    if (key === 'g' || key === 'd' || key === ']' || key === '[') {
       pending = key
       return
     }
@@ -767,7 +813,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

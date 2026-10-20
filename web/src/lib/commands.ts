@@ -1,6 +1,6 @@
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
 import { workspace } from './store.svelte'
-import { formatDay, parseDay, parseDue, relative, sealedNote, type ScrollAmount } from './util'
+import { formatDay, parseDay, parseDue, relative, sealedNote, type Heading, type ScrollAmount } from './util'
 
 export type { ScrollAmount }
 
@@ -22,6 +22,11 @@ export const hooks = {
   scrollReader: (_amount: ScrollAmount): boolean => false,
   /* Filled in by the file pane: what Enter does there, false when nothing. */
   fileAction: (): boolean => false,
+  /* `]]` / `[[` in whatever is being read; false when it has no headings. */
+  jumpHeading: (_direction: 1 | -1): boolean => false,
+  /* `gO`: the headings of what is on screen, read or being written, and the
+     one the reader or the cursor is in. */
+  headings: (): { headings: Heading[]; current: number } => ({ headings: [], current: 0 }),
   /** How many space cards the overview fits in a row, for j/k to step by. */
   overviewColumns: (): number => 1,
   openOverview: () => {},
@@ -761,6 +766,20 @@ export const commands: CommandSpec[] = [
       await workspace.loadMedia()
       workspace.overlay = 'media'
     }),
+  },
+  {
+    name: 'outline',
+    aliases: ['toc'],
+    group: 'documents',
+    help: "the open document's headings to pick from — gO, in the editor too",
+    run: () => {
+      if (!requireOpen()) return
+      const { headings, current } = hooks.headings()
+      if (headings.length === 0) return workspace.say('no headings in this document')
+      workspace.outline = headings
+      workspace.outlineCursor = current
+      workspace.overlay = 'outline'
+    },
   },
   {
     name: 'search',
