@@ -3,6 +3,12 @@
    * The password `workspace.askSecret` asks for, in the same place as the
    * `[y/N]` prompt. A masked field of its own rather than the command line, so
    * a password never shows on screen or lands in the command history.
+   *
+   * It appears at once rather than rising into place like the `[y/N]` prompt:
+   * it is where the next keys go, and a field still sliding and fading in
+   * under them reads as a stutter. Password managers are asked to leave the
+   * field alone: it is not the login, and their menus redrawn on every key
+   * are a flicker of their own.
    */
   import { workspace } from './store.svelte'
 
@@ -38,6 +44,10 @@
       type="password"
       autocomplete="off"
       spellcheck="false"
+      data-1p-ignore
+      data-lpignore="true"
+      data-bwignore
+      data-form-type="other"
       bind:this={input}
       bind:value
       {onkeydown}
@@ -67,7 +77,6 @@
     border-bottom: 0;
     border-radius: var(--radius-l) var(--radius-l) 0 0;
     font-size: 13px;
-    animation: rise var(--t-slow) var(--ease-snap) both;
   }
   .text { flex: none; color: var(--light); }
   input {

@@ -125,7 +125,7 @@ class Workspace {
    */
   prompt = $state<{ text: string; resolve: (yes: boolean) => void } | null>(null)
   /** A password asked for in the same place, typed into a masked field. */
-  secret = $state<{ text: string; resolve: (value: string | null) => void } | null>(null)
+  secret = $state.raw<{ text: string; resolve: (value: string | null) => void } | null>(null)
   /** The vault, as last heard from the server; null until asked. */
   vault = $state<VaultStatus | null>(null)
   media = $state<MediaFile[]>([])
@@ -217,13 +217,22 @@ class Workspace {
   askSecret(text: string): Promise<string | null> {
     this.secret?.resolve(null)
     return new Promise((resolve) => {
-      this.secret = {
+      let answered = false
+      const asked = {
         text,
-        resolve: (value) => {
-          this.secret = null
+        resolve: (value: string | null) => {
+          if (answered) return
+          answered = true
+          // Put away a turn later, so a question that follows straight on —
+          // the second of two passwords — takes over the same box instead
+          // of a new one appearing under the fingers already typing it.
+          setTimeout(() => {
+            if (this.secret === asked) this.secret = null
+          })
           resolve(value)
         },
       }
+      this.secret = asked
     })
   }
 
