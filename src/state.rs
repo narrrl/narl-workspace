@@ -3,7 +3,11 @@ use std::sync::{atomic::AtomicI64, Arc};
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::Sessions, backup::Backup, config::Config, notify::Notifier, throttle::LoginThrottle,
+    auth::Sessions,
+    backup::Backup,
+    config::Config,
+    notify::Notifier,
+    throttle::{LoginThrottle, LoginThrottles},
     vault::Vault,
 };
 
@@ -11,7 +15,7 @@ use crate::{
 pub struct AppState {
     pub db: SqlitePool,
     pub config: Arc<Config>,
-    pub login_throttle: Arc<LoginThrottle>,
+    pub login_throttle: Arc<LoginThrottles>,
     /// The vault password gets the same slowing-down as the login, kept apart
     /// so guessing at one does not slow the other.
     pub vault_throttle: Arc<LoginThrottle>,

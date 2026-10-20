@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{AppendHeaders, IntoResponse},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,13 @@ pub async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<impl IntoResponse> {
-    let attempt = state.login_throttle.begin().map_err(|wait| {
-        tracing::warn!("login refused, {wait}s of backoff remaining");
+    let device = auth::device_id(&state.config, &headers);
+    let throttle = state.login_throttle.for_device(device.as_deref());
+    let attempt = throttle.begin().map_err(|wait| {
+        tracing::warn!(
+            known_device = device.is_some(),
+            "login refused, {wait}s of backoff remaining"
+        );
         AppError::TooManyRequests(wait)
     })?;
 
@@ -34,7 +39,10 @@ pub async fn login(
         let failures = attempt.failed();
         // Worth a mail once someone is past guessing and into trying.
         if failures > FREE_ATTEMPTS {
-            state.notify.note_failed_logins(failures).await;
+            state
+                .notify
+                .note_failed_logins(failures, device.is_some())
+                .await;
         }
         return Err(AppError::Unauthorized);
     }
@@ -54,12 +62,20 @@ pub async fn login(
         &id,
         &state.config,
     );
+    // Signed again on every login, so a browser in use never runs out of it.
+    let device = device.unwrap_or_else(auth::new_device_id);
     Ok((
         StatusCode::OK,
-        [(
-            header::SET_COOKIE,
-            auth::session_cookie(&state.config, &token),
-        )],
+        AppendHeaders([
+            (
+                header::SET_COOKIE,
+                auth::session_cookie(&state.config, &token),
+            ),
+            (
+                header::SET_COOKIE,
+                auth::device_cookie(&state.config, &device),
+            ),
+        ]),
         Json(json!({ "user": state.config.username })),
     ))
 }

@@ -267,9 +267,8 @@ pub fn clear_cookie(config: &Config) -> String {
     format!("{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}")
 }
 
-fn cookie_value<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
-    parts
-        .headers
+pub fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
@@ -277,6 +276,41 @@ fn cookie_value<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
         .filter_map(|pair| pair.split_once('='))
         .find(|(k, _)| k.trim() == name)
         .map(|(_, v)| v.trim())
+}
+
+/// The cookie a browser keeps once it has logged in, so the login can tell
+/// it from a stranger; see [`crate::throttle::LoginThrottles`]. It opens
+/// nothing, outlives logging out, and only ever picks a throttle.
+const DEVICE_COOKIE: &str = "diary_device";
+const SECURE_DEVICE_COOKIE: &str = "__Host-diary_device";
+const DEVICE_DAYS: i64 = 400;
+
+fn device_cookie_name(config: &Config) -> &'static str {
+    if config.secure_cookie {
+        SECURE_DEVICE_COOKIE
+    } else {
+        DEVICE_COOKIE
+    }
+}
+
+/// The device id a request's cookie carries, if it is one this server signed.
+pub fn device_id(config: &Config, headers: &HeaderMap) -> Option<String> {
+    let (id, signature) = cookie_value(headers, device_cookie_name(config))?.split_once('.')?;
+    let expected = sign(&config.secret, &format!("device:{id}"));
+    bool::from(expected.as_bytes().ct_eq(signature.as_bytes())).then(|| id.to_string())
+}
+
+/// A fresh device id, for a browser that logged in without one.
+pub fn new_device_id() -> String {
+    B64.encode(rand::random::<[u8; 16]>())
+}
+
+pub fn device_cookie(config: &Config, id: &str) -> String {
+    let name = device_cookie_name(config);
+    let signature = sign(&config.secret, &format!("device:{id}"));
+    let max_age = DEVICE_DAYS * 86_400;
+    let secure = if config.secure_cookie { "; Secure" } else { "" };
+    format!("{name}={id}.{signature}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}")
 }
 
 /// Extractor that rejects the request unless a valid session cookie is present.
@@ -292,8 +326,8 @@ impl FromRequestParts<AppState> for Session {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token =
-            cookie_value(parts, cookie_name(&state.config)).ok_or(AppError::Unauthorized)?;
+        let token = cookie_value(&parts.headers, cookie_name(&state.config))
+            .ok_or(AppError::Unauthorized)?;
         let epoch = state.epoch.load(std::sync::atomic::Ordering::SeqCst);
         let id = verify_token(&state.config, token, epoch).ok_or(AppError::Unauthorized)?;
         let due = state.sessions.seen(&id).ok_or(AppError::Unauthorized)?;
@@ -505,6 +539,27 @@ mod tests {
         let token = token(&config, 3);
         assert!(verify_token(&config, &token, 3).is_some());
         assert!(verify_token(&config, &token, 4).is_none());
+    }
+
+    #[test]
+    fn only_a_device_cookie_this_server_signed_counts() {
+        use axum::http::{header, HeaderMap};
+        let config = config(30);
+        let with = |cookie: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::COOKIE, cookie.parse().unwrap());
+            super::device_id(&config, &headers)
+        };
+        let set = super::device_cookie(&config, "laptop");
+        let pair = set.split(';').next().unwrap();
+        assert_eq!(with(pair).as_deref(), Some("laptop"));
+        assert_eq!(with("diary_device=laptop"), None);
+        assert_eq!(with(&pair.replace("laptop.", "phone.")), None);
+
+        let mut other = Config::for_tests(30);
+        other.secret = b"a-different-secret-entirely".to_vec();
+        let foreign = super::device_cookie(&other, "laptop");
+        assert_eq!(with(foreign.split(';').next().unwrap()), None);
     }
 
     #[test]

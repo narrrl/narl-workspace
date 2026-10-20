@@ -315,7 +315,7 @@ impl Notifier {
 
     /// A run of wrong passwords. Enqueued at most once an hour, because the
     /// point is to notice an attempt, not to be mailed by the attacker.
-    pub async fn note_failed_logins(&self, failures: u32) {
+    pub async fn note_failed_logins(&self, failures: u32, known_device: bool) {
         if !self.config.mail.sends("login") {
             return;
         }
@@ -327,8 +327,14 @@ impl Notifier {
                 &format!("login_failed:{hour}"),
                 "workspace — repeated failed logins",
                 &format!(
-                    "{failures} failed login attempts. The login is being answered more \
-                     slowly with every one of them.\n"
+                    "{failures} failed login attempts {}. The login is being answered more \
+                     slowly with every one of them.\n",
+                    if known_device {
+                        "from a browser that has logged in before"
+                    } else {
+                        "from browsers that have not logged in before, which do not slow \
+                         down the browsers that have"
+                    }
                 ),
             )
             .await;

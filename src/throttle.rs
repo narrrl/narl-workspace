@@ -1,12 +1,15 @@
-use std::sync::Mutex;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 /// Failed logins get progressively slower to answer.
 ///
 /// The workspace has exactly one account, so this is one counter rather than a map
 /// keyed by address: an attacker cannot step around it by changing source IP,
-/// and there is no per-client table to grow. The cost of that choice is that
-/// someone hammering the login can slow the owner's own attempt down — which is
-/// why the wait is capped at `MAX_DELAY` seconds instead of locking the account.
+/// and there is no per-client table to grow. Someone hammering it slows down
+/// every browser it covers, so the login keeps one for browsers it does not
+/// know and one apiece for those it does; see [`LoginThrottles`].
 #[derive(Debug, Default)]
 pub struct LoginThrottle {
     state: Mutex<State>,
@@ -62,6 +65,50 @@ impl LoginThrottle {
     }
 }
 
+/// How many browsers that have logged in before get a throttle of their own.
+/// Past that, the one used longest ago is forgotten, and falls back to
+/// sharing the anonymous one until it next logs in.
+const KNOWN_DEVICES: usize = 64;
+
+/// The login's throttles. A browser that has logged in before carries a
+/// signed device cookie and is slowed only by its own mistakes; every other
+/// request shares the anonymous throttle. A stranger guessing at the
+/// password therefore slows strangers, never a browser the owner already
+/// uses — a new one still waits in line with the guesses.
+#[derive(Debug, Default)]
+pub struct LoginThrottles {
+    anonymous: Arc<LoginThrottle>,
+    known: Mutex<HashMap<String, (Arc<LoginThrottle>, i64)>>,
+}
+
+impl LoginThrottles {
+    /// The throttle for a login from `device`, a device id whose signature
+    /// has already been checked, or from a browser without one.
+    pub fn for_device(&self, device: Option<&str>) -> Arc<LoginThrottle> {
+        let Some(device) = device else {
+            return Arc::clone(&self.anonymous);
+        };
+        let mut known = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        let now = crate::now();
+        if let Some((throttle, used)) = known.get_mut(device) {
+            *used = now;
+            return Arc::clone(throttle);
+        }
+        if known.len() >= KNOWN_DEVICES {
+            let oldest = known
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(id, _)| id.clone());
+            if let Some(oldest) = oldest {
+                known.remove(&oldest);
+            }
+        }
+        let throttle = Arc::<LoginThrottle>::default();
+        known.insert(device.to_string(), (Arc::clone(&throttle), now));
+        throttle
+    }
+}
+
 /// One attempt that [`LoginThrottle::begin`] let through. Dropping it without
 /// a verdict — a request that failed for some other reason — counts for
 /// nothing either way.
@@ -94,7 +141,7 @@ impl Drop for Attempt<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{delay_after, Attempt, LoginThrottle, MAX_DELAY};
+    use super::{delay_after, Attempt, LoginThrottle, LoginThrottles, KNOWN_DEVICES, MAX_DELAY};
 
     #[test]
     fn the_first_few_mistakes_are_free() {
@@ -137,5 +184,36 @@ mod tests {
         assert_eq!(throttle.begin().err(), Some(1));
         drop(first);
         assert!(throttle.begin().is_ok());
+    }
+
+    #[test]
+    fn guesses_from_strangers_do_not_slow_a_known_browser() {
+        let throttles = LoginThrottles::default();
+        let anonymous = throttles.for_device(None);
+        for _ in 0..10 {
+            Attempt {
+                throttle: &anonymous,
+            }
+            .failed();
+        }
+        assert!(throttles.for_device(None).begin().is_err());
+        assert!(throttles.for_device(Some("laptop")).begin().is_ok());
+
+        // And a known browser's own mistakes stay its own.
+        let laptop = throttles.for_device(Some("laptop"));
+        for _ in 0..10 {
+            Attempt { throttle: &laptop }.failed();
+        }
+        assert!(throttles.for_device(Some("laptop")).begin().is_err());
+        assert!(throttles.for_device(Some("phone")).begin().is_ok());
+    }
+
+    #[test]
+    fn known_browsers_are_capped() {
+        let throttles = LoginThrottles::default();
+        for n in 0..KNOWN_DEVICES * 3 {
+            throttles.for_device(Some(&format!("device-{n}")));
+        }
+        assert_eq!(throttles.known.lock().unwrap().len(), KNOWN_DEVICES);
     }
 }

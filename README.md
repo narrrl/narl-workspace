@@ -604,6 +604,14 @@ runtime dependencies, no build tools on the host. The server will not start
 while `WORKSPACE_SECRET` or `WORKSPACE_PASSWORD` is still the example from
 `.env.example`: with the example secret anyone could sign themselves a session.
 
+Wrong passwords are answered more and more slowly — free for three, then 1 s,
+2 s, 4 s… up to 30 s. A browser that has logged in before keeps a signed
+`diary_device` cookie (`__Host-diary_device` over HTTPS) and is slowed only by
+its own mistakes, so someone guessing at the login from elsewhere cannot keep
+you out of a browser you already use. A browser that has never logged in waits
+in the same line as the guesses. The cookie opens nothing and survives
+logging out.
+
 With `WORKSPACE_SECURE_COOKIE=1` the session cookie is `Secure` and named
 `__Host-diary_session`, so the browser keeps it to this host and HTTPS, and every
 response carries `Strict-Transport-Security` for a year. Turning it on logs
