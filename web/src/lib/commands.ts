@@ -51,6 +51,8 @@ export interface CommandSpec {
   group: Group
   help: string
   run: (arg: string) => void | Promise<void>
+  /** What the argument can be, for Tab on the command line. */
+  complete?: (arg: string) => string[]
   /** The forcing variant, `:name!` — vim hands the bang over as an argument. */
   bang?: { help: string; run: (arg: string) => void | Promise<void> }
 }
@@ -92,6 +94,15 @@ const findFolder = (target: string) => {
       isContainer(node) && (node.slug === wanted || node.name.toLowerCase() === wanted),
   )
 }
+
+/** The folders listed here, by slug, then the two ways out — for `:cd` and `:mv`. */
+const folderNames = () => [
+  ...workspace.nodes.filter(isContainer).map((node) => node.slug),
+  '..',
+  '/',
+]
+
+const spaceNames = () => workspace.spaces.map((space) => space.slug)
 
 /** `:encrypt` and `:decrypt`: a file, or everything under a folder. */
 const sealTarget = (encrypt: boolean) =>
@@ -287,6 +298,7 @@ export const commands: CommandSpec[] = [
     args: '[name]',
     group: 'tree',
     help: 'switch to a space, or list them',
+    complete: spaceNames,
     run: async (arg) => {
       const wanted = arg.trim().toLowerCase()
       if (!wanted) {
@@ -321,6 +333,7 @@ export const commands: CommandSpec[] = [
     args: '<name|..|/>',
     group: 'tree',
     help: 'enter a folder, .. goes up, / back to the space',
+    complete: folderNames,
     run: async (arg) => {
       const target = arg.trim()
       await workspace.guard(async () => {
@@ -382,6 +395,7 @@ export const commands: CommandSpec[] = [
     args: '<when|->',
     group: 'board',
     help: 'due date of the card: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
+    complete: () => ['today', 'tm', 'fri', '+3d'],
     run: async (arg) => {
       if (workspace.view !== 'board') return workspace.say('no board open — :board', 'error')
       const target = arg.trim()
@@ -428,14 +442,15 @@ export const commands: CommandSpec[] = [
   {
     name: 'move',
     aliases: ['mv'],
-    args: '<folder|..>',
+    args: '<folder|..|/>',
     group: 'tree',
-    help: 'move the marked nodes, or else the selected one, into a folder here, or up one level',
+    help: 'move the marked nodes, or else the selected one, into a folder here, up one level, or to the root of the space',
+    complete: folderNames,
     run: async (arg) => {
       const node = workspace.marked[0] ?? workspace.target
       if (!node) return workspace.say('nothing selected', 'error')
       const target = arg.trim()
-      if (!target) return workspace.say('usage: :mv <folder|..>', 'error')
+      if (!target) return workspace.say('usage: :mv <folder|..|/>', 'error')
 
       // `..` is up from where the node is, which in a search result is not
       // the folder being browsed.
@@ -444,7 +459,8 @@ export const commands: CommandSpec[] = [
         const parent = await api.getNode(node.parent_id)
         return parent.kind === 'space' ? undefined : (parent.parent_id ?? undefined)
       }
-      const destination = target === '..' ? await up() : findFolder(target)?.id
+      const destination =
+        target === '..' ? await up() : target === '/' ? (workspace.spaceId ?? undefined) : findFolder(target)?.id
       if (destination === undefined) return workspace.say(`no such folder: ${target}`, 'error')
       if (destination === node.id) return workspace.say('a folder cannot hold itself', 'error')
       if (workspace.marked.length) return workspace.guard(() => workspace.moveNodes(workspace.marked, destination))
@@ -651,6 +667,7 @@ export const commands: CommandSpec[] = [
     args: '[name]',
     group: 'tree',
     help: 'delete a space and everything in it (asks first)',
+    complete: spaceNames,
     run: async (arg) => {
       const wanted = arg.trim().toLowerCase()
       const space = wanted
@@ -878,6 +895,7 @@ export const commands: CommandSpec[] = [
     args: '<option>',
     group: 'view',
     help: 'vim, novim, clipboard, noclipboard, board, noboard',
+    complete: () => ['vim', 'novim', 'clipboard', 'noclipboard', 'board', 'noboard'],
     run: (arg) => {
       const option = arg.trim()
       if (option === 'vim') return workspace.setVim(true), workspace.say('vim keys on')
@@ -898,6 +916,7 @@ export const commands: CommandSpec[] = [
     group: 'view',
     args: '[login <proton-username> | logout]',
     help: 'when the workspace was last mirrored to proton drive — login sets the mirror up, logout forgets its session',
+    complete: () => ['login ', 'logout'],
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
@@ -1145,6 +1164,22 @@ export async function runCommand(line: string): Promise<void> {
     return
   }
   await spec.run(arg)
+}
+
+/**
+ * What Tab offers for the argument of `line`, a command name and the start of
+ * an argument: whatever the command's `complete` lists that begins that way.
+ * Null when the name is not finished yet, or names no command.
+ */
+export function argCompletions(line: string): string[] | null {
+  const match = /^:?(\S+)\s(.*)$/.exec(line)
+  if (!match) return null
+  const [, head, arg] = match
+  if (head.endsWith('!')) return []
+  const spec = lookup.get(head)
+  if (!spec) return null
+  const wanted = arg.toLowerCase()
+  return (spec.complete?.(arg) ?? []).filter((candidate) => candidate.toLowerCase().startsWith(wanted) && candidate !== arg)
 }
 
 /** Command names for the `:` completion menu. */

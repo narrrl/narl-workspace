@@ -94,11 +94,11 @@ it; in the document pane it is that document. In the browse pane:
 | `c` | capture a card into this space's inbox without leaving where you are |
 | `Esc`, `q` | close the document |
 | `h` | up one level in the tree |
-| `/` | full-text search in this space (`n` clears it) |
+| `/` | full-text search in this space (`n` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
 | `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
 | `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
 | `x`, `dd` | delete the entry under the cursor (asks `y`/`N`) |
-| `:` | command line |
+| `:` | command line — `Tab` / `Shift-Tab` cycle the matching commands, then the argument (folders for `:cd` and `:mv`, spaces for `:space`, options for `:set` …); `↑` / `↓` recall the lines run before that start as this one does |
 | `Ctrl-S` | save from anywhere |
 | `?` | help |
 
@@ -117,7 +117,7 @@ and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
 session, `:logout!` every session and `:sessions rm <n>` one other. The tree has its own: `:space [name]` switches (`:space! <name>`
 makes one, `:rmspace [name]` deletes one and everything in it), `:mkdir <name>`
-makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..>` moves what is
+makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..|/>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
 (`:import!` takes a `.zip` instead). `:upload` outside the editor puts files
 into the folder being browsed, and so does dropping them on the list. `:name <text>` renames whatever is under
