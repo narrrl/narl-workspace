@@ -10,7 +10,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{links, media, revisions, trash},
+    routes::{diary, links, media, revisions, trash},
     state::AppState,
 };
 
@@ -148,6 +148,10 @@ pub struct CreateInput {
     /// Optional override so a document can be backdated to the day it is about.
     #[serde(default)]
     pub created_at: Option<i64>,
+    /// A document to start from, its placeholders filled in for this one. A
+    /// new entry in the diary starts from `templates/day` without being asked.
+    #[serde(default)]
+    pub template_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -208,7 +212,7 @@ const MOVE_AT_ONCE: usize = 1000;
 
 /// How much of a body the list query reads. Comfortably more than an excerpt
 /// needs, and a rounding error next to documents that run to thousands of words.
-const HEAD_CHARS: usize = 1024;
+pub(crate) const HEAD_CHARS: usize = 1024;
 const EXCERPT_CHARS: usize = 180;
 
 /// The columns every list query selects, so a row always converts the same way.
@@ -223,7 +227,7 @@ const SUMMARY_COLUMNS: &str =
 /// A short, plain-ish preview of the body for the list pane. `head` is only the
 /// leading `HEAD_CHARS` of the document, so truncation is inferred from its
 /// length rather than measured against the whole body.
-fn excerpt(head: &str) -> String {
+pub(crate) fn excerpt(head: &str) -> String {
     let flat: String = head
         .lines()
         .map(str::trim)
@@ -626,6 +630,31 @@ pub async fn create(
     let created_at = input.created_at.unwrap_or(now);
     let slug = unique_slug(&mut tx, Some(input.parent_id), &slugify(&input.name), None).await?;
 
+    let tz = state.config.mail.timezone;
+    let name = input.name.trim();
+    let body = match input.template_id {
+        Some(_) if kind != DOCUMENT => {
+            return Err(AppError::BadRequest(
+                "only a document starts from a template".into(),
+            ));
+        }
+        Some(_) if !input.body.is_empty() => {
+            return Err(AppError::BadRequest(
+                "a document starts from a template or from a body, not both".into(),
+            ));
+        }
+        Some(template) => diary::from_template(&mut tx, tz, template, created_at, name).await?,
+        None if kind == DOCUMENT
+            && input.body.is_empty()
+            && diary::is_diary(&mut tx, input.parent_id).await? =>
+        {
+            diary::day_template(&mut tx, tz, input.parent_id, created_at)
+                .await?
+                .unwrap_or_default()
+        }
+        None => input.body,
+    };
+
     let id: i64 = sqlx::query(
         "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -633,17 +662,17 @@ pub async fn create(
     )
     .bind(input.parent_id)
     .bind(kind)
-    .bind(input.name.trim())
+    .bind(name)
     .bind(&slug)
-    .bind(&input.body)
+    .bind(&body)
     .bind(created_at)
     .bind(now)
     .fetch_one(&mut *tx)
     .await?
     .get("id");
 
-    media::link_to_node(&mut tx, id, &input.body).await?;
-    links::index(&mut tx, id, &input.body).await?;
+    media::link_to_node(&mut tx, id, &body).await?;
+    links::index(&mut tx, id, &body).await?;
     // A `[[link]]` written before the document it names now finds it.
     links::follow(&mut tx, id).await?;
     tx.commit().await?;

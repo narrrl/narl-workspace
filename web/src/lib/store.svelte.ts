@@ -9,6 +9,7 @@ import {
   type Board,
   type Card,
   type Crumb,
+  type DiaryEntry,
   type WorkspaceNode,
   type MediaFile,
   type NodeSummary,
@@ -18,7 +19,7 @@ import {
   type TrashItem,
   type VaultStatus,
 } from './api'
-import { formatBytes, formatStamp, isTouchDevice, sealedNote, type Heading } from './util'
+import { formatBytes, formatDay, formatStamp, isTouchDevice, parseDay, sealedNote, type Heading } from './util'
 
 export type Pane = 'list' | 'document'
 /** The tree of documents, or the board of the space being browsed. */
@@ -282,7 +283,7 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'agenda' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks' | 'calendar'>('none')
   /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
   outline = $state.raw<Heading[]>([])
   outlineCursor = $state(0)
@@ -291,8 +292,12 @@ class Workspace {
    * What is due or in hand on every board, kept loaded all the time: the bar
    * counts from it, so what is late is in sight without going to look.
    */
-  agenda = $state<Agenda>({ cards: [], diary_today: null })
+  agenda = $state<Agenda>({ cards: [], diary_today: null, on_this_day: [] })
   agendaCursor = $state(0)
+
+  /** `C`: the day the calendar's cursor is on, `2026-10-20`, and its month's entries. */
+  calendarDay = $state('')
+  calendarEntries = $state.raw<DiaryEntry[]>([])
 
   /** A search across every space rather than the one being browsed — Ctrl-P. */
   globalSearch = $state(false)
@@ -939,11 +944,15 @@ class Workspace {
     else await this.openNode(selected.id, edit)
   }
 
-  /** A new document is created immediately so uploads have something to attach to. */
-  async createDocument(name = '') {
+  /**
+   * A new document is created immediately so uploads have something to attach
+   * to. In the diary it starts from `templates/day` when there is one; the
+   * server sees to that, so capture does the same.
+   */
+  async createDocument(name = '', from: { created_at?: number; template_id?: number } = {}) {
     const parent = this.parentId
     if (parent === null) return
-    const node = await api.createNode({ parent_id: parent, name, body: '' })
+    const node = await api.createNode({ parent_id: parent, name, body: '', ...from })
     this.query = ''
     this.globalSearch = false
     await this.refresh()
@@ -1285,7 +1294,7 @@ class Workspace {
     } catch {
       /* the counter is a convenience; a failed refresh leaves the last one up */
     }
-    this.agendaCursor = Math.min(this.agendaCursor, Math.max(this.agendaCards.length - 1, 0))
+    this.agendaCursor = Math.min(this.agendaCursor, Math.max(this.agendaCards.length + this.agenda.on_this_day.length - 1, 0))
   }
 
   /**
@@ -1300,6 +1309,52 @@ class Workspace {
     localStorage.setItem('diary:agenda-seen', today)
     this.agendaCursor = 0
     this.overlay = 'agenda'
+  }
+
+  /** `C`: the calendar, on the day of the entry being read or else today. */
+  async openCalendar() {
+    const open = this.open
+    const reading = open && this.spaces.find((space) => space.id === open.path[0]?.id)?.role === 'diary'
+    this.calendarDay = formatDay(reading ? open.created_at : Math.floor(Date.now() / 1000))
+    await this.loadCalendar()
+    this.overlay = 'calendar'
+  }
+
+  async loadCalendar() {
+    this.calendarEntries = await api.diaryDays(this.calendarDay.slice(0, 7))
+  }
+
+  /** The calendar's cursor, `days` along or `months` over; a month keeps the day where it can. */
+  async moveCalendar(days: number, months = 0) {
+    const [y, m, d] = this.calendarDay.split('-').map(Number)
+    const last = new Date(y, m - 1 + months + 1, 0).getDate()
+    const date = new Date(y, m - 1 + months, Math.min(d, last) + days, 12)
+    const before = this.calendarDay.slice(0, 7)
+    this.calendarDay = formatDay(Math.floor(date.getTime() / 1000))
+    if (this.calendarDay.slice(0, 7) !== before) await this.loadCalendar()
+  }
+
+  /** Enter in the calendar: that day's entry, or a new one dated that day. */
+  async openCalendarDay() {
+    const day = this.calendarDay
+    const entry = this.calendarEntries.find((e) => e.day === day)
+    this.overlay = 'none'
+    if (entry) return this.openPath(entry.path)
+    const home = this.spaces.find((space) => space.role === 'diary')
+    if (!home) return this.say('there is no diary to write in', 'error')
+    if (this.parentId !== home.id) await this.enterSpace(home.id)
+    await this.createDocument('', { created_at: parseDay(day) ?? undefined })
+  }
+
+  /** `[d` / `]d`: the diary entry before or after the one being read. */
+  async stepEntry(by: -1 | 1) {
+    const open = this.open
+    if (!open) return this.say('nothing open', 'error')
+    const { prev, next } = await api.diaryAround(open.id)
+    const entry = by < 0 ? prev : next
+    if (!entry) return this.say(by < 0 ? 'no entry before this one' : 'no entry after this one')
+    await this.openPath(entry.path)
+    this.say(entry.day)
   }
 
   /** Enter in the agenda: to the card, on its own board. */

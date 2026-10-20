@@ -98,6 +98,8 @@ it; in the document pane it is that document. In the browse pane:
 | `b` | the board of this space |
 | `t` | the agenda: what is late, due this week, or in hand, on every board |
 | `T` | today's diary entry, started if there is none |
+| `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
+| `[d` / `]d` | the diary entry before / after the one open, by date |
 | `c` | capture a card into this space's inbox without leaving where you are |
 | `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
@@ -113,7 +115,7 @@ it; in the document pane it is that document. In the browse pane:
 
 Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
-`:w`, `:wq`, `:q!`, `:new [yyyy-mm-dd]`, `:date`, `:name`, `:share`, `:link`,
+`:w`, `:wq`, `:q!`, `:new [template] [yyyy-mm-dd] [name]`, `:date`, `:name`, `:share`, `:link`,
 `:upload`, `:media`, `:search`, `:backup` and
 `:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
 there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
@@ -241,6 +243,32 @@ it stands, `D` sets its due date (`:due` on the line), `H` / `L` send it to
 the list left / right on its board, and `T` writes today's entry. The bar shows `late` and `today` counts
 whenever either is above zero, and the agenda opens by itself once a day when
 something is late or due, so nothing has to be remembered to be looked at.
+Below the cards it lists what the diary holds from this day in earlier years;
+`j` walks on into them and `Enter` opens one. A 29 February is remembered on
+the 28th in the years that have none.
+
+## The diary
+
+The space with the diary role is a journal: each document in it is an entry,
+dated by the day it is about (`:date` changes that). `T` opens today's, `[d`
+and `]d` step to the one before or after by date, and `C` (or `:cal`) shows a
+month: `h` / `l` move a day, `j` / `k` a week, `H` / `L` a month, `.` goes
+back to today, and `Enter` opens the day's entry or starts one dated that day.
+A marked day has an entry, a number says how many. Days are counted in
+`WORKSPACE_TIMEZONE`, the same as the evening reminder.
+
+### Templates
+
+Any space can have a folder called `templates` at its root; every document in
+it is a template. `:new meeting` starts a document from `templates/meeting`,
+`:new meeting 2026-10-20 Budget` dates and names it as well, and Tab completes
+the template names. In a template, `{{date}}` becomes `2026-10-20`,
+`{{weekday}}` `Tuesday`, `{{time}}` `14:05` and `{{title}}` the new document's
+name, all on the clock of `WORKSPACE_TIMEZONE` at the date the document is
+for. A new entry in the diary — from `T`, `o`, the calendar or a capture —
+starts from `templates/day` when the diary has one. The templates are not
+entries, so they are not on the calendar and do not count as having written
+today.
 
 ## Capturing from elsewhere
 
@@ -264,7 +292,7 @@ named by `"space": "<slug>"`, or else of the first space that has a board,
 the same as `:card` outside the board. The first line is the card's title and
 the rest its notes. `"to": "diary"` adds `- 14:05 call the bank` to the end of
 today's entry, in `WORKSPACE_TIMEZONE`, and starts the entry when there is
-none yet. The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
+none yet, from `templates/day` when the diary has one. The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
 
 A token opens this one route and nothing else — it reads nothing, not even the
 list of spaces — and only its SHA-256 is kept, the way a share key is. Wrong
@@ -736,13 +764,16 @@ sealed or not.
 | `GET` | `/api/sessions` | every signed-in browser, the one seen last first |
 | `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
-| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create |
+| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create, from a template with `template_id` |
 | `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete into the trash, subtree and all — or for good, for something already in it |
 | `GET`/`DELETE` | `/api/trash` | what was deleted, the last first / empty it |
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |
 | `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
-| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, and whether the diary has today |
+| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, and its entries `on_this_day` in earlier years |
+| `GET` | `/api/diary/days?month=2026-10` | the diary's entries in a month, each with its local `day` |
+| `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
+| `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
 | `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |
 | `GET`/`POST` | `/api/tokens` | the capture tokens / make one, `{ name }`, answered with the token this once |
 | `DELETE` | `/api/tokens/{id}` | remove a capture token |

@@ -5,7 +5,7 @@
    * had today yet. The keys live in App.svelte with the others; this draws
    * and lets a pointer do the same.
    */
-  import type { AgendaCard } from './api'
+  import type { AgendaCard, DiaryEntry } from './api'
   import { workspace } from './store.svelte'
   import { runCommand } from './commands'
   import Icon from './Icon.svelte'
@@ -22,6 +22,12 @@
     const index = workspace.agendaCursor
     sheet?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
   })
+
+  /** An entry from an earlier year, in place in the diary. */
+  function open(entry: DiaryEntry) {
+    workspace.overlay = 'none'
+    void workspace.guard(() => workspace.openPath(entry.path))
+  }
 
   /** Where a card sits in the walked order, across the groups. */
   function indexOf(card: AgendaCard) {
@@ -80,10 +86,33 @@
     <p class="clear">nothing late, nothing due this week, nothing in hand. <span class="kbd">c</span> captures the next thing.</p>
   {/each}
 
+  {#if workspace.agenda.on_this_day.length}
+    <section class="past">
+      <h2>on this day <span class="n">{workspace.agenda.on_this_day.length}</span></h2>
+      <ul>
+        {#each workspace.agenda.on_this_day as entry, at (entry.id)}
+          {@const index = total + at}
+          <li>
+            <button
+              class="row"
+              class:at={index === workspace.agendaCursor}
+              data-index={index}
+              onclick={() => open(entry)}
+              onpointerenter={() => (workspace.agendaCursor = index)}
+            >
+              <span class="text">{entry.name.trim() || entry.excerpt || 'untitled'}</span>
+              <span class="due">{entry.day.slice(0, 4)}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+
   <footer class="label">
     <span class="kbd">j</span><span class="kbd">k</span> move
     <span class="gap"></span>
-    <span class="kbd">↵</span> to its board
+    <span class="kbd">↵</span> open
     <span class="gap"></span>
     <span class="kbd">␣</span> done
     <span class="gap"></span>

@@ -156,6 +156,23 @@ const spaceNames = () => workspace.spaces.map((space) => space.slug)
 /** The capture tokens' names, for Tab after `:token rm`; null until fetched. */
 let tokenNames: string[] | null = null
 
+/** The templates of the space last asked about, for `:new` to complete. */
+let templateCache: { space: number; names: string[] } | null = null
+
+/** Tab cannot wait for the server: the names come on the press after the first. */
+function templateNames(): string[] {
+  const here = workspace.spaceId
+  if (here === null) return []
+  if (templateCache?.space !== here) {
+    templateCache = { space: here, names: [] }
+    void api.templates(here).then(
+      (templates) => (templateCache = { space: here, names: templates.map((t) => t.slug) }),
+      () => (templateCache = null),
+    )
+  }
+  return templateCache.names
+}
+
 /** `:encrypt` and `:decrypt`: a file, or everything under a folder. */
 const sealTarget = (encrypt: boolean) =>
   workspace.guard(async () => {
@@ -526,22 +543,41 @@ export const commands: CommandSpec[] = [
   {
     name: 'new',
     aliases: ['n', 'o'],
-    args: '[yyyy-mm-dd]',
+    args: '[template] [yyyy-mm-dd] [name]',
     group: 'documents',
-    help: 'start a new document here, optionally dated',
+    help: "start a new document here — from one of the space's templates, dated, named; in the diary from templates/day",
+    complete: (arg) => (arg.includes(' ') ? [] : templateNames()),
     run: async (arg) => {
       await workspace.guard(async () => {
-        await workspace.createDocument()
-        if (arg) {
-          const at = parseDay(arg)
-          if (at === null) return workspace.say(`not a date: ${arg}`, 'error')
-          workspace.draft.created_at = at
-          workspace.dirty = true
-          await workspace.save()
+        const words = arg.trim().split(/\s+/).filter(Boolean)
+        const here = workspace.spaceId
+        const templates = words.length && here !== null ? await api.templates(here) : []
+        if (words.length && here !== null) templateCache = { space: here, names: templates.map((t) => t.slug) }
+        const wanted = words[0]?.toLowerCase()
+        const template = templates.find((t) => t.slug === wanted || t.name.toLowerCase() === wanted)
+        if (template) words.shift()
+        let created_at: number | undefined
+        if (words.length && /^\d{4}-\d{2}-\d{2}$/.test(words[0])) {
+          const at = parseDay(words[0])
+          if (at === null) return workspace.say(`not a date: ${words[0]}`, 'error')
+          created_at = at
+          words.shift()
         }
+        await workspace.createDocument(words.join(' '), { created_at, template_id: template?.id })
       })
       hooks.focusEditor()
     },
+  },
+  {
+    name: 'cal',
+    aliases: ['calendar'],
+    group: 'documents',
+    help: 'the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it',
+    run: () =>
+      workspace.guard(async () => {
+        if (workspace.overlay === 'calendar') return void (workspace.overlay = 'none')
+        await workspace.openCalendar()
+      }),
   },
   {
     name: 'agenda',

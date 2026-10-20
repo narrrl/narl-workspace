@@ -461,16 +461,14 @@ fn device_hash(user_agent: &str) -> String {
 /// whether today has been written.
 pub(crate) async fn diary_written(db: &SqlitePool, tz: Tz, day: NaiveDate) -> sqlx::Result<bool> {
     let (start, end) = day_bounds(tz, day);
-    let written: i64 = sqlx::query_scalar(
-        "WITH RECURSIVE tree (id) AS (
-             SELECT id FROM nodes WHERE role = 'diary'
-             UNION ALL
-             SELECT n.id FROM nodes n JOIN tree t ON n.parent_id = t.id
-         )
+    // A template is not an entry, however recently it was written.
+    let written: i64 = sqlx::query_scalar(&format!(
+        "WITH RECURSIVE {}
          SELECT count(*) FROM nodes
-         WHERE kind = 'document' AND id IN (SELECT id FROM tree)
+         WHERE kind = 'document' AND id IN (SELECT id FROM entries)
            AND created_at >= ? AND created_at < ?",
-    )
+        crate::routes::diary::ENTRIES
+    ))
     .bind(start)
     .bind(end)
     .fetch_one(db)

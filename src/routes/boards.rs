@@ -140,6 +140,8 @@ pub struct Agenda {
     /// Whether the diary has an entry for today, in the configured timezone —
     /// `None` when there is no diary space to ask about.
     pub diary_today: Option<bool>,
+    /// Diary entries from this day in earlier years, the latest year first.
+    pub on_this_day: Vec<crate::routes::diary::Entry>,
 }
 
 #[derive(Serialize)]
@@ -162,16 +164,21 @@ pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json
     let has_diary: Option<i64> = sqlx::query_scalar("SELECT id FROM nodes WHERE role = 'diary'")
         .fetch_optional(&state.db)
         .await?;
+    let tz = state.config.mail.timezone;
     let diary_today = match has_diary {
         Some(_) => {
-            let tz = state.config.mail.timezone;
             let today = crate::notify::local_day(tz, crate::now());
             Some(crate::notify::diary_written(&state.db, tz, today).await?)
         }
         None => None,
     };
+    let on_this_day = crate::routes::diary::on_this_day(&state.db, tz, crate::now()).await?;
 
-    Ok(Json(Agenda { cards, diary_today }))
+    Ok(Json(Agenda {
+        cards,
+        diary_today,
+        on_this_day,
+    }))
 }
 
 /// The agenda's cards, due before `horizon` or in hand. Apart from the handler

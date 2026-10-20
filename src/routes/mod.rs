@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod boards;
 pub mod capture;
+pub mod diary;
 pub mod export;
 pub mod import;
 pub mod inspect;
@@ -56,6 +57,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/spaces", get(nodes::spaces).post(nodes::create_space))
         .route("/spaces/overview", get(nodes::overview))
         .route("/agenda", get(boards::agenda))
+        .route("/diary/days", get(diary::days))
+        .route("/diary/around/{id}", get(diary::around_entry))
         .route("/capture", post(capture::capture))
         .route("/spaces/{id}/board", get(boards::board))
         .route("/spaces/{id}/lists", post(boards::create_list))
@@ -76,6 +79,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/nodes/{id}", delete(nodes::remove))
         .route("/nodes/{id}/revisions", get(revisions::list))
         .route("/nodes/{id}/backlinks", get(links::backlinks))
+        .route("/nodes/{id}/templates", get(diary::templates))
         .route("/nodes/{id}/revisions/{rev}", get(revisions::get))
         .route("/nodes/move", post(nodes::move_many))
         .route("/nodes/{id}/move", post(nodes::move_node))

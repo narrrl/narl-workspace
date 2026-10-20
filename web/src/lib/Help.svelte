@@ -32,7 +32,9 @@
     ['M', 'pick up the whole folder — again puts it all back'],
     ['Ctrl / Shift-click', 'pick a row up · every row up to it — drag them onto a folder'],
     ['t', 'agenda — late, due this week, in hand, on every board'],
-    ['T', "today's diary entry, started if there is none"],
+    ['T', "today's diary entry, started if there is none — from templates/day when the diary has one"],
+    ['C', 'the diary by month: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day'],
+    ['[d / ]d', 'the diary entry before / after the one open, by date'],
     ['Ctrl-P', 'find anything, in every space — Enter goes to the result lit'],
     ['b', "open this space's board"],
     ['c', "capture a card into this space's inbox, without leaving here"],
@@ -73,8 +75,8 @@
   ]
 
   const agendaKeys: [string, string][] = [
-    ['j / k', 'down / up the cards'],
-    ['Enter', 'to the card, on its own board'],
+    ['j / k', 'down / up the cards, then what was written on this day in earlier years'],
+    ['Enter', 'to the card, on its own board — or to the entry'],
     ['Space', 'done, where it stands'],
     ['D', 'due date: fri, tm, +3d … — :due on the line'],
     ['H / L', 'to the list left / right on its board'],

@@ -183,6 +183,27 @@ export interface Agenda {
   cards: AgendaCard[]
   /** Whether the diary has an entry today; null when there is no diary. */
   diary_today: boolean | null
+  /** Diary entries from this day in earlier years, the latest year first. */
+  on_this_day: DiaryEntry[]
+}
+
+/** A diary entry, by the local day it is about. */
+export interface DiaryEntry {
+  id: number
+  name: string
+  /** `2026-10-20`, in the server's timezone. */
+  day: string
+  created_at: number
+  /** `diary/untitled`, to open it by. */
+  path: string
+  excerpt: string
+}
+
+/** A document in a space's `templates` folder. */
+export interface Template {
+  id: number
+  name: string
+  slug: string
 }
 
 export interface BoardList {
@@ -433,7 +454,19 @@ export const api = {
     name?: string
     body?: string
     created_at?: number
+    /** Start from this document, its `{{date}}` and the rest filled in. */
+    template_id?: number
   }) => request<WorkspaceNode>('/nodes', { method: 'POST', body: body(input) }),
+
+  /** The templates of the space `id` is in. */
+  templates: (id: number) => request<Template[]>(`/nodes/${id}/templates`),
+
+  /** A month's diary entries: `2026-10`. */
+  diaryDays: (month: string) => request<DiaryEntry[]>(`/diary/days?month=${encodeURIComponent(month)}`),
+
+  /** The entries before and after a diary entry, by date. */
+  diaryAround: (id: number) =>
+    request<{ prev: DiaryEntry | null; next: DiaryEntry | null }>(`/diary/around/${id}`),
 
   /**
    * `base_updated_at`: refused with 409 if the node was saved since then.

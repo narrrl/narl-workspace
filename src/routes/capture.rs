@@ -14,7 +14,7 @@ use crate::{
     error::{AppError, AppResult},
     routes::{
         boards::{self, CardInput},
-        links, media,
+        diary, links, media,
         nodes::{self, slugify, unique_slug},
         revisions,
     },
@@ -96,7 +96,7 @@ async fn card(db: &SqlitePool, text: &str, space: Option<&str>) -> AppResult<Cap
 
 /// `- 14:05 text`, at the end of today's entry: the first document written
 /// today at the top of the diary, the one `:today` opens. With none yet, the
-/// line starts one, the way `:today` would.
+/// line starts one the way `:today` would, from `templates/day` if there is one.
 async fn diary(db: &SqlitePool, tz: Tz, text: &str, now: i64) -> AppResult<Captured> {
     let line = format!("- {} {}", clock(tz, now), item(text));
 
@@ -134,7 +134,8 @@ async fn diary(db: &SqlitePool, tz: Tz, text: &str, now: i64) -> AppResult<Captu
             id
         }
         None => {
-            let body = format!("{line}\n");
+            let start = diary::day_template(&mut tx, tz, diary, now).await?;
+            let body = appended(start.as_deref().unwrap_or_default(), &line);
             let slug = unique_slug(&mut tx, Some(diary), &slugify(""), None).await?;
             let id: i64 = sqlx::query_scalar(
                 "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
@@ -203,7 +204,7 @@ fn appended(body: &str, line: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use axum::{
         body::Body,
         http::{header, Request, StatusCode},
@@ -217,6 +218,12 @@ mod tests {
     use crate::{auth::token_hash, state::AppState};
 
     const TOKEN: &str = "nwc_a-token-for-the-tests";
+
+    /// A line in the diary in Berlin at `now`, for tests elsewhere: the id of
+    /// the entry it went into.
+    pub(crate) async fn diary_at(db: &sqlx::SqlitePool, text: &str, now: i64) -> i64 {
+        diary(db, Berlin, text, now).await.unwrap().id
+    }
 
     async fn state() -> AppState {
         let state = crate::routes::tests::state_in(".".into()).await;

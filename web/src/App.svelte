@@ -2,6 +2,7 @@
   import { cycleTile, focusTile, followLink, hooks, runCommand } from './lib/commands'
   import { embedSnippet } from './lib/markdown'
   import Agenda from './lib/Agenda.svelte'
+  import Calendar from './lib/Calendar.svelte'
   import Bar from './lib/Bar.svelte'
   import Board from './lib/Board.svelte'
   import CommandLine from './lib/CommandLine.svelte'
@@ -25,7 +26,7 @@
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import { workspace } from './lib/store.svelte'
-  import { dwindle, neighbour, type Direction } from './lib/util'
+  import { dwindle, formatDay, neighbour, type Direction } from './lib/util'
 
   /*
    * A share link is /s/<token>#<key>. The fragment never leaves the browser, so
@@ -292,14 +293,18 @@
     return false
   }
 
-  /** The agenda's keys: j/k down the list, Enter to the card, Space finishes it. */
+  /**
+   * The agenda's keys: j/k down the list, Enter to the card, Space finishes it.
+   * Past the cards the cursor walks on into what was written on this day.
+   */
   function agendaKey(event: KeyboardEvent): boolean {
     const cards = workspace.agendaCards
     const card = cards[workspace.agendaCursor]
+    const past = workspace.agenda.on_this_day[workspace.agendaCursor - cards.length]
     switch (event.key) {
       case 'j':
       case 'ArrowDown':
-        workspace.agendaCursor = Math.min(workspace.agendaCursor + 1, Math.max(cards.length - 1, 0))
+        workspace.agendaCursor = Math.min(workspace.agendaCursor + 1, Math.max(cards.length + workspace.agenda.on_this_day.length - 1, 0))
         return true
       case 'k':
       case 'ArrowUp':
@@ -307,6 +312,10 @@
         return true
       case 'Enter':
         if (card) void workspace.guard(() => workspace.goToCard(card))
+        else if (past) {
+          workspace.overlay = 'none'
+          void workspace.guard(() => workspace.openPath(past.path))
+        }
         return true
       case ' ':
         if (card) void workspace.guard(() => workspace.finishCard(card))
@@ -327,6 +336,35 @@
         void runCommand('today')
         return true
       case 't':
+      case 'q':
+        workspace.overlay = 'none'
+        return true
+      default:
+        return false
+    }
+  }
+
+  /** The calendar's keys: h/l a day, j/k a week, H/L a month, Enter to the day. */
+  function calendarKey(event: KeyboardEvent): boolean {
+    const step: Record<string, [number, number]> = {
+      h: [-1, 0], ArrowLeft: [-1, 0], l: [1, 0], ArrowRight: [1, 0],
+      k: [-7, 0], ArrowUp: [-7, 0], j: [7, 0], ArrowDown: [7, 0],
+      H: [0, -1], L: [0, 1],
+    }
+    if (event.key in step) {
+      const [days, months] = step[event.key]
+      void workspace.guard(() => workspace.moveCalendar(days, months))
+      return true
+    }
+    switch (event.key) {
+      case '.':
+        workspace.calendarDay = formatDay(Math.floor(Date.now() / 1000))
+        void workspace.guard(() => workspace.loadCalendar())
+        return true
+      case 'Enter':
+        void workspace.guard(() => workspace.openCalendarDay()).then(() => hooks.focusEditor())
+        return true
+      case 'C':
       case 'q':
         workspace.overlay = 'none'
         return true
@@ -675,6 +713,12 @@
         return
       }
     }
+    if (workspace.overlay === 'calendar' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (calendarKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'outline' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (outlineKey(event)) {
         event.preventDefault()
@@ -769,6 +813,11 @@
       void runCommand('today')
       return
     }
+    if (key === 'C') {
+      event.preventDefault()
+      void runCommand('cal')
+      return
+    }
 
     if (workspace.view === 'board') {
       if (previous === 'g' && key === 'g') {
@@ -845,6 +894,12 @@
       event.preventDefault()
       const amount = ({ h: -1, l: 1, H: 'halfleft', L: 'halfright' } as const)[key as 'h' | 'l' | 'H' | 'L']
       if (!reading || !hooks.scrollWide(amount)) workspace.say('nothing wider than the column in view', 'error')
+      return
+    }
+    // `[d` / `]d`: the diary entry of the day before or after, by its date.
+    if ((previous === '[' || previous === ']') && key === 'd') {
+      event.preventDefault()
+      void workspace.guard(() => workspace.stepEntry(previous === '[' ? -1 : 1))
       return
     }
     if ((previous === ']' && key === ']') || (previous === '[' && key === '[')) {
@@ -1112,7 +1167,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else if workspace.overlay === 'calendar'}<Calendar />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>
