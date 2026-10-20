@@ -27,6 +27,7 @@
     "@lezer/highlight": "^1.2.1",
     "@replit/codemirror-vim": "^6.2.1",
     "dompurify": "^3.2.4",
+    "katex": "^0.19.0",
     "marked": "^15.0.6"
   }
 }

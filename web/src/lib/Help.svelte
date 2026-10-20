@@ -141,7 +141,7 @@
   <footer>
     inside the editor the full vim keymap is live — hjkl, w/b, dd, ciw, visual mode, macros, and
     <span class="key">:w</span> to write. drop or paste an image, video or audio file into the
-    editor to attach it. a file opens in place — pdf, text and code, markdown, csv, and
+    editor to attach it. <span class="key">$x^2$</span> and <span class="key">$$…$$</span> are set as math. a file opens in place — pdf, text and code, markdown, csv, and
     certificates and keystores, which ask for their password. <span class="key">:12</span> jumps straight to entry 12. yanks and
     deletes are copied to the system clipboard —
     <span class="key">:set noclipboard</span> keeps them in vim's registers.

@@ -6,7 +6,9 @@ one binary. It was called `narl-diary` until it grew everything but the diary.
 
 - **Rust + axum** backend, **SQLite** storage, **Svelte 5** frontend.
 - Spaces (`diary`, `work`, `uni`, …) with folders nested to any depth inside them.
-- Markdown documents with full-text search across a whole space (SQLite FTS5).
+- Markdown documents with full-text search across a whole space (SQLite FTS5),
+  and math in them set by KaTeX: `$x^2$` inline, `$$…$$` or a ```` ```math ````
+  block on its own.
 - Import a folder — or a zip of one — as a tree of documents, links and all.
 - A kanban board per space, so what is open at work is not mixed up with uni.
 - Drag, drop or paste images, video and audio straight into an entry.

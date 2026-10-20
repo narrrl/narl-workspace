@@ -1,7 +1,65 @@
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
+import { marked, type TokenizerAndRendererExtension } from 'marked'
+import { mathEngine } from './math.svelte'
 
 marked.setOptions({ gfm: true, breaks: true })
+
+/*
+ * Math the way GitHub writes it: `$x^2$` inline, `$$…$$` on lines of its own
+ * or inline for display, and a ```math block. A `$` opening on a space or
+ * closing before a digit is a price, not math — "$5 and $10" stays text — and
+ * `\$` is a dollar sign as ever.
+ */
+const DISPLAY = /^\$\$((?:\\.|[^\\$])+?)\$\$/
+const INLINE = /^\$(?!\s)((?:\\.|[^\\$\n])+?)(?<!\s)\$(?!\d)/
+
+const mathBlock: TokenizerAndRendererExtension = {
+  name: 'mathBlock',
+  level: 'block',
+  start: (src) => src.match(/^\$\$/m)?.index,
+  tokenizer(src) {
+    const match = /^\$\$((?:\\.|[^\\$])+?)\$\$[^\S\n]*(?:\n+|$)/.exec(src)
+    if (match) return { type: 'mathBlock', raw: match[0], text: match[1].trim() }
+  },
+  renderer: (token) => tex(token.text, true),
+}
+
+const mathInline: TokenizerAndRendererExtension = {
+  name: 'mathInline',
+  level: 'inline',
+  start: (src) => src.indexOf('$'),
+  tokenizer(src) {
+    const display = DISPLAY.exec(src)
+    if (display) return { type: 'mathInline', raw: display[0], text: display[1].trim(), display: true }
+    const inline = INLINE.exec(src)
+    if (inline) return { type: 'mathInline', raw: inline[0], text: inline[1], display: false }
+  },
+  renderer: (token) => tex(token.text, token.display),
+}
+
+marked.use({
+  extensions: [mathBlock, mathInline],
+  renderer: {
+    code(token) {
+      return token.lang === 'math' ? tex(token.text, true) : false
+    },
+  },
+})
+
+/** TeX as KaTeX sets it, or as its source while KaTeX is still loading. */
+function tex(source: string, display: boolean): string {
+  const katex = mathEngine()
+  if (!katex) {
+    const text = escapeHtml(source)
+    return display ? `<pre class="math">${text}</pre>` : `<code class="math">${text}</code>`
+  }
+  // An error shows in place, in red, rather than throwing away the page.
+  return katex.renderToString(source, { displayMode: display, throwOnError: false })
+}
+
+function escapeHtml(text: string): string {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+}
 
 /**
  * Render entry markdown to sanitised HTML. When share credentials are given,
@@ -20,8 +78,9 @@ export function renderMarkdown(source: string, share?: { token: string; key: str
   const html = marked.parse(md, { async: false }) as string
 
   return DOMPurify.sanitize(html, {
-    ADD_TAGS: ['video', 'audio', 'source'],
-    ADD_ATTR: ['controls', 'target', 'loading', 'playsinline', 'preload'],
+    // `semantics` and `annotation` carry KaTeX's MathML, for screen readers.
+    ADD_TAGS: ['video', 'audio', 'source', 'semantics', 'annotation'],
+    ADD_ATTR: ['controls', 'target', 'loading', 'playsinline', 'preload', 'encoding'],
   })
 }
 
