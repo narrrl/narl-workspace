@@ -112,6 +112,33 @@
     }
   })
 
+  /*
+   * The browser's PDF viewer keeps every key once it has been clicked, and
+   * nothing it is sent reaches the page. The page only sees the window lose
+   * the focus to the frame; it says so, and takes the keys back as soon as
+   * the pointer leaves the frame — the one move that still reaches it.
+   */
+  let pdf = $state<HTMLIFrameElement>()
+  let pdfHasKeys = $state(false)
+  $effect(() => {
+    const frame = pdf
+    if (!frame) return
+    const blur = () => setTimeout(() => (pdfHasKeys = document.activeElement === frame))
+    // The viewer keeps the pointer's events to itself too, so any of them
+    // reaching the page means the pointer is off the frame.
+    const leave = () => {
+      if (!pdfHasKeys) return
+      if (document.activeElement === frame) hooks.focusList()
+      pdfHasKeys = false
+    }
+    window.addEventListener('blur', blur)
+    document.addEventListener('pointermove', leave)
+    return () => {
+      window.removeEventListener('blur', blur)
+      document.removeEventListener('pointermove', leave)
+    }
+  })
+
   // Markdown read rendered has headings to jump between, as a document does.
   let article = $state<HTMLElement>()
   $effect(() => {
@@ -190,7 +217,12 @@
       {:else if kind === 'audio'}
         <audio src={file.url} controls preload="metadata"></audio>
       {:else if kind === 'pdf'}
-        <iframe class="pdf" src={file.url} title={node.name}></iframe>
+        <div class="pdfbox">
+          <iframe class="pdf" src={file.url} title={node.name} bind:this={pdf}></iframe>
+          {#if pdfHasKeys}
+            <p class="pdfkeys label">the pdf viewer has the keys — move the pointer off it to take them back · gx opens it in a tab</p>
+          {/if}
+        </div>
       {:else if kind === 'cert'}
         <CertView bind:this={cert} id={node.id} name={node.name} />
       {:else if text !== null}
@@ -326,6 +358,22 @@
     color: var(--muted);
     text-align: right;
     user-select: none;
+  }
+  .pdfbox { position: relative; }
+  .pdfkeys {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    margin: 0;
+    padding: 6px 12px;
+    transform: translateX(-50%);
+    border: 1px solid var(--light-dim);
+    border-radius: var(--radius-s);
+    background: var(--hull);
+    color: var(--light);
+    font-size: 10px;
+    white-space: nowrap;
+    pointer-events: none;
   }
   .pdf {
     display: block;
