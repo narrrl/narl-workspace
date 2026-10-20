@@ -421,15 +421,18 @@ pub fn spawn(notifier: Arc<Notifier>) {
         return;
     }
 
-    tokio::spawn(async move {
-        // A minute is fine-grained enough for a configuration written as HH:MM
-        // and coarse enough to be free.
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(e) = notifier.tick().await {
-                tracing::error!(error = %format!("{e:#}"), "the notification tick failed");
+    crate::tasks::supervise("the notifier", move || {
+        let notifier = Arc::clone(&notifier);
+        async move {
+            // A minute is fine-grained enough for a configuration written as
+            // HH:MM and coarse enough to be free.
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(e) = notifier.tick().await {
+                    tracing::error!(error = %format!("{e:#}"), "the notification tick failed");
+                }
             }
         }
     });

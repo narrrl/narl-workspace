@@ -33,6 +33,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
     // Multipart framing on top of the files themselves.
     let uploads = DefaultBodyLimit::max(max_upload.saturating_add(1024 * 1024));
     Router::new()
+        .route("/health", get(session::health))
         .route("/me", get(session::me))
         .route("/login", post(session::login).layer(DefaultBodyLimit::max(LOGIN_LIMIT)))
         .route("/logout", post(session::logout))

@@ -6,7 +6,7 @@ use chrono_tz::Tz;
 
 /// Runtime configuration. Everything comes from the environment (`.env` is
 /// loaded on startup), because this is a deliberately single-user application.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub username: String,
     pub password: String,
@@ -21,6 +21,61 @@ pub struct Config {
     pub backup: BackupConfig,
     pub mail: MailConfig,
     pub sftp: SftpConfig,
+}
+
+/// Written by hand so that a `{:?}` anywhere — a log line, a panic — never
+/// prints the password, the cookie secret or the relay's credentials.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("secret", &"<redacted>")
+            .field("bind", &self.bind)
+            .field("data_dir", &self.data_dir)
+            .field("session_days", &self.session_days)
+            .field("max_upload_bytes", &self.max_upload_bytes)
+            .field("secure_cookie", &self.secure_cookie)
+            .field("vault_idle", &self.vault_idle)
+            .field("backup", &self.backup)
+            .field("mail", &self.mail)
+            .field("sftp", &self.sftp)
+            .finish()
+    }
+}
+
+/// A whole number from the environment, `default` when it is not set, and an
+/// error at startup — not an overflow later — when it is outside `allowed`.
+fn number(key: &str, default: u64, allowed: std::ops::RangeInclusive<u64>) -> Result<u64> {
+    let Some(raw) = var(key) else {
+        return Ok(default);
+    };
+    let value: u64 = raw
+        .trim()
+        .parse()
+        .with_context(|| format!("WORKSPACE_{key} must be a whole number, not {raw:?}"))?;
+    if !allowed.contains(&value) {
+        anyhow::bail!(
+            "WORKSPACE_{key} must be between {} and {}, not {value}",
+            allowed.start(),
+            allowed.end()
+        );
+    }
+    Ok(value)
+}
+
+/// A switch. Anything that is not clearly on or clearly off is an error:
+/// `WORKSPACE_SECURE_COOKIE=yes` quietly meaning "no" is how a cookie ends up
+/// going out over plain HTTP.
+fn flag(key: &str) -> Result<bool> {
+    let Some(raw) = var(key) else {
+        return Ok(false);
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!("WORKSPACE_{key} must be 1 or 0 (true/false, yes/no, on/off), not {raw:?}"),
+    }
 }
 
 /// The SFTP mount. Dormant until `WORKSPACE_SFTP_BIND` is set — same shape as
@@ -51,7 +106,7 @@ pub struct TimeOfDay {
 /// Notification mail. Dormant until `WORKSPACE_SMTP_URL` is set — the same
 /// dormant-until-configured shape the Proton mirror has, because a workspace
 /// that refuses to start over an unconfigured mail relay would be a bad trade.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MailConfig {
     /// `smtp://host:587` or `smtps://user:pass@host:465`. `None` turns every
     /// notification off, including the queue that would otherwise pile up.
@@ -69,6 +124,22 @@ pub struct MailConfig {
     /// The kinds that are allowed to be sent: `reminder`, `card_due`, `digest`,
     /// `login`. Listing them explicitly is how a single kind is switched off.
     pub kinds: Vec<String>,
+}
+
+impl std::fmt::Debug for MailConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MailConfig")
+            // The URL carries the relay's user and password.
+            .field("url", &self.url.as_ref().map(|_| "<redacted>"))
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("timezone", &self.timezone)
+            .field("reminder_at", &self.reminder_at)
+            .field("card_due_at", &self.card_due_at)
+            .field("digest_at", &self.digest_at)
+            .field("kinds", &self.kinds)
+            .finish()
+    }
 }
 
 impl MailConfig {
@@ -190,32 +261,16 @@ impl Config {
 
         let data_dir = PathBuf::from(var("DATA_DIR").unwrap_or_else(|| "./data".into()));
 
-        let session_days = var("SESSION_DAYS")
-            .map(|v| v.parse())
-            .transpose()
-            .context("WORKSPACE_SESSION_DAYS must be a number")?
-            .unwrap_or(30);
-
-        let max_upload_bytes = var("MAX_UPLOAD_MB")
-            .map(|v| v.parse::<usize>())
-            .transpose()
-            .context("WORKSPACE_MAX_UPLOAD_MB must be a number")?
-            .unwrap_or(1024)
-            * 1024
-            * 1024;
-
-        let vault_idle = std::time::Duration::from_secs(
-            var("VAULT_IDLE_MIN")
-                .map(|v| v.parse::<u64>())
-                .transpose()
-                .context("WORKSPACE_VAULT_IDLE_MIN must be a number")?
-                .unwrap_or(15)
-                * 60,
-        );
-
-        let secure_cookie = var("SECURE_COOKIE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+        // Ten years at most: a session is a cookie, and the expiry is
+        // arithmetic on it that must not overflow.
+        let session_days = number("SESSION_DAYS", 30, 1..=3650)? as i64;
+        // Up to a terabyte, in bytes.
+        let max_upload_bytes = usize::try_from(number("MAX_UPLOAD_MB", 1024, 1..=1024 * 1024)? * 1024 * 1024)
+            .context("WORKSPACE_MAX_UPLOAD_MB is more than this machine can address")?;
+        // A vault that locks the moment it opens could not be used; one that
+        // stays open for more than a day is not much of a vault.
+        let vault_idle = Duration::from_secs(number("VAULT_IDLE_MIN", 15, 1..=24 * 60)? * 60);
+        let secure_cookie = flag("SECURE_COOKIE")?;
 
         Ok(Self {
             username,
@@ -311,24 +366,11 @@ impl BackupConfig {
         // second device and a fresh upload of everything in it.
         let device_name = var("PROTON_DEVICE").unwrap_or_else(|| "narl-diary".to_string());
 
-        let minutes = var("BACKUP_INTERVAL_MIN")
-            .map(|v| v.parse::<u64>())
-            .transpose()
-            .context("WORKSPACE_BACKUP_INTERVAL_MIN must be a number of minutes")?
-            .unwrap_or(60);
+        // 0 turns the backstop off; a week is the longest it waits.
+        let minutes = number("BACKUP_INTERVAL_MIN", 60, 0..=7 * 24 * 60)?;
         let interval = (minutes > 0).then(|| Duration::from_secs(minutes * 60));
-
-        let debounce = Duration::from_secs(
-            var("BACKUP_DEBOUNCE_SEC")
-                .map(|v| v.parse::<u64>())
-                .transpose()
-                .context("WORKSPACE_BACKUP_DEBOUNCE_SEC must be a number of seconds")?
-                .unwrap_or(300),
-        );
-
-        let prune = var("BACKUP_PRUNE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+        let debounce = Duration::from_secs(number("BACKUP_DEBOUNCE_SEC", 300, 0..=24 * 60 * 60)?);
+        let prune = flag("BACKUP_PRUNE")?;
 
         Ok(Self {
             device_name,
@@ -342,8 +384,33 @@ impl BackupConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_digest, parse_time, TimeOfDay};
+    use super::{flag, number, parse_digest, parse_time, TimeOfDay};
     use chrono::Weekday;
+
+    /// Each case under a name of its own: tests run in parallel and share
+    /// one environment.
+    fn with(key: &str, value: &str) -> String {
+        std::env::set_var(format!("WORKSPACE_{key}"), value);
+        key.to_string()
+    }
+
+    #[test]
+    fn numbers_out_of_bounds_stop_the_start() {
+        assert_eq!(number("TEST_UNSET_NUMBER", 7, 1..=10).unwrap(), 7);
+        assert_eq!(number(&with("TEST_NUMBER_OK", " 9 "), 7, 1..=10).unwrap(), 9);
+        assert!(number(&with("TEST_NUMBER_ZERO", "0"), 7, 1..=10).is_err());
+        assert!(number(&with("TEST_NUMBER_HUGE", "99999999999999999999"), 7, 1..=10).is_err());
+        assert!(number(&with("TEST_NUMBER_NEGATIVE", "-1"), 7, 1..=10).is_err());
+    }
+
+    #[test]
+    fn a_switch_is_on_off_or_an_error() {
+        assert!(!flag("TEST_UNSET_FLAG").unwrap());
+        assert!(flag(&with("TEST_FLAG_YES", "yes")).unwrap());
+        assert!(flag(&with("TEST_FLAG_ONE", "1")).unwrap());
+        assert!(!flag(&with("TEST_FLAG_OFF", "off")).unwrap());
+        assert!(flag(&with("TEST_FLAG_TYPO", "ture")).is_err());
+    }
 
     #[test]
     fn a_time_of_day_is_read_as_written() {

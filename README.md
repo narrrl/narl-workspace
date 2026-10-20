@@ -37,7 +37,11 @@ spelling still accepted behind it, so a server configured before the rename
 keeps running untouched.
 
 `WORKSPACE_SECRET` signs the session cookie; generate one with
-`openssl rand -base64 32`. Changing it logs every device out. The database and
+`openssl rand -base64 32`. Changing it logs every device out, and so does
+changing `WORKSPACE_PASSWORD` or `:logout!`, which ends every session but
+needs no restart. A setting that is set but cannot be read — a number out of
+range, a switch that is neither on nor off — stops the start with the reason,
+rather than being taken for its default. The database and
 uploads live under `WORKSPACE_DATA_DIR` (`./data` by default) — that directory is
 the entire backup, and it is exactly what the Proton Drive mirror copies.
 
@@ -445,11 +449,14 @@ both halves.
 
 ## API
 
-Everything except the two share routes requires the session cookie.
+Everything except the login, the health check and the two share routes
+requires the session cookie. Media answers `Range` requests, so a video seeks,
+sealed or not.
 
 | method | path | purpose |
 | --- | --- | --- |
-| `POST` | `/api/login`, `/api/logout` | session |
+| `GET` | `/api/health` | public: up, and the database answers — for a supervisor |
+| `POST` | `/api/login`, `/api/logout` | session; `/api/logout?everywhere=true` ends every one |
 | `GET` | `/api/me` | current user |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
 | `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`) / create |
@@ -494,7 +501,17 @@ so a proxy must pass the `Host` header through unchanged (traefik and nginx's
 `proxy_set_header Host $host` both do). Only the upload routes accept a body as
 large as `WORKSPACE_MAX_UPLOAD_MB`; everything else stops at 16 MiB, and the
 login at 16 KiB, before anyone has proved who they are. `SIGTERM` gets in-flight
-requests eight seconds to finish, inside the ten `docker stop` waits.
+requests eight seconds to finish, inside the ten `docker stop` waits. Any
+other request that has not been answered after 30 seconds is given up on with
+a `503`, except the ones that move files around: uploads, imports, the export,
+re-sealing and a backup run.
+
+Every request is logged at `info`, path and status and time, never a query
+string, and with a share link's token and key left out. A background loop that
+panics — the mirror, the mail, the sweep, the SFTP server — is logged and
+started again rather than lost until the next restart. If
+`WORKSPACE_SESSION_KEY_FILE` cannot be read the server starts anyway with
+backups off, and `:backup` says why.
 
 ### Docker
 

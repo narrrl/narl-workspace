@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::LazyLock};
 use axum::{
     body::Body,
     extract::{multipart::Field, Multipart, Path, Query, State},
-    http::header,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -385,8 +385,45 @@ pub async fn serve(
     _: Session,
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> AppResult<Response> {
-    stream_media(&state, &id, true).await
+    stream_media(&state, &id, true, headers.get(header::RANGE)).await
+}
+
+/// The one `bytes=` range of a `Range` header, inclusive, against a file of
+/// `size` bytes. `Ok(None)` serves the whole file: no header, one that cannot
+/// be read, or several ranges — a whole file is always a valid answer.
+/// `Err` is a range that starts past the end.
+fn byte_range(header: Option<&axum::http::HeaderValue>, size: u64) -> Result<Option<(u64, u64)>, ()> {
+    let Some(spec) = header
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.trim().strip_prefix("bytes="))
+    else {
+        return Ok(None);
+    };
+    if spec.contains(',') {
+        return Ok(None);
+    }
+    let Some((from, to)) = spec.split_once('-') else {
+        return Ok(None);
+    };
+    let (from, to) = (from.trim(), to.trim());
+    let range = match (from.parse::<u64>(), to.parse::<u64>()) {
+        // `bytes=-500`: the last 500.
+        (Err(_), Ok(suffix)) if from.is_empty() => {
+            if suffix == 0 || size == 0 {
+                return Err(());
+            }
+            (size.saturating_sub(suffix), size - 1)
+        }
+        (Ok(start), Err(_)) if to.is_empty() => (start, size.saturating_sub(1)),
+        (Ok(start), Ok(end)) if start <= end => (start, end.min(size.saturating_sub(1))),
+        _ => return Ok(None),
+    };
+    if range.0 >= size {
+        return Err(());
+    }
+    Ok(Some(range))
 }
 
 pub async fn remove(
@@ -402,7 +439,12 @@ pub async fn remove(
 /// Shared by the private and the public-share media handlers. A sealed file
 /// is only ever served to the owner, and only while the vault is open — a
 /// share link is a door for strangers, and the vault is not behind it.
-pub async fn stream_media(state: &AppState, id: &str, private: bool) -> AppResult<Response> {
+pub async fn stream_media(
+    state: &AppState,
+    id: &str,
+    private: bool,
+    range: Option<&axum::http::HeaderValue>,
+) -> AppResult<Response> {
     let row = sqlx::query("SELECT mime, filename, size, encrypted FROM media WHERE id = ?1")
         .bind(id)
         .fetch_optional(&state.db)
@@ -423,18 +465,40 @@ pub async fn stream_media(state: &AppState, id: &str, private: bool) -> AppResul
         (true, true) => Some(state.vault.key().ok_or(AppError::Locked)?),
     };
 
-    let file = tokio::fs::File::open(state.config.uploads_dir().join(id))
+    let size = size.max(0) as u64;
+    // A video is seeked by asking for the bytes from a point on; without an
+    // answer to that, seeking fails, and Safari will not play it at all.
+    let (status, start, end) = match byte_range(range, size) {
+        Ok(None) => (StatusCode::OK, 0, size.saturating_sub(1)),
+        Ok(Some((start, end))) => (StatusCode::PARTIAL_CONTENT, start, end),
+        Err(()) => {
+            return Ok((
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{size}"))],
+            )
+                .into_response())
+        }
+    };
+    let length = if size == 0 { 0 } else { end - start + 1 };
+
+    let mut file = tokio::fs::File::open(state.config.uploads_dir().join(id))
         .await
         .map_err(|_| AppError::NotFound)?;
     let body = match key {
-        None => Body::from_stream(ReaderStream::new(file)),
-        Some(key) => Body::from_stream(open_stream(file, &key, id).await?),
+        None => {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            file.seek(std::io::SeekFrom::Start(start)).await?;
+            Body::from_stream(ReaderStream::new(file.take(length)))
+        }
+        Some(key) => Body::from_stream(open_stream(file, &key, id, start, length).await?),
     };
 
-    Ok((
+    let mut response = (
+        status,
         [
             (header::CONTENT_TYPE, mime),
-            (header::CONTENT_LENGTH, size.to_string()),
+            (header::CONTENT_LENGTH, length.to_string()),
+            (header::ACCEPT_RANGES, "bytes".to_string()),
             // An upload never changes under its id, so the browser may keep
             // it — unless it was sealed: the plaintext would then sit in the
             // browser's cache long after the vault had been shut.
@@ -459,34 +523,59 @@ pub async fn stream_media(state: &AppState, id: &str, private: bool) -> AppResul
         ],
         body,
     )
-        .into_response())
+        .into_response();
+    if status == StatusCode::PARTIAL_CONTENT {
+        let value = format!("bytes {start}-{end}/{size}");
+        if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+            response.headers_mut().insert(header::CONTENT_RANGE, value);
+        }
+    }
+    Ok(response)
 }
 
-/// A sealed file as a stream of its plaintext, a record at a time. The
-/// header is checked before the first byte goes out, so a file that will not
-/// open is an error response rather than a download that breaks off.
+/// A sealed file as a stream of its plaintext, a record at a time, from
+/// byte `start` for `length` bytes. A range starts at the record that holds
+/// its first byte, so seeking into a sealed video costs one record, not the
+/// whole file before it. The header is checked before the first byte goes
+/// out, so a file that will not open is an error response rather than a
+/// download that breaks off.
 async fn open_stream(
     mut file: tokio::fs::File,
     key: &vault::Key,
     id: &str,
+    start: u64,
+    length: u64,
 ) -> AppResult<impl futures_util::Stream<Item = std::io::Result<axum::body::Bytes>>> {
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     let len = file.metadata().await?.len();
     let mut header = [0u8; vault::HEADER];
     file.read_exact(&mut header).await?;
-    let opener = vault::Opener::new(key, id, &header, len)?;
+    let mut opener = vault::Opener::new(key, id, &header, len)?;
+    let first = start / vault::CHUNK as u64;
+    if first > 0 {
+        opener.skip_to(first)?;
+        file.seek(std::io::SeekFrom::Start(vault::HEADER as u64 + first * vault::RECORD as u64))
+            .await?;
+    }
+    let skip = (start - first * vault::CHUNK as u64) as usize;
 
-    Ok(futures_util::stream::try_unfold((file, opener), |(mut file, mut opener)| async move {
-        let len = opener.next_len();
-        if len == 0 {
-            return Ok(None);
-        }
-        let mut record = vec![0u8; len];
-        file.read_exact(&mut record).await?;
-        let plain = opener.open(&record).map_err(std::io::Error::other)?;
-        Ok(Some((axum::body::Bytes::from(plain), (file, opener))))
-    }))
+    Ok(futures_util::stream::try_unfold(
+        (file, opener, skip, length),
+        |(mut file, mut opener, skip, left)| async move {
+            let len = opener.next_len();
+            if len == 0 || left == 0 {
+                return Ok(None);
+            }
+            let mut record = vec![0u8; len];
+            file.read_exact(&mut record).await?;
+            let plain = opener.open(&record).map_err(std::io::Error::other)?;
+            let piece = &plain[skip.min(plain.len())..];
+            let piece = &piece[..piece.len().min(usize::try_from(left).unwrap_or(usize::MAX))];
+            let left = left - piece.len() as u64;
+            Ok(Some((axum::body::Bytes::copy_from_slice(piece), (file, opener, 0, left))))
+        },
+    ))
 }
 
 /// The id as it is stored and as it names the file on disk, or `None` for
@@ -627,7 +716,22 @@ fn urlencode(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_id, sanitize_mime};
+    use super::{byte_range, canonical_id, sanitize_mime};
+
+    #[test]
+    fn ranges_are_read_the_way_browsers_send_them() {
+        let range = |raw: &'static str| byte_range(Some(&axum::http::HeaderValue::from_static(raw)), 1000);
+        assert_eq!(byte_range(None, 1000), Ok(None));
+        assert_eq!(range("bytes=0-"), Ok(Some((0, 999))));
+        assert_eq!(range("bytes=100-199"), Ok(Some((100, 199))));
+        assert_eq!(range("bytes=900-5000"), Ok(Some((900, 999))));
+        assert_eq!(range("bytes=-100"), Ok(Some((900, 999))));
+        assert_eq!(range("bytes=1000-"), Err(()));
+        // Not understood, or several at once: the whole file is the answer.
+        assert_eq!(range("bytes=0-1,5-9"), Ok(None));
+        assert_eq!(range("items=0-1"), Ok(None));
+        assert_eq!(range("bytes=9-1"), Ok(None));
+    }
 
     #[test]
     fn only_a_uuid_is_an_id() {

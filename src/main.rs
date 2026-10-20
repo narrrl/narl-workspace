@@ -11,6 +11,7 @@ mod sftp;
 mod state;
 mod static_files;
 mod sweep;
+mod tasks;
 mod throttle;
 mod vault;
 
@@ -23,7 +24,9 @@ use sqlx::sqlite::{
 };
 use axum::http::{header, HeaderValue};
 use tower_http::{
-    compression::CompressionLayer, set_header::SetResponseHeaderLayer, trace::TraceLayer,
+    compression::CompressionLayer,
+    set_header::SetResponseHeaderLayer,
+    trace::{DefaultOnResponse, TraceLayer},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -106,7 +109,14 @@ async fn main() -> Result<()> {
     let bind = config.bind;
     let max_upload = config.max_upload_bytes;
     let config = Arc::new(config);
-    let backup = backup::Backup::new(db.clone(), Arc::clone(&config))?;
+    let backup = match backup::Backup::new(db.clone(), Arc::clone(&config)) {
+        Ok(backup) => backup,
+        Err(e) => {
+            let reason = format!("{e:#}");
+            tracing::error!("Proton Drive backups are off: {reason}");
+            backup::Backup::unavailable(db.clone(), Arc::clone(&config), reason)
+        }
+    };
     backup::spawn(Arc::clone(&backup));
 
     let notify = notify::Notifier::new(db.clone(), Arc::clone(&config))?;
@@ -114,6 +124,7 @@ async fn main() -> Result<()> {
 
     sweep::spawn(db.clone(), config.uploads_dir());
 
+    let epoch = auth::Epoch::load(&db, &config).await?;
     let vault = vault::Vault::new(db.clone(), config.vault_idle);
     vault.spawn_idle_lock();
     let state = AppState {
@@ -124,13 +135,20 @@ async fn main() -> Result<()> {
         vault_throttle: Arc::default(),
         backup,
         notify,
+        epoch: Arc::new(std::sync::atomic::AtomicI64::new(epoch)),
     };
 
     if let Some(sftp_bind) = config.sftp.bind {
         let sftp_state = state.clone();
-        tokio::spawn(async move {
-            if let Err(e) = sftp::serve(sftp_state, sftp_bind).await {
-                tracing::error!("sftp server stopped: {e:#}");
+        tasks::supervise("the sftp server", move || {
+            let state = sftp_state.clone();
+            async move {
+                // A port that is taken now may be free in a minute; the web
+                // side carries on either way.
+                while let Err(e) = sftp::serve(state.clone(), sftp_bind).await {
+                    tracing::error!("sftp server stopped: {e:#}; trying again in a minute");
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                }
             }
         });
     }
@@ -222,9 +240,21 @@ async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -
         .nest("/api", routes::api_router(max_upload))
         .fallback(static_files::handler)
         .layer(axum::middleware::from_fn(auth::same_origin))
-        .layer(CompressionLayer::new())
+        .layer(axum::middleware::from_fn(deadline))
+        .layer(CompressionLayer::new().compress_when(compressible))
         .layer(security_headers())
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<axum::body::Body>| {
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        path = %loggable(request.uri().path()),
+                    )
+                })
+                .on_request(())
+                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind)
@@ -250,8 +280,89 @@ async fn serve(bind: std::net::SocketAddr, max_upload: usize, state: AppState) -
     Ok(())
 }
 
+/// How long an ordinary request may take to be answered. A request that takes
+/// this long is stuck — waiting on a lock it will not get — and is better
+/// answered with an error than left hanging.
+const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Requests that take as long as the bytes do: uploads, imports, re-sealing,
+/// a backup run, the export. Only the time to the first byte of a response is
+/// bounded anyway, so a long download of a file is never cut off.
+fn is_slow(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    match *method {
+        Method::POST => {
+            path == "/api/media"
+                || path == "/api/import"
+                || path == "/api/backup"
+                || path.ends_with("/import")
+                || path.ends_with("/files")
+                || path.ends_with("/encrypt")
+                || path.ends_with("/decrypt")
+        }
+        Method::GET => path == "/api/export",
+        _ => false,
+    }
+}
+
+async fn deadline(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if is_slow(request.method(), request.uri().path()) {
+        return next.run(request).await;
+    }
+    let path = loggable(request.uri().path()).to_string();
+    match tokio::time::timeout(REQUEST_DEADLINE, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => {
+            tracing::error!("{path} took longer than {REQUEST_DEADLINE:?} and was given up on");
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({ "error": "the server took too long — try again" })),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Below the ten seconds `docker stop` waits before it sends SIGKILL.
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// A request path as it may go into the log: a share link's token and key are
+/// the whole of its secret, and the key is kept out of every log on purpose —
+/// it travels in the URL fragment so that no server ever sees it, except this
+/// one's API, which must not write it down either. Query strings, which carry
+/// search terms, are never logged at all.
+fn loggable(path: &str) -> &str {
+    if path.starts_with("/api/share/") {
+        "/api/share/…"
+    } else if path.starts_with("/s/") {
+        "/s/…"
+    } else {
+        path
+    }
+}
+
+/// Text is worth compressing; uploads are not. Media is already compressed,
+/// and a compressed body no longer matches the byte ranges a video player
+/// asks for, so nothing that answers a range — or could — is touched.
+fn compressible(
+    status: axum::http::StatusCode,
+    _: axum::http::Version,
+    headers: &axum::http::HeaderMap,
+    _: &axum::http::Extensions,
+) -> bool {
+    if status == axum::http::StatusCode::PARTIAL_CONTENT || headers.contains_key(header::ACCEPT_RANGES) {
+        return false;
+    }
+    let kind = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    kind.starts_with("text/")
+        || kind.starts_with("application/json")
+        || kind.starts_with("application/javascript")
+        || kind.starts_with("image/svg+xml")
+}
 
 /// Content-Security-Policy for the app shell. `unsafe-inline` is granted to
 /// styles only, because CodeMirror injects its theme as a <style> element at

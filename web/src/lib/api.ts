@@ -201,7 +201,9 @@ export const api = {
   login: (username: string, password: string) =>
     request<{ user: string }>('/login', { method: 'POST', body: body({ username, password }) }),
 
-  logout: () => request<{ ok: true }>('/logout', { method: 'POST' }),
+  /** `everywhere`: every device's session ends, not only this one. */
+  logout: (everywhere = false) =>
+    request<{ ok: true }>(`/logout${everywhere ? '?everywhere=true' : ''}`, { method: 'POST' }),
 
   listSpaces: () => request<NodeSummary[]>('/spaces'),
 

@@ -62,6 +62,10 @@ russh-sftp = "3"
 # speaks rand_core 0.10, one major version past the `rand` used everywhere else.
 rand10 = { package = "rand", version = "0.10" }
 
+[dev-dependencies]
+# A paused clock, so tests of timed loops do not wait in real time.
+tokio = { version = "1", features = ["test-util"] }
+
 [features]
 default = []
 # Keep the Proton session in the OS keyring instead of a 0600 file. Needs a

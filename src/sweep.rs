@@ -19,7 +19,14 @@ const UNREFERENCED_DAYS: i64 = 7;
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf) {
-    tokio::spawn(async move {
+    crate::tasks::supervise("the uploads sweep", move || {
+        let (db, uploads) = (db.clone(), uploads.clone());
+        sweep_forever(db, uploads)
+    });
+}
+
+async fn sweep_forever(db: SqlitePool, uploads: std::path::PathBuf) {
+    {
         let mut ticker = tokio::time::interval(EVERY);
         loop {
             ticker.tick().await;
@@ -34,7 +41,7 @@ pub fn spawn(db: SqlitePool, uploads: std::path::PathBuf) {
                 Err(e) => tracing::warn!("could not sweep uploads: {e:#}"),
             }
         }
-    });
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]

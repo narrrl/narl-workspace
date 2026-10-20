@@ -400,8 +400,8 @@ class Workspace {
     await this.openAgendaIfDue()
   }
 
-  async logout() {
-    await api.logout()
+  async logout(everywhere = false) {
+    await api.logout(everywhere)
     this.user = null
     this.vault = null
     this.spaces = []

@@ -879,6 +879,10 @@ export const commands: CommandSpec[] = [
     group: 'view',
     help: 'end the session',
     run: () => workspace.guard(() => workspace.logout()),
+    bang: {
+      help: 'end every session, on every device — for a lost phone or a shared computer',
+      run: () => workspace.guard(() => workspace.logout(true)),
+    },
   },
 ]
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicI64, Arc};
 
 use sqlx::SqlitePool;
 
@@ -18,4 +18,7 @@ pub struct AppState {
     pub backup: Arc<Backup>,
     /// Notification mail. Always present; dormant until WORKSPACE_SMTP_URL is set.
     pub notify: Arc<Notifier>,
+    /// Signed into every session cookie, which must carry the current value
+    /// to be accepted; see [`crate::auth::Epoch`].
+    pub epoch: Arc<AtomicI64>,
 }

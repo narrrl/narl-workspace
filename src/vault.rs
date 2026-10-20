@@ -42,7 +42,7 @@ use std::{
 
 use aes_gcm::{
     aead::{
-        stream::{DecryptorBE32, EncryptorBE32},
+        stream::{EncryptorBE32, NewStream, StreamBE32, StreamPrimitive},
         Aead, KeyInit, Payload,
     },
     Aes256Gcm, Nonce,
@@ -57,7 +57,8 @@ pub const MAGIC: &[u8; 8] = b"NARLVLT1";
 /// small enough to hold one in memory per open download.
 pub const CHUNK: usize = 64 * 1024;
 const TAG: usize = 16;
-const RECORD: usize = CHUNK + TAG;
+/// A record on disk: a chunk of plaintext and its tag.
+pub const RECORD: usize = CHUNK + TAG;
 const WRAP_NONCE: usize = 12;
 const STREAM_NONCE: usize = 7;
 pub const HEADER: usize = MAGIC.len() + WRAP_NONCE + 32 + TAG + STREAM_NONCE;
@@ -185,11 +186,15 @@ fn file_aad(media_id: &str) -> Vec<u8> {
     aad
 }
 
-/// Decrypts one sealed file, a record at a time.
+/// Decrypts one sealed file, a record at a time, from the first or from any
+/// record a range asks to start at.
 pub struct Opener {
-    stream: Option<DecryptorBE32<Aes256Gcm>>,
-    /// Records still to come, the last of them included.
-    remaining: u64,
+    stream: StreamBE32<Aes256Gcm>,
+    /// The record `open` decrypts next. STREAM binds each record to its
+    /// position, so one moved within the file refuses to open.
+    position: u32,
+    /// Records in the file, the last of them included.
+    total: u64,
     /// The size of the last record, which is the only short one.
     last: usize,
 }
@@ -222,35 +227,46 @@ impl Opener {
                 )
                 .map_err(|_| anyhow!("this file was not sealed under this vault, or not as {media_id}"))?,
         );
-        let stream = DecryptorBE32::from_aead(
+        let stream = StreamBE32::from_aead(
             Aes256Gcm::new(file_key.as_slice().into()),
             stream_nonce.into(),
         );
-        Ok(Self { stream: Some(stream), remaining, last })
+        Ok(Self { stream, position: 0, total: remaining, last })
     }
 
     /// How many bytes the next record takes on disk; 0 once all are read.
     pub fn next_len(&self) -> usize {
-        match self.remaining {
+        match self.total.saturating_sub(self.position as u64) {
             0 => 0,
             1 => self.last,
             _ => RECORD,
         }
     }
 
+    /// Start at record `index` instead of the first — at byte
+    /// `HEADER + index * RECORD` of the file — for a read that wants only the
+    /// end of it.
+    pub fn skip_to(&mut self, index: u64) -> Result<()> {
+        if index >= self.total {
+            return Err(anyhow!("past the end of the sealed file"));
+        }
+        self.position = u32::try_from(index).map_err(|_| anyhow!("sealed file is too large"))?;
+        Ok(())
+    }
+
     /// Decrypt the record `next_len` asked for.
     pub fn open(&mut self, record: &[u8]) -> Result<Vec<u8>> {
-        let stream = self.stream.as_mut().ok_or_else(|| anyhow!("sealed file already read"))?;
-        let plain = if self.remaining == 1 {
-            self.stream
-                .take()
-                .expect("present: checked above")
-                .decrypt_last(record)
-        } else {
-            stream.decrypt_next(record)
+        let left = self.total.saturating_sub(self.position as u64);
+        if left == 0 {
+            return Err(anyhow!("sealed file already read"));
         }
-        .map_err(|_| anyhow!("sealed file is damaged or was tampered with"))?;
-        self.remaining -= 1;
+        // Only the record that really is the last may be opened as last, so
+        // a file cut short at a record boundary still refuses to open.
+        let plain = self
+            .stream
+            .decrypt(self.position, left == 1, record)
+            .map_err(|_| anyhow!("sealed file is damaged or was tampered with"))?;
+        self.position += 1;
         Ok(plain)
     }
 }
@@ -585,6 +601,33 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(30));
         vault.expire();
         assert!(vault.slot().is_none());
+    }
+
+    /// Reading from record `k` on gives exactly the plaintext from
+    /// `k * CHUNK` on, and the last record still has to be the last.
+    #[test]
+    fn a_sealed_file_opens_from_any_record() {
+        let master = key(3);
+        let plain: Vec<u8> = (0..3 * CHUNK + 17).map(|i| (i % 249) as u8).collect();
+        let sealed = seal(&master, "id", &plain, CHUNK);
+        for first in 0..4u64 {
+            let mut opener = Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
+            opener.skip_to(first).unwrap();
+            let mut at = HEADER + first as usize * super::RECORD;
+            let mut out = Vec::new();
+            while opener.next_len() > 0 {
+                let len = opener.next_len();
+                out.extend(opener.open(&sealed[at..at + len]).unwrap());
+                at += len;
+            }
+            assert_eq!(out, plain[first as usize * CHUNK..], "from record {first}");
+        }
+        let mut opener = Opener::new(&master, "id", &sealed[..HEADER], sealed.len() as u64).unwrap();
+        assert!(opener.skip_to(4).is_err());
+        // A middle record presented where the last one should be does not open.
+        opener.skip_to(3).unwrap();
+        let middle = &sealed[HEADER + super::RECORD..HEADER + 2 * super::RECORD];
+        assert!(opener.open(&middle[..opener.next_len()]).is_err());
     }
 
     #[test]

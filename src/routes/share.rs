@@ -155,6 +155,7 @@ pub async fn read(
 pub async fn serve_media(
     State(state): State<AppState>,
     Path((token, key, id)): Path<(String, String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> AppResult<Response> {
     let stored: Option<String> = sqlx::query(
         "SELECT n.share_key_hash
@@ -171,7 +172,7 @@ pub async fn serve_media(
     if !key_matches(stored.as_deref(), &key) {
         return Err(AppError::NotFound);
     }
-    media::stream_media(&state, &id, false).await
+    media::stream_media(&state, &id, false, headers.get(axum::http::header::RANGE)).await
 }
 
 #[cfg(test)]

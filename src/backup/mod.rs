@@ -62,16 +62,34 @@ pub struct Backup {
     /// Held for the duration of a run, so a manual backup and the timer cannot
     /// upload the same snapshot twice at once.
     running: tokio::sync::Mutex<()>,
+    /// Why backups cannot run at all — a session key file that is configured
+    /// but unreadable — when that is so. The server still starts; the mirror
+    /// says why it is off, every time it is asked.
+    disabled: Option<String>,
 }
 
 impl Backup {
     pub fn new(db: SqlitePool, config: Arc<Config>) -> Result<Arc<Self>> {
         let store = SessionStore::open(&config)?;
-        let configured = matches!(store.load(), Ok(Some(_)));
-        Ok(Arc::new(Self {
+        Ok(Self::with_store(db, config, store, None))
+    }
+
+    /// A mirror that is off for `reason`, for a server that should start
+    /// anyway: backups are worth a loud error, not an outage of the workspace.
+    pub fn unavailable(db: SqlitePool, config: Arc<Config>, reason: String) -> Arc<Self> {
+        let store = SessionStore::new(config.proton_session_path());
+        let backup = Self::with_store(db, config, store, Some(reason.clone()));
+        backup.set(|s| s.last_error = Some(reason));
+        backup
+    }
+
+    fn with_store(db: SqlitePool, config: Arc<Config>, store: SessionStore, disabled: Option<String>) -> Arc<Self> {
+        let configured = disabled.is_none() && matches!(store.load(), Ok(Some(_)));
+        Arc::new(Self {
             db,
             config,
             store,
+            disabled,
             wake: Notify::new(),
             // The workspace may have been written to while this process was down,
             // and a restart is the cheapest moment to find out.
@@ -81,11 +99,11 @@ impl Backup {
                 ..Status::default()
             }),
             running: tokio::sync::Mutex::new(()),
-        }))
+        })
     }
 
     pub fn status(&self) -> Status {
-        let mut status = self.status.lock().expect("backup status mutex poisoned").clone();
+        let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
         status.pending = self.dirty.load(Ordering::Relaxed);
         status
     }
@@ -100,7 +118,20 @@ impl Backup {
     /// session has been stored — asking an unconfigured backup to run is a
     /// no-op, not a failure.
     pub async fn run_now(&self) -> Result<Option<Summary>> {
+        if let Some(reason) = &self.disabled {
+            anyhow::bail!("backups are off: {reason}");
+        }
         let _guard = self.running.lock().await;
+        // The same, across processes: `backup-now` beside a running server
+        // would otherwise share the snapshot file and the bookkeeping with it.
+        let _lock = match self.lock_data_dir() {
+            Ok(lock) => lock,
+            Err(e) => {
+                let message = format!("{e:#}");
+                self.set(move |s| s.last_error = Some(message));
+                return Err(e);
+            }
+        };
         self.dirty.store(false, Ordering::Relaxed);
         self.set(|s| {
             s.running = true;
@@ -143,6 +174,23 @@ impl Backup {
         }
 
         outcome
+    }
+
+    fn lock_data_dir(&self) -> Result<std::fs::File> {
+        let path = self.config.data_dir.join(".backup.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("could not open {}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                anyhow::bail!("another backup of this data directory is running — `backup-now` and the server take turns")
+            }
+            Err(std::fs::TryLockError::Error(e)) => Err(e).context("could not lock the data directory for a backup"),
+        }
     }
 
     async fn mirror(&self) -> Result<Option<Summary>> {
@@ -285,50 +333,63 @@ impl Backup {
     }
 
     fn set(&self, edit: impl FnOnce(&mut Status)) {
-        let mut status = self.status.lock().expect("backup status mutex poisoned");
+        let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner());
         edit(&mut status);
     }
 }
 
-/// Run the mirror in the background for as long as the server lives.
+/// Run the mirror in the background for as long as the server lives. With
+/// no Proton session yet it waits for one: `proton-login` is a separate
+/// process, and the server picks its session up without a restart.
 pub fn spawn(backup: Arc<Backup>) {
     if backup.store.load().ok().flatten().is_none() {
         tracing::info!(
             "Proton Drive backups are not configured — run `narl-workspace proton-login` to enable them"
         );
+    }
+    crate::tasks::supervise("the backup", move || mirror_forever(Arc::clone(&backup)));
+}
+
+async fn mirror_forever(backup: Arc<Backup>) {
+    if backup.disabled.is_some() {
         return;
     }
+    let interval = backup.config.backup.interval;
+    let debounce = backup.config.backup.debounce;
 
-    tokio::spawn(async move {
-        let interval = backup.config.backup.interval;
-        let debounce = backup.config.backup.debounce;
-
-        loop {
-            // Nothing to do: wait for a change, or for the backstop timer.
-            while !backup.dirty.load(Ordering::Relaxed) {
-                match interval {
-                    Some(interval) => {
-                        tokio::select! {
-                            _ = backup.wake.notified() => {}
-                            _ = tokio::time::sleep(interval) => break,
-                        }
-                    }
-                    None => backup.wake.notified().await,
-                }
+    loop {
+        if backup.store.load().ok().flatten().is_none() {
+            tokio::select! {
+                _ = backup.wake.notified() => {}
+                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
             }
-
-            // Let the workspace fall quiet. Every further change restarts the wait,
-            // so a writing session is mirrored once, when it is over.
-            loop {
-                tokio::select! {
-                    _ = backup.wake.notified() => continue,
-                    _ = tokio::time::sleep(debounce) => break,
-                }
-            }
-
-            let _ = backup.run_now().await;
+            continue;
         }
-    });
+
+        // Nothing to do: wait for a change, or for the backstop timer.
+        while !backup.dirty.load(Ordering::Relaxed) {
+            match interval {
+                Some(interval) => {
+                    tokio::select! {
+                        _ = backup.wake.notified() => {}
+                        _ = tokio::time::sleep(interval) => break,
+                    }
+                }
+                None => backup.wake.notified().await,
+            }
+        }
+
+        // Let the workspace fall quiet. Every further change restarts the wait,
+        // so a writing session is mirrored once, when it is over.
+        loop {
+            tokio::select! {
+                _ = backup.wake.notified() => continue,
+                _ = tokio::time::sleep(debounce) => break,
+            }
+        }
+
+        let _ = backup.run_now().await;
+    }
 }
 
 /// One-shot mirror for `narl-workspace backup-now`, without starting a server.
