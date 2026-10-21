@@ -3,7 +3,7 @@
   import { carry, into, release } from './carry'
   import Icon from './Icon.svelte'
   import { workspace } from './store.svelte'
-  import { formatBytes, formatDay, formatTime, formatWeekday, isTouchDevice } from './util'
+  import { formatBytes, formatDay, formatTime, formatWeekday, hitParts, isTouchDevice } from './util'
 
   let list = $state<HTMLUListElement>()
   /** Files are being dragged over the list, which takes them into this folder. */
@@ -130,7 +130,7 @@
           <span class="title">
             {label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}
             {#if workspace.query && node.location}<span class="where">{node.location}</span>{/if}
-            {#if workspace.query && node.in_text}<span class="hit" title="found in the file's text">{node.excerpt}</span>{/if}
+            {#if workspace.query && node.in_text}<span class="hit" title="found in the file's text">{#each hitParts(node.excerpt) as part, at (at)}{#if part.lit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>{/if}
           </span>
           {#if workspace.isMarked(node.id)}<span class="badge" title="marked — p drops what is marked in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
@@ -270,6 +270,8 @@
     color: var(--muted);
   }
   .row.active .hit { color: var(--ink); }
+  .hit mark { background: none; color: var(--light); }
+  .row.active .hit mark { color: var(--ink); font-weight: 700; }
   .aside { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .badge { flex: none; font-size: 11px; font-weight: 700; color: var(--light-dim); }
   .shared {

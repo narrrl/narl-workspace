@@ -507,7 +507,7 @@ limit at least that large too.
 of every file that is text — by its type, or by its first 8 KiB reading as
 UTF-8 without a NUL — is indexed, up to its first 256 KiB, the same part the
 viewer shows. A file found that way lists the words around the match under its
-name. The text is read when a file arrives, by upload, import or the SFTP
+name, the words that matched lit. The text is read when a file arrives, by upload, import or the SFTP
 mount, again when its bytes change, and at start for any file still without
 it. PDFs, office documents and images are not read.
 
@@ -848,7 +848,7 @@ sealed or not.
 | `GET` | `/api/sessions` | every signed-in browser, the one seen last first |
 | `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
-| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`; a file matched by its text has `in_text` and the words around the match as `excerpt`) / create, from a template with `template_id` |
+| `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`; a file matched by its text has `in_text` and the words around the match as `excerpt`, each matched word between U+0002 and U+0003) / create, from a template with `template_id` |
 | `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update only the fields sent — `name`, `body`, `created_at`, `has_board`; with `base_updated_at`, refused with `409` once it was saved since / delete into the trash, subtree and all — or for good, for something already in it |
 | `GET`/`DELETE` | `/api/trash` | what was deleted, the last first / empty it |
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |

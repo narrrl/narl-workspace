@@ -79,7 +79,9 @@ pub struct NodeSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
     /// Search results only: a file found by what it says rather than by its
-    /// name, with the words around the match as its excerpt.
+    /// name, with the words around the match as its excerpt — each word that
+    /// matched between U+0002 and U+0003, which no text file has a use for,
+    /// for the client to light.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub in_text: bool,
 }
@@ -580,7 +582,7 @@ pub async fn list(
                  hits (id, rank, snippet) AS (
                      SELECT rowid, rank, NULL FROM nodes_fts WHERE nodes_fts MATCH ?1
                      UNION ALL
-                     SELECT rowid, rank, snippet(files_fts, 0, '', '', '…', 16)
+                     SELECT rowid, rank, snippet(files_fts, 0, char(2), char(3), '…', 16)
                      FROM files_fts WHERE files_fts MATCH ?1
                  ),
                  best AS (

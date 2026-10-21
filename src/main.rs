@@ -155,7 +155,7 @@ async fn main() -> Result<()> {
     // first start, so the server does not wait for it.
     let (db, uploads) = (state.db.clone(), config.uploads_dir());
     tokio::spawn(async move {
-        match routes::file_text::catch_up(&db, &uploads).await {
+        match routes::file_text::catch_up(&db, &uploads, None).await {
             Ok(0) => {}
             Ok(read) => tracing::info!("read {read} files for search"),
             Err(e) => tracing::warn!("could not index files for search: {e:?}"),

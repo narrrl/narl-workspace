@@ -985,7 +985,7 @@ impl SpaceFs {
             let _ = tokio::fs::remove_file(self.uploads.join(&media_id)).await;
             return Err(StatusCode::Failure);
         }
-        file_text::refresh(&self.db, &self.uploads).await;
+        file_text::refresh(&self.db, &self.uploads, Some(parent)).await;
         self.changed();
         Ok(())
     }

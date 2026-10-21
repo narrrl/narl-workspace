@@ -346,3 +346,19 @@ export function hardWrapped(paragraph: string): boolean {
   const sentences = body.filter((line) => /[.!?:;]$/.test(line)).length
   return fits && sentences <= Math.floor((body.length - 1) / 3)
 }
+
+/**
+ * A search excerpt cut into what to draw plainly and what to light: the
+ * server puts each matched word between U+0002 and U+0003. A cut through the
+ * middle of a match leaves an opening without its close, lit to the end.
+ */
+export function hitParts(excerpt: string): { text: string; lit: boolean }[] {
+  const parts: { text: string; lit: boolean }[] = []
+  let lit = false
+  for (const piece of excerpt.split(/([\u0002\u0003])/)) {
+    if (piece === '\u0002') lit = true
+    else if (piece === '\u0003') lit = false
+    else if (piece) parts.push({ text: piece, lit })
+  }
+  return parts
+}

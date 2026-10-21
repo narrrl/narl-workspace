@@ -250,7 +250,7 @@ async fn reseal(state: &AppState, id: i64, seal: bool) -> AppResult<Resealed> {
     if files > 0 {
         // Sealing dropped the text with the old bytes; opened, it is read again.
         if !seal {
-            file_text::refresh(&state.db, &state.config.uploads_dir()).await;
+            file_text::refresh(&state.db, &state.config.uploads_dir(), Some(id)).await;
         }
         state.backup.signal();
     }

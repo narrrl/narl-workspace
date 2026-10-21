@@ -68,7 +68,7 @@ A search reads the text files in the tree as well as the documents. A file
 counts as text by its type, or when its first 8 KiB read as UTF-8 with no NUL
 byte, which covers `.log` files and Makefiles. The first 256 KiB of each is
 indexed, the same part the viewer shows. A file found by its text shows the
-words around the match under its name.
+words around the match under its name, with the words that matched lit.
 
 The text is read when a file arrives, by upload, import or the SFTP mount,
 again when its bytes change, and at start for any file still missing it. PDFs,

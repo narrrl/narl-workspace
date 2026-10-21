@@ -559,7 +559,11 @@ async fn run(state: &AppState, into: Into, multipart: Multipart) -> AppResult<Im
     }
 
     let report = result?;
-    file_text::refresh(&state.db, &state.config.uploads_dir()).await;
+    let under = match &into {
+        Into::Node(node) => Some(node.id),
+        Into::Root => None,
+    };
+    file_text::refresh(&state.db, &state.config.uploads_dir(), under).await;
     state.backup.signal();
     Ok(report)
 }

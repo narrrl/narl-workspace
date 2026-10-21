@@ -3,9 +3,11 @@
 //! A file's bytes live in `uploads/`, out of reach of SQLite's full-text
 //! index, so the text of the ones that are text is copied into `file_text`
 //! beside them. There is one way in, [`catch_up`]: it reads every file that
-//! has no row yet. Whatever puts a file in the tree — an upload, an import, an
-//! SFTP save, a decrypt — calls it once its own transaction is done, and the
-//! server calls it at start for anything that slipped past. The triggers of
+//! has no row yet, in the part of the tree it is pointed at. Whatever puts a
+//! file in the tree — an upload, an import, an SFTP save, a decrypt — calls it
+//! for the folder it wrote into once its own transaction is done, and the
+//! server calls it for the whole tree at start, for anything that slipped
+//! past. The triggers of
 //! 0024 take care of the other direction: new bytes or sealing drop the row,
 //! and a sealed file never gets one.
 //!
@@ -72,17 +74,28 @@ fn utf8_but_for_a_cut(bytes: &[u8]) -> bool {
     }
 }
 
-/// Read every unsealed file in the tree that has no row yet. Returns how many
-/// were read. A file whose bytes are missing is skipped and asked about again
-/// next time; one that is not text gets an empty row and is not.
-pub async fn catch_up(db: &SqlitePool, uploads: &Path) -> AppResult<usize> {
+/// Read every unsealed file that has no row yet: at or under `under`, or in
+/// the whole tree when it is `None`. Returns how many were read. A file whose
+/// bytes are missing is skipped and asked about again next time; one that is
+/// not text gets an empty row and is not. A write asks only about where it
+/// wrote, so an upload into one folder does not walk every file there is.
+pub async fn catch_up(db: &SqlitePool, uploads: &Path, under: Option<i64>) -> AppResult<usize> {
     let missing = sqlx::query(
         "SELECT n.id, n.media_id, m.mime
          FROM nodes n
          JOIN media m ON m.id = n.media_id
          LEFT JOIN file_text t ON t.node_id = n.id
-         WHERE n.kind = 'file' AND m.encrypted = 0 AND t.node_id IS NULL",
+         WHERE n.kind = 'file' AND m.encrypted = 0 AND t.node_id IS NULL
+           AND (?1 IS NULL OR n.id IN (
+               WITH RECURSIVE sub (id) AS (
+                   SELECT ?1
+                   UNION ALL
+                   SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id
+               )
+               SELECT id FROM sub
+           ))",
     )
+    .bind(under)
     .fetch_all(db)
     .await?;
 
@@ -122,8 +135,8 @@ pub async fn catch_up(db: &SqlitePool, uploads: &Path) -> AppResult<usize> {
 /// [`catch_up`] after a write, where a failure is worth a line in the log
 /// but not the write's answer: the file is there either way, and the next
 /// start reads it.
-pub async fn refresh(db: &SqlitePool, uploads: &Path) {
-    if let Err(e) = catch_up(db, uploads).await {
+pub async fn refresh(db: &SqlitePool, uploads: &Path, under: Option<i64>) {
+    if let Err(e) = catch_up(db, uploads, under).await {
         tracing::warn!("could not index files for search: {e:?}");
     }
 }
@@ -235,13 +248,13 @@ mod tests {
         .await;
 
         assert_eq!(
-            catch_up(&state.db, &state.config.uploads_dir())
+            catch_up(&state.db, &state.config.uploads_dir(), None)
                 .await
                 .unwrap(),
             2
         );
         assert_eq!(
-            catch_up(&state.db, &state.config.uploads_dir())
+            catch_up(&state.db, &state.config.uploads_dir(), None)
                 .await
                 .unwrap(),
             0
@@ -250,7 +263,7 @@ mod tests {
         assert_eq!(hits.len(), 1);
         let (name, in_text, excerpt) = &hits[0];
         assert_eq!((name.as_str(), *in_text), ("notes.txt", true));
-        assert!(excerpt.contains("otter sleeps"), "{excerpt}");
+        assert!(excerpt.contains("\u{2}otter\u{3} sleeps"), "{excerpt}");
         // Found by its name, it is not marked.
         assert!(!found(&state, "notes").await[0].1);
 
@@ -263,6 +276,39 @@ mod tests {
         assert!(found(&state, "otter").await.is_empty());
     }
 
+    /// After a write only the folder written into is read; the rest waits
+    /// for the pass at start.
+    #[tokio::test]
+    async fn a_write_reads_only_where_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = crate::routes::tests::state_in(dir.path().into()).await;
+        std::fs::create_dir_all(state.config.uploads_dir()).unwrap();
+        let notes = file(&state, "notes.txt", b"the otter sleeps", false).await;
+        let space: i64 = sqlx::query_scalar("SELECT parent_id FROM nodes WHERE id = ?1")
+            .bind(notes)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let elsewhere: i64 = sqlx::query_scalar(
+            "SELECT id FROM nodes WHERE parent_id IS NULL AND id <> ?1 AND role IS NULL LIMIT 1",
+        )
+        .bind(space)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        let uploads = state.config.uploads_dir();
+
+        assert_eq!(
+            catch_up(&state.db, &uploads, Some(elsewhere))
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(found(&state, "otter").await.is_empty());
+        assert_eq!(catch_up(&state.db, &uploads, Some(space)).await.unwrap(), 1);
+        assert_eq!(found(&state, "otter").await.len(), 1);
+    }
+
     /// A sealed file is never read, a file that gets sealed drops out at
     /// once, and the trigger refuses its text whatever tries to store it.
     #[tokio::test]
@@ -272,7 +318,7 @@ mod tests {
         std::fs::create_dir_all(state.config.uploads_dir()).unwrap();
         file(&state, "secret.txt", b"badger plans", true).await;
         let open = file(&state, "open.txt", b"heron plans", false).await;
-        catch_up(&state.db, &state.config.uploads_dir())
+        catch_up(&state.db, &state.config.uploads_dir(), None)
             .await
             .unwrap();
         assert!(found(&state, "badger").await.is_empty());
@@ -299,7 +345,7 @@ mod tests {
             .unwrap();
         assert!(found(&state, "heron").await.is_empty());
         assert_eq!(
-            catch_up(&state.db, &state.config.uploads_dir())
+            catch_up(&state.db, &state.config.uploads_dir(), None)
                 .await
                 .unwrap(),
             0
@@ -323,7 +369,7 @@ mod tests {
         let uploads = state.config.uploads_dir();
         std::fs::create_dir_all(&uploads).unwrap();
         let id = file(&state, "todo.md", b"buy lentils", false).await;
-        catch_up(&state.db, &uploads).await.unwrap();
+        catch_up(&state.db, &uploads, None).await.unwrap();
 
         std::fs::write(uploads.join("v2"), b"buy chickpeas").unwrap();
         sqlx::query(
@@ -338,7 +384,7 @@ mod tests {
             .await
             .unwrap();
         assert!(found(&state, "lentils").await.is_empty());
-        catch_up(&state.db, &uploads).await.unwrap();
+        catch_up(&state.db, &uploads, None).await.unwrap();
         assert_eq!(found(&state, "chickpeas").await.len(), 1);
     }
 }
