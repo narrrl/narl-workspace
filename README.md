@@ -302,6 +302,8 @@ the agenda kept up so `:repeat` acts on the card, `H` / `L` send it to
 the list left / right on its board, and `T` writes today's entry. The bar shows `late` and `today` counts
 whenever either is above zero, and the agenda opens by itself once a day when
 something is late or due, so nothing has to be remembered to be looked at.
+The day is the one in `WORKSPACE_TIMEZONE`, as for the mails, so a browser on a
+trip groups the cards the same way.
 Below the cards it lists what the diary holds from this day in earlier years;
 `j` walks on into them and `Enter` opens one. A 29 February is remembered on
 the 28th in the years that have none.
@@ -846,7 +848,7 @@ sealed or not.
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |
 | `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
-| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, and its entries `on_this_day` in earlier years |
+| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, its entries `on_this_day` in earlier years, and `today` in `WORKSPACE_TIMEZONE`, with its bounds |
 | `GET` | `/api/diary/days?month=2026-10` | the diary's entries in a month, each with its local `day` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |

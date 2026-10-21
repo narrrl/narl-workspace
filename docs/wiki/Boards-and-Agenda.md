@@ -107,7 +107,9 @@ does not make a second copy. The board and the agenda show the rule as
 | `T` | today's diary entry |
 | `t`, `q`, `Esc` | close |
 
-The agenda opens by itself once a day when something is late or due. The bar
+The agenda opens by itself once a day when something is late or due. "Today"
+is the day in `WORKSPACE_TIMEZONE`, the same as for the mails, so a browser in
+another timezone groups the cards the same way. The bar
 shows the `late` and `today` counts whenever either is above zero. With mail
 set up, cards due today are mailed in the morning too; see
 [Backup and mail](Backup-and-Mail.md#mail).

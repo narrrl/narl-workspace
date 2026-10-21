@@ -157,6 +157,21 @@ pub struct Agenda {
     pub diary_today: Option<bool>,
     /// Diary entries from this day in earlier years, the latest year first.
     pub on_this_day: Vec<crate::routes::diary::Entry>,
+    /// Today in the configured timezone, which is the day the cards are due
+    /// on and the mails are sent by — not the browser's, which may be
+    /// somewhere else, and not 24 hours long when the clocks change.
+    pub today: AgendaDay,
+}
+
+#[derive(Serialize)]
+pub struct AgendaDay {
+    /// `2026-10-21`.
+    pub date: String,
+    /// When today starts and ends, in Unix seconds.
+    pub start: i64,
+    pub end: i64,
+    /// The end of the seventh day after today: what is due before it is this week.
+    pub week_end: i64,
 }
 
 #[derive(Serialize)]
@@ -189,10 +204,19 @@ pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json
     };
     let on_this_day = crate::routes::diary::on_this_day(&state.db, tz, crate::now()).await?;
 
+    let day = crate::notify::local_day(tz, crate::now());
+    let (start, end) = crate::notify::day_bounds(tz, day);
+    let (_, week_end) = crate::notify::day_bounds(tz, day + chrono::Duration::days(AGENDA_DAYS));
     Ok(Json(Agenda {
         cards,
         diary_today,
         on_this_day,
+        today: AgendaDay {
+            date: day.format("%Y-%m-%d").to_string(),
+            start,
+            end,
+            week_end,
+        },
     }))
 }
 
@@ -1404,5 +1428,37 @@ mod tests {
     fn a_card_kept_in_place_does_not_drift() {
         let ids = [1, 2, 3];
         assert_eq!(reordered(&ids, 2, 1), vec![1, 2, 3]);
+    }
+
+    /// The agenda says which day it counts as today, in the workspace's
+    /// timezone, with the bounds the browser groups the cards by.
+    #[tokio::test]
+    async fn the_agenda_says_what_today_is() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let agenda = super::agenda(
+            crate::auth::Session { id: "test".into() },
+            axum::extract::State(state.clone()),
+        )
+        .await
+        .unwrap()
+        .0;
+        let tz = state.config.mail.timezone;
+        let now = crate::now();
+        let day = &agenda.today;
+        assert_eq!(
+            day.date,
+            crate::notify::local_day(tz, now)
+                .format("%Y-%m-%d")
+                .to_string()
+        );
+        assert!(
+            day.start <= now && now < day.end,
+            "{} {} {}",
+            day.start,
+            now,
+            day.end
+        );
+        // Seven more local days, each 23 to 25 hours long.
+        assert!((day.week_end - day.end - 7 * 86400).abs() <= 3600);
     }
 }

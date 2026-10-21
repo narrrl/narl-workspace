@@ -356,7 +356,7 @@ await send('Page.enable')
 await send('Network.enable')
 // The agenda opens itself once a day; here it opens when asked.
 await send('Page.addScriptToEvaluateOnNewDocument', {
-  source: `localStorage.setItem('diary:agenda-seen', new Date().toDateString())`,
+  source: `localStorage.setItem('diary:agenda-seen', new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date()))`,
 })
 
 await viewport(1440, 900)

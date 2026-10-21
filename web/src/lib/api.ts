@@ -194,6 +194,8 @@ export interface Agenda {
   diary_today: boolean | null
   /** Diary entries from this day in earlier years, the latest year first. */
   on_this_day: DiaryEntry[]
+  /** Today in the workspace's timezone, which is what due dates are counted in. */
+  today: { date: string; start: number; end: number; week_end: number } | null
 }
 
 /** A diary entry, by the local day it is about. */

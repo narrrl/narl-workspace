@@ -299,7 +299,7 @@ class Workspace {
    * What is due or in hand on every board, kept loaded all the time: the bar
    * counts from it, so what is late is in sight without going to look.
    */
-  agenda = $state<Agenda>({ cards: [], diary_today: null, on_this_day: [] })
+  agenda = $state<Agenda>({ cards: [], diary_today: null, on_this_day: [], today: null })
   agendaCursor = $state(0)
 
   /** `C`: the day the calendar's cursor is on, `2026-10-20`, and its month's entries. */
@@ -386,16 +386,18 @@ class Workspace {
     return this.list?.cards[this.cardCursor]
   }
 
-  /** The agenda in the order it is drawn and walked, bucketed by urgency. */
+  /**
+   * The agenda in the order it is drawn and walked, bucketed by urgency. The
+   * day is the server's, in the workspace's timezone, so a browser on a trip
+   * groups the cards the way the morning mail does.
+   */
   get agendaGroups(): { key: 'overdue' | 'today' | 'week' | 'doing'; cards: AgendaCard[] }[] {
-    const midnight = new Date()
-    midnight.setHours(0, 0, 0, 0)
-    const start = Math.floor(midnight.getTime() / 1000)
+    const { start, end, week_end } = this.agenda.today ?? { start: 0, end: 0, week_end: 0 }
     const groups = { overdue: [] as AgendaCard[], today: [] as AgendaCard[], week: [] as AgendaCard[], doing: [] as AgendaCard[] }
     for (const card of this.agenda.cards) {
       if (card.due_at !== null && card.due_at < start) groups.overdue.push(card)
-      else if (card.due_at !== null && card.due_at < start + 86400) groups.today.push(card)
-      else if (card.due_at !== null && card.due_at < start + 8 * 86400) groups.week.push(card)
+      else if (card.due_at !== null && card.due_at < end) groups.today.push(card)
+      else if (card.due_at !== null && card.due_at < week_end) groups.week.push(card)
       else if (card.role === 'doing') groups.doing.push(card)
     }
     return (['overdue', 'today', 'week', 'doing'] as const).map((key) => ({ key, cards: groups[key] }))
@@ -1306,8 +1308,8 @@ class Workspace {
    * point is to be told, not to have to remember to ask.
    */
   async openAgendaIfDue() {
-    const today = new Date().toDateString()
-    if (localStorage.getItem('diary:agenda-seen') === today) return
+    const today = this.agenda.today?.date
+    if (!today || localStorage.getItem('diary:agenda-seen') === today) return
     const { late, today: due } = this.dueCounts
     if (late + due === 0) return
     localStorage.setItem('diary:agenda-seen', today)

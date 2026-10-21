@@ -20,7 +20,7 @@ sealed or not.
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |
 | `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
-| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, and its entries `on_this_day` in earlier years |
+| `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, its entries `on_this_day` in earlier years, and `today` in `WORKSPACE_TIMEZONE`, with its bounds |
 | `GET` | `/api/diary/days?month=2026-10` | the diary's entries in a month, each with its local `day` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
