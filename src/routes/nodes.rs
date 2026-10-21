@@ -267,6 +267,46 @@ fn fts_query(raw: &str) -> Option<String> {
 /// A name as a path segment: lowercase, ASCII-ish, no surprises in a URL. An
 /// empty result becomes `untitled`, because every node needs a slug and a
 /// document usually gets its name minutes after it is created.
+/// The longest name a node may have, in characters. A file is called by its
+/// name on the SFTP mount, where most filesystems stop at 255 bytes, and a
+/// name that long helps nobody in a list or a crumb either.
+pub const NAME_MAX: usize = 200;
+
+pub fn check_name(name: &str) -> AppResult<()> {
+    if name.chars().count() > NAME_MAX {
+        return Err(AppError::BadRequest(format!(
+            "a name is at most {NAME_MAX} characters"
+        )));
+    }
+    Ok(())
+}
+
+/// Spaces are a short, numbered list switched by name: two that read alike
+/// are only confusing, and `:space work` could not say which it meant. Taken
+/// means the same name in any case, or the same slug.
+async fn space_name_free(
+    db: &mut SqliteConnection,
+    name: &str,
+    exclude: Option<i64>,
+) -> AppResult<()> {
+    let taken: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM nodes
+         WHERE parent_id IS NULL AND kind = 'space' AND id IS NOT ?3
+           AND (lower(name) = lower(?1) OR slug = ?2)",
+    )
+    .bind(name)
+    .bind(slugify(name))
+    .bind(exclude)
+    .fetch_optional(&mut *db)
+    .await?;
+    match taken {
+        Some(taken) => Err(AppError::BadRequest(format!(
+            "there is a space called {taken} already"
+        ))),
+        None => Ok(()),
+    }
+}
+
 pub fn slugify(name: &str) -> String {
     let mut slug = String::new();
     let mut dash = false;
@@ -466,6 +506,7 @@ pub async fn create_space(
     if name.is_empty() {
         return Err(AppError::BadRequest("a space needs a name".into()));
     }
+    check_name(name)?;
 
     let id = insert_space(&state.db, name, input.has_board.unwrap_or(true)).await?;
     state.backup.signal();
@@ -476,6 +517,7 @@ pub async fn create_space(
 /// root of the SFTP mount, which is why it takes a pool and not the state.
 pub async fn insert_space(db: &SqlitePool, name: &str, has_board: bool) -> AppResult<i64> {
     let mut tx = crate::db::begin_write(db).await?;
+    space_name_free(&mut tx, name, None).await?;
     let slug = unique_slug(&mut tx, None, &slugify(name), None).await?;
     let now = crate::now();
     let position: i64 = sqlx::query(
@@ -512,8 +554,14 @@ pub async fn list(
     let offset = params.offset.unwrap_or(0).max(0);
     let search = params.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
 
-    let searching = search.and_then(fts_query).is_some();
-    let rows = match search.and_then(fts_query) {
+    let query = search.and_then(fts_query);
+    // Something asked for that is all punctuation finds nothing; it is not a
+    // request to browse the spaces.
+    if search.is_some() && query.is_none() {
+        return Ok(Json(Vec::new()));
+    }
+    let searching = query.is_some();
+    let rows = match query {
         // A search reaches through the whole tree, optionally confined to one
         // space: the recursive term collects that space, or every space, and
         // everything under it — which leaves the trash out. It asks both
@@ -648,6 +696,7 @@ pub async fn create(
         )));
     }
 
+    check_name(input.name.trim())?;
     let mut tx = crate::db::begin_write(&state.db).await?;
     container(&mut tx, input.parent_id).await?;
 
@@ -740,6 +789,10 @@ pub async fn update(
         .name
         .as_deref()
         .map_or(previous_name.as_str(), str::trim);
+    check_name(name)?;
+    if kind == SPACE && name != previous_name {
+        space_name_free(&mut tx, name, Some(id)).await?;
+    }
 
     // The slug follows the name, because a path nobody can read is no better
     // than an id. It only moves when the name does, so a link to an unrenamed
@@ -1440,5 +1493,75 @@ mod tests {
         assert_eq!(next_slug(&taken, "readme").unwrap(), "readme-3");
         assert_eq!(next_slug(&taken, "notes").unwrap(), "notes");
         assert_eq!(next_slug(&BTreeSet::new(), "readme").unwrap(), "readme");
+    }
+
+    /// A search of nothing but punctuation finds nothing, rather than
+    /// answering with the spaces as if it had been asked to browse.
+    #[tokio::test]
+    async fn punctuation_finds_nothing() {
+        use axum::extract::{Query, State};
+
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let search = |q: &'static str| {
+            let state = state.clone();
+            async move {
+                let query = serde_json::from_value(serde_json::json!({ "q": q })).unwrap();
+                super::list(
+                    crate::auth::Session { id: "test".into() },
+                    State(state),
+                    Query(query),
+                )
+                .await
+                .unwrap()
+                .0
+            }
+        };
+        assert!(search("!!!").await.is_empty());
+        assert!(search(" -- ").await.is_empty());
+    }
+
+    /// Two spaces may not read alike, in any case or by slug, and a name has
+    /// a ceiling — for a new space, a rename, and a new document alike.
+    #[tokio::test]
+    async fn names_are_checked() {
+        use axum::extract::{Path, State};
+
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let session = || crate::auth::Session { id: "test".into() };
+        let space = |name: &str| {
+            let state = state.clone();
+            let input = serde_json::from_value(serde_json::json!({ "name": name })).unwrap();
+            async move { super::create_space(session(), State(state), axum::Json(input)).await }
+        };
+        assert!(matches!(space("Work").await, Err(AppError::BadRequest(_))));
+        assert!(matches!(
+            space(" work ").await,
+            Err(AppError::BadRequest(_))
+        ));
+        let home = space("home").await.unwrap().0;
+
+        let rename = |name: String| {
+            let state = state.clone();
+            let input = serde_json::from_value(serde_json::json!({ "name": name })).unwrap();
+            async move { super::update(session(), State(state), Path(home.id), axum::Json(input)).await }
+        };
+        assert!(matches!(
+            rename("uni".into()).await,
+            Err(AppError::BadRequest(_))
+        ));
+        assert_eq!(rename("Home".into()).await.unwrap().0.name, "Home");
+        assert!(matches!(
+            rename("x".repeat(201)).await,
+            Err(AppError::BadRequest(_))
+        ));
+
+        let long = serde_json::from_value(
+            serde_json::json!({ "parent_id": home.id, "name": "y".repeat(201) }),
+        )
+        .unwrap();
+        assert!(matches!(
+            super::create(session(), State(state.clone()), axum::Json(long)).await,
+            Err(AppError::BadRequest(_))
+        ));
     }
 }

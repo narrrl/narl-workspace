@@ -59,7 +59,8 @@ previous result beside the list, and `:noh` clears the search.
 ![A search that found a line in a log file](../images/search.png)
 
 Each word you type matches the start of a word, so `inge` finds "ingest". All
-the words must be there. Punctuation is ignored.
+the words must be there. Punctuation is ignored, so a search of nothing else
+finds nothing.
 
 ### Inside files
 

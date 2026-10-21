@@ -176,7 +176,8 @@ selected, and `:import` uploads a folder into the one being browsed
 (`:import!` takes a `.zip` instead). `:upload` outside the editor puts files
 into the folder being browsed, and so does dropping them on the list. `:name <text>` renames whatever is under
 the cursor — a document, a folder, or a card on a board — and `:name!` renames
-the space itself. The board has
+the space itself. Two spaces cannot share a name, in any case, and no name is
+longer than 200 characters. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
 `:due <when|->`, `:repeat <rule|->`, `:done` and `:list <name>` (`:list!` deletes one).
 

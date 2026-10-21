@@ -11,7 +11,8 @@ uni do not get mixed up.
 - `w` shows every space at once, with what was last written in each. `hjkl`
   move, `Enter` goes there.
 - `:space! <name>` makes a space, `:name! <name>` renames the one you are in,
-  and `:rmspace` puts it in the trash with everything in it.
+  and `:rmspace` puts it in the trash with everything in it. Two spaces cannot
+  share a name, whatever the case.
 - `:set noboard` turns the board off for a space, `:set board` back on.
 
 ![Every space at a glance](../images/overview.png)
