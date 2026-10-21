@@ -42,12 +42,14 @@ arguments and `↑` / `↓` recall earlier lines.
 | `m / p` | pick nodes up, then drop them all into the folder you walk to |
 | `M` | pick up the whole folder — again puts it all back |
 | `Ctrl / Shift-click` | pick a row up · every row up to it — drag them onto a folder |
-| `t` | agenda — late, due this week, in hand, on every board |
+| `S` | the special workspace: the board, the agenda and the calendar side by side — again puts it away |
+| `Alt-h/j/k/l · f` | in the special workspace: to the board, the agenda or the calendar — f gives one the screen |
+| `t` | agenda — late, due this week, in hand, on every board — in the special workspace |
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
-| `C` | the diary by month: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day |
+| `C` | the diary by month, in the special workspace: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day |
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | find anything, in every space — Enter goes to the result lit |
-| `b` | open this space's board |
+| `b` | this space's board, in the special workspace — 1 … 9 there shows another space's |
 | `c` | capture a card into this space's inbox, without leaving here |
 | `Esc · q` | close the document, and its tile when there are several |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
@@ -82,20 +84,20 @@ The first list is the inbox, the last list is done.
 | `F` | a letter over every card in view — type it to put the cursor there |
 | `r` | read the board again, for changes made elsewhere |
 | `x · dd` | delete the card (asks y/N) |
-| `q · Esc` | back to the tree |
+| `q · Esc` | put the special workspace away |
 
 ### In the agenda
 
 | key | what it does |
 | --- | --- |
 | `j / k` | down / up the cards, then what was written on this day in earlier years |
-| `Enter` | to the card, on its own board — or to the entry |
+| `Enter` | to the card, on its own board beside — or to the entry |
 | `Space` | done, where it stands |
 | `D` | due date: fri, tm, +3d … — :due on the line |
 | `:` | the line, with the agenda kept up — :repeat weekly acts on the card |
 | `H / L` | to the list left / right on its board |
 | `T` | today's diary entry |
-| `t · q · Esc` | close the agenda |
+| `t · q · Esc` | put the special workspace away |
 
 ## Commands
 
@@ -121,7 +123,8 @@ do: `:w!`, `:space! <name>`, `:import!`.
 
 | command | what it does |
 | --- | --- |
-| `:board` | show this space's board, or go back to the tree |
+| `:board` | this space's board, in the special workspace — again puts it away |
+| `:special` | the special workspace: the board, the agenda and the calendar side by side — S toggles it, Alt-h/j/k/l moves between them, 1 … 9 picks the board |
 | `:card, :c <title>` | add a card — on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:card!` | add a card linked to the open document — Enter on it opens the document |
 | `:due <when\|->` | due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |

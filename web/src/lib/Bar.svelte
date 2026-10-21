@@ -40,8 +40,8 @@
   <span class="divider path"></span>
 
   <nav class="crumbs" aria-label="path">
-    {#if workspace.view === 'board'}
-      <span class="here">board</span>
+    {#if workspace.view === 'special'}
+      <span class="here">special:{workspace.specialFocus}</span>
     {:else}
       <button
         class="crumb"

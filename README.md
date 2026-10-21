@@ -136,8 +136,9 @@ it; in the document pane it is that document. In the browse pane:
 | `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:name!` renames the space) |
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
-| `b` | the board of this space |
-| `t` | the agenda: what is late, due this week, or in hand, on every board |
+| `S` | the special workspace: the board, the agenda and the calendar side by side; `Alt-h`/`j`/`k`/`l` move between them, `f` gives one the screen |
+| `b` | the board of this space, in the special workspace; a digit there shows another space's |
+| `t` | the agenda: what is late, due this week, or in hand, on every board, in the special workspace |
 | `T` | today's diary entry, started if there is none |
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
@@ -240,8 +241,9 @@ start as `sftp_host_key` in the data directory.
 
 ## Boards
 
-`b`, the board door on the rail, or `:board` swaps the tree for the board
-of the space being browsed, and swaps it back. Every space has one except the
+`b`, the board door on the rail, or `:board` swaps the tree for the special
+workspace — the board of the space being browsed, with the agenda and the
+calendar beside it — and swaps it back. Every space has one except the
 diary — a journal has no backlog — and `:set board` / `:set noboard` changes
 that for the space you are in (the dimmed board door on the rail does the
 same). A new board starts with `backlog`, `doing` and `done`, and the columns mean

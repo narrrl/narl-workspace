@@ -11,7 +11,9 @@ The keys are the desktop's. On a phone, every one of these has a button; see
 ## Morning: what needs you
 
 The first time you open the workspace each day, the **agenda** opens by itself
-when anything is late or due. Any other time, press `t`.
+when anything is late or due. Any other time, press `t`. It opens in the
+**special workspace**, beside the board and the calendar; `S` puts that up and
+away from anywhere, and `Alt-h`/`Alt-l` move between its tiles.
 
 ![The agenda](../images/agenda.png)
 
@@ -31,9 +33,9 @@ Walk it with `j` and `k`. On a card:
 - `Space` finishes it, where it stands;
 - `D` gives it a due date: `fri`, `tm`, `+3d`, `10-31`;
 - `H` and `L` move it to the list left or right on its board;
-- `Enter` goes to the card on its own board.
+- `Enter` goes to the card on its own board, in the tile beside.
 
-`Esc` or `t` closes the agenda. The bar keeps showing the `late` and `today`
+`Esc` or `t` puts the special workspace away. The bar keeps showing the `late` and `today`
 counts while either is above zero. More in [Boards and the agenda](Boards-and-Agenda.md).
 
 ## At work: spaces, documents and tiles
@@ -84,7 +86,8 @@ In a meeting someone asks you to renew a certificate. Press `c`, type
 `Renew the gateway certificate`, and `Enter`. The card is in this space's
 inbox, and you have not left the document you were reading.
 
-Press `b` to see the **board**.
+Press `b` to see the **board**, in the special workspace. A digit there
+shows the board of another space.
 
 ![The board](../images/board.png)
 

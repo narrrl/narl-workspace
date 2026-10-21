@@ -25,7 +25,7 @@
 
   /** An entry from an earlier year, in place in the diary. */
   function open(entry: DiaryEntry) {
-    workspace.overlay = 'none'
+    workspace.closeSpecial()
     void workspace.guard(() => workspace.openPath(entry.path))
   }
 
@@ -38,7 +38,7 @@
 <div class="sheet" bind:this={sheet}>
   <header>
     <span class="label rule"><span class="marker"></span><span class="title">agenda</span> {total} open</span>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
+    <button onclick={() => workspace.closeSpecial()}>esc</button>
   </header>
 
   {#if workspace.agenda.diary_today === false}

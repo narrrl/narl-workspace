@@ -30,15 +30,24 @@
     const cmd: Door = { icon: 'prompt', label: 'Command line', keys: [':'], run: () => hooks.openCommandLine(':') }
     const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help') }
 
-    if (workspace.view === 'board') {
+    if (workspace.view === 'special') {
+      // The tiles of the special workspace are doors, so a phone — which
+      // shows one at a time — can walk between them.
+      const tiles: Door[] = [
+        { icon: 'board', label: 'Board', keys: ['b'], run: () => (workspace.specialFocus = 'board'), on: workspace.specialFocus === 'board' },
+        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => (workspace.specialFocus = 'agenda'), on: workspace.specialFocus === 'agenda' },
+        { icon: 'calendar', label: 'Calendar', keys: ['C'], run: () => (workspace.specialFocus = 'calendar'), on: workspace.specialFocus === 'calendar' },
+        { icon: 'list', label: 'Back to the tree', keys: ['S', 'q'], run: () => workspace.closeSpecial() },
+      ]
+      if (workspace.specialFocus !== 'board') return [tiles, [cmd, help]]
       // The card verbs are doors too, so a phone — which has no H, L or
       // Space — can still move work along.
       const card = !!workspace.card
       return [
+        tiles,
         [
           { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
           { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
-          { icon: 'list', label: 'Back to the tree', keys: ['b', 'q'], run: () => runCommand('board'), on: true },
         ],
         [
           { icon: 'left', label: 'Send the card left', keys: ['H'], run: () => workspace.guard(() => workspace.sendCard(-1)), dim: !card },
@@ -79,6 +88,7 @@
       ],
       [
         { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => runCommand('agenda') },
+        { icon: 'calendar', label: 'Calendar — the diary by month', keys: ['C'], run: () => runCommand('cal') },
         { icon: 'today', label: "Today's diary entry", keys: ['T'], run: () => runCommand('today') },
         { icon: 'capture', label: 'Capture a card to the inbox', keys: ['c'], run: () => hooks.openCommandLine(':card ') },
       ],

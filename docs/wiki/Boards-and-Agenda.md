@@ -1,11 +1,33 @@
 # Boards and the agenda
 
+## The special workspace
+
+The board, the agenda and the [calendar](Diary.md#the-calendar) share one
+workspace of their own, as the desktop's special workspace holds what is
+looked at in passing. `S` (or `:special`) puts it up and away again. It is
+three tiles: the board on the left, the agenda over the calendar on the right.
+
+![The special workspace](../images/board.png)
+
+| key | what it does |
+| --- | --- |
+| `S` | put the special workspace up, or away |
+| `b`, `t`, `C` | straight to the board, the agenda or the calendar; again on the one with focus puts the workspace away |
+| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | focus the tile that way |
+| `f` | the focused tile fills the screen; again or `Esc` to leave |
+| `1` … `9` | switch space, and the board with it |
+| `q`, `Esc` | back to the tree |
+
+The keys go to the tile with focus, which wears the light border; the other
+tiles keep their cursors, dimmed. Everything in it is read again each time it
+comes up.
+
 ## The board
 
 Every space except the diary has a board. `b`, the board button on the rail, or
-`:board` swaps the tree for it, and `q` swaps back.
-
-![The board of a space](../images/board.png)
+`:board` shows it in the special workspace, and `q` goes back to the tree. The
+head of the board names every space that has one, with the digit that goes
+there.
 
 A new board has three lists: `backlog`, `doing` and `done`. The lists mean
 something by where they stand, not by their names:
@@ -33,11 +55,11 @@ a week fold away until `z` shows them.
 | `z` | show done cards older than a week |
 | `F` | a letter over every card; type it to jump there |
 | `x`, `dd` | delete the card |
-| `q`, `Esc` | back to the tree |
+| `q`, `Esc` | put the special workspace away |
 
 ### Capturing a card
 
-`c` anywhere outside the board opens `:card ` on the command line. The card goes
+`c` anywhere outside the special workspace opens `:card ` on the command line. The card goes
 into the inbox of the space you are in, or of the first space with a board, and
 you stay where you were. From outside the browser, see [Capture](Capture.md).
 
@@ -86,7 +108,8 @@ does not make a second copy. The board and the agenda show the rule as
 
 ## The agenda
 
-`t` (or `:agenda`) gathers what needs you from every board at once.
+`t` (or `:agenda`) gathers what needs you from every board at once, in the
+special workspace beside the board.
 
 ![The agenda](../images/agenda.png)
 
@@ -99,13 +122,13 @@ does not make a second copy. The board and the agenda show the rule as
 | key | what it does |
 | --- | --- |
 | `j` / `k` | down / up, on into the diary entries |
-| `Enter` | to the card on its own board, or open the entry |
+| `Enter` | to the card on its own board, in the tile beside, or open the entry |
 | `Space` | finish the card where it stands |
 | `D` | due date |
 | `H` / `L` | to the list left / right on its board |
 | `:` | the command line with the agenda kept up, so `:repeat` acts on the card |
 | `T` | today's diary entry |
-| `t`, `q`, `Esc` | close |
+| `t`, `q`, `Esc` | put the special workspace away |
 
 The agenda opens by itself once a day when something is late or due. "Today"
 is the day in `WORKSPACE_TIMEZONE`, the same as for the mails, so a browser in

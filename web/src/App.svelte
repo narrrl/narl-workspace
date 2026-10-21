@@ -25,7 +25,7 @@
   import Shared from './lib/Shared.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
-  import { workspace } from './lib/store.svelte'
+  import { workspace, type SpecialTile } from './lib/store.svelte'
   import { dwindle, formatDay, neighbour, type Direction } from './lib/util'
 
   /*
@@ -220,8 +220,8 @@
     [['j', 'k'], 'browse, l opens, L opens beside'],
     [['1…9'], 'switch space, Tab cycles'],
     [['w'], 'overview of every space'],
-    [['b'], "this space's board"],
-    [['t'], 'agenda — late, due, in hand'],
+    [['S'], 'board, agenda and calendar'],
+    [['b', 't', 'C'], 'straight to one of them'],
     [['c'], 'capture a card to the inbox'],
     [['⌃ P'], 'find in every space'],
     [['/'], 'search this space'],
@@ -313,7 +313,7 @@
       case 'Enter':
         if (card) void workspace.guard(() => workspace.goToCard(card))
         else if (past) {
-          workspace.overlay = 'none'
+          workspace.closeSpecial()
           void workspace.guard(() => workspace.openPath(past.path))
         }
         return true
@@ -337,12 +337,12 @@
         if (card) void workspace.guard(() => workspace.sendAgendaCard(card, event.key === 'H' ? -1 : 1))
         return true
       case 'T':
-        workspace.overlay = 'none'
+        workspace.closeSpecial()
         void runCommand('today')
         return true
       case 't':
       case 'q':
-        workspace.overlay = 'none'
+        workspace.closeSpecial()
         return true
       default:
         return false
@@ -371,7 +371,7 @@
         return true
       case 'C':
       case 'q':
-        workspace.overlay = 'none'
+        workspace.closeSpecial()
         return true
       default:
         return false
@@ -584,7 +584,22 @@
    * too; left of the leftmost tile is the list. With Shift the focused tile
    * goes that way instead, swapping places with the one it lands on.
    */
+  /*
+   * The special workspace is three tiles: the board on the left, the agenda
+   * over the calendar on the right. Alt-h/j/k/l moves between them.
+   */
+  const specialNeighbours: Record<SpecialTile, Partial<Record<Direction, SpecialTile>>> = {
+    board: { l: 'agenda' },
+    agenda: { h: 'board', j: 'calendar' },
+    calendar: { h: 'board', k: 'agenda' },
+  }
+
   function tileKey(direction: Direction, shift: boolean) {
+    if (workspace.view === 'special') {
+      const next = specialNeighbours[workspace.specialFocus][direction]
+      if (next && !shift) workspace.specialFocus = next
+      return
+    }
     if (workspace.pane === 'list' || !workspace.open) {
       if (direction === 'l' && !shift) focusPane('document')
       return
@@ -681,7 +696,7 @@
         return true
       case 'q':
       case 'Escape':
-        workspace.closeBoard()
+        workspace.closeSpecial()
         return true
       default:
         return false
@@ -734,7 +749,10 @@
         return
       }
     }
-    if (workspace.overlay === 'agenda' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    // The special workspace's agenda and calendar read their own keys while
+    // they have focus; what they leave falls through to the rest below.
+    const special = workspace.overlay === 'none' && workspace.view === 'special' && listening && !event.ctrlKey && !event.metaKey && !event.altKey
+    if (special && workspace.specialFocus === 'agenda') {
       if (agendaKey(event)) {
         event.preventDefault()
         return
@@ -764,7 +782,7 @@
         return
       }
     }
-    if (workspace.overlay === 'calendar' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (special && workspace.specialFocus === 'calendar') {
       if (calendarKey(event)) {
         event.preventDefault()
         return
@@ -842,7 +860,7 @@
     }
     // `gt` / `gT` walk the tiles, as they walk vim's tab pages — before `t`
     // and `T` on their own are taken for the agenda and today's entry.
-    if (previous === 'g' && (key === 't' || key === 'T') && workspace.view !== 'board') {
+    if (previous === 'g' && (key === 't' || key === 'T') && workspace.view !== 'special') {
       event.preventDefault()
       void cycleTile(key === 't' ? 1 : -1)
       return
@@ -869,8 +887,31 @@
       void runCommand('cal')
       return
     }
+    // `S`, as the desktop's special workspace is bound: the board, the
+    // agenda and the calendar, put up and away again.
+    if (key === 'S') {
+      event.preventDefault()
+      void runCommand('special')
+      return
+    }
 
-    if (workspace.view === 'board') {
+    if (workspace.view === 'special') {
+      if (workspace.specialFocus !== 'board') {
+        // The agenda and the calendar have had their keys; nothing reaches
+        // the board's from them, since it is not the tile with focus.
+        if (key === 'b') void runCommand('board')
+        else if (key === 'Escape') workspace.closeSpecial()
+        else if (key === ':') cmdline = ':'
+        else if (key === '?') void runCommand('help')
+        else return
+        event.preventDefault()
+        return
+      }
+      if (key === 'b') {
+        event.preventDefault()
+        workspace.closeSpecial()
+        return
+      }
       if (previous === 'g' && key === 'g') {
         event.preventDefault()
         workspace.cardCursor = 0
@@ -1142,10 +1183,26 @@
       <!-- Keyed on the space, so a switch slides the new one in, as the desktop
            does between workspaces: from below when moving right, above when left. -->
       {#key workspace.spaceId}
-      {#if workspace.view === 'board'}
-        <!-- The board takes the whole width: its columns are the two panes. -->
-        <div class="panes board switch" style="--dir: {workspace.switchDirection}">
-          <div class="window focused" bind:this={boardEl}><Board /></div>
+      {#if workspace.view === 'special'}
+        <!-- The special workspace: the board, and the agenda over the
+             calendar beside it. `f` gives the focused one the whole porthole. -->
+        <div class="panes special switch" class:full={workspace.fullscreen} data-focus={workspace.specialFocus} style="--dir: {workspace.switchDirection}">
+          {#each ['board', 'agenda', 'calendar'] as const as tile (tile)}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="window {tile}"
+              class:focused={workspace.specialFocus === tile}
+              onpointerdown={() => (workspace.specialFocus = tile)}
+            >
+              {#if tile === 'board'}
+                <div class="fill" bind:this={boardEl}><Board /></div>
+              {:else if tile === 'agenda'}
+                <Agenda />
+              {:else}
+                <Calendar />
+              {/if}
+            </div>
+          {/each}
         </div>
       {:else}
         <div
@@ -1218,7 +1275,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
       <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'agenda'}<Agenda />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else if workspace.overlay === 'calendar'}<Calendar />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>
@@ -1237,12 +1294,49 @@
 <style>
   .boot { display: grid; place-items: center; height: 100%; }
 
-  .panes.board { grid-template-columns: 1fr; }
+  /*
+   * The special workspace: the board takes what the right column leaves,
+   * the agenda takes what the calendar leaves under it.
+   */
+  .panes.special {
+    grid-template-columns: minmax(0, 1fr) minmax(44ch, 30vw);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: 'board agenda' 'board calendar';
+  }
+  .special > .board { grid-area: board; }
+  .special > .agenda { grid-area: agenda; }
+  .special > .calendar { grid-area: calendar; }
+  .special .fill { height: 100%; }
+  /* One cursor is lit at a time: the other tiles keep theirs, dimmed. */
+  .special > .window:not(.focused) :global(:is(.card.active, .row.at, .day.at)) {
+    background: var(--surface-alt);
+    color: var(--light);
+  }
+  .special > .window:not(.focused) :global(.row.at :is(.where, .due)) { color: var(--muted); }
+  .special > .window:not(.focused) :global(.card.active :is(.meta, .doc)) { color: var(--muted); }
+  .special > .window:not(.focused) :global(:is(.card.active .today, .today .row.at .due)) { color: var(--light); }
+  .special > .window:not(.focused) :global(:is(.card.active .overdue, .overdue .row.at .due)) { color: var(--alarm); }
+  .special > .window:not(.focused) :global(.card.active .tick) { border-color: var(--outline); }
+  .special > .window:not(.focused) :global(.day.at :is(.dot)) { background: var(--light); }
+  .special > .window:not(.focused) :global(.day.at .many) { color: var(--light); }
+  .panes.special.full { grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: none; }
+  .panes.special.full > .window:not(.focused) { display: none; }
+  .panes.special.full > .window { grid-area: auto; }
+
+  /* The agenda and the calendar are sheets of their own as overlays; as tiles
+     the window is their sheet. */
+  .special > .window :global(.sheet) {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
   .window.list { --pane-bg: color-mix(in oklab, var(--surface) 60%, var(--base)); }
 
   /* Only one pane on screen: nothing to tell apart, so no active border. */
-  .panes:not(.reading) .window.list,
-  .panes.board .window {
+  .panes:not(.reading) .window.list {
     background:
       linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
       linear-gradient(var(--overlay), var(--overlay)) border-box;
@@ -1311,5 +1405,9 @@
     .tiles > .window:not(.current) { display: none; }
     .tiles > .window.current { inset: calc(var(--gap) / 2); width: auto; height: auto; }
     .overlay { padding: 12px; }
+    /* A phone shows the special workspace's focused tile alone. */
+    .panes.special { grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: none; }
+    .panes.special > .window { grid-area: auto; }
+    .panes.special > .window:not(.focused) { display: none; }
   }
 </style>

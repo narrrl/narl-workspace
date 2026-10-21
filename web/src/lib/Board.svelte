@@ -43,6 +43,11 @@
     return index === 0 ? 'inbox' : index === lastIndex ? 'done' : ''
   }
 
+  /** The spaces that have a board, with the digit that switches to each. */
+  const boards = $derived(
+    workspace.spaces.flatMap((space, index) => (space.has_board && index < 10 ? [{ space, digit: (index + 1) % 10 }] : [])),
+  )
+
   function pick(list: number, card: number) {
     workspace.listCursor = list
     workspace.cardCursor = card
@@ -54,7 +59,18 @@
     <span class="marker"></span>
     <span class="name">{workspace.space?.slug ?? ''}</span>
     <span>board</span>
-    <span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>
+    {#if workspace.board}<span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>{/if}
+    <!-- Every board is a digit away: the digit switches space, and the board
+         follows the space. -->
+    {#if boards.length > 1}
+      <span class="boards">
+        {#each boards as { space, digit } (space.id)}
+          <button class="other" class:here={space.id === workspace.spaceId} onclick={() => workspace.guard(() => workspace.switchSpace(digit === 0 ? 9 : digit - 1))}>
+            <span class="n">{digit}</span>{space.slug}
+          </button>
+        {/each}
+      </span>
+    {/if}
   </div>
 
   <div class="columns" bind:this={columns}>
@@ -116,7 +132,11 @@
       </section>
     {:else}
       <div class="empty muted">
-        no lists yet — :list &lt;name&gt; makes a column. then o adds a card to it.
+        {#if !workspace.space?.has_board}
+          {workspace.space?.slug ?? 'this space'} has no board — :set board turns one on{#if boards.length}, or a digit goes to one that has{/if}.
+        {:else}
+          no lists yet — :list &lt;name&gt; makes a column. then o adds a card to it.
+        {/if}
       </div>
     {/each}
   </div>
@@ -131,7 +151,7 @@
     <span><span class="kbd">D</span> due</span>
     <span><span class="kbd">R</span> rename</span>
     <span><span class="kbd">dd</span> delete</span>
-    <span><span class="kbd">q</span> tree</span>
+    <span><span class="kbd">1</span>…<span class="kbd">9</span> board</span>
     <span class="rule-hint">first list is the inbox · last list is done</span>
   </footer>
 </div>
@@ -151,6 +171,21 @@
   }
   .head .marker { background: var(--light); }
   .head .name { color: var(--light); }
+  .boards { display: flex; gap: 4px; margin-left: 8px; }
+  .other {
+    display: flex;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: var(--radius-s);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: none;
+    color: var(--muted);
+  }
+  .other .n { color: var(--outline); }
+  .other.here { background: var(--surface-alt); color: var(--light); }
+  .other.here .n { color: var(--light-dim); }
 
   .columns {
     flex: 1;

@@ -13,7 +13,9 @@ an entry written after midnight on a trip still lands on the right day.
 
 ## The calendar
 
-`C` (or `:cal`) shows the diary a month at a time.
+`C` (or `:cal`) shows the diary a month at a time, in the
+[special workspace](Boards-and-Agenda.md#the-special-workspace) under the
+agenda.
 
 ![The diary by month](../images/calendar.png)
 
@@ -24,7 +26,7 @@ an entry written after midnight on a trip still lands on the right day.
 | `H` / `L` | a month back / forward |
 | `.` | today |
 | `Enter` | open the day's entry, or start one dated that day |
-| `C`, `Esc` | close |
+| `C`, `Esc` | put the special workspace away |
 
 A dot marks a day with an entry. A number says how many when there are more
 than one.

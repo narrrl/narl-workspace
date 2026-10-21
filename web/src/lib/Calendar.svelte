@@ -42,7 +42,7 @@
     <span class="label rule"><span class="marker"></span><span class="title">{title}</span> {workspace.calendarEntries.length} entries</span>
     <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, -1))} aria-label="previous month">‹</button>
     <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, 1))} aria-label="next month">›</button>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
+    <button onclick={() => workspace.closeSpecial()}>esc</button>
   </header>
 
   <ol class="grid">
