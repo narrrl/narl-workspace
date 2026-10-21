@@ -74,7 +74,7 @@ The rail of buttons on the right does the same as the keys, for a mouse.
    inbox of this space's board. Press `b` to see the board, and `b` again to go
    back.
 7. Press `T`. That is today's diary entry, started for you.
-8. Press `?` for the list of every key and command, and `Esc` to close it.
+8. Press `?` for the list of every key and command. `h` / `l` walk its columns, `/` narrows it down, and `Esc` closes it.
 
 On a phone the same things are buttons: the dock at the bottom has a new
 document, a new folder, the board, today's entry, an upload and a search, and

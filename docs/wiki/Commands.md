@@ -60,7 +60,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `gb` | the documents that link to the open one — \[\[title]] links by title, \[\[ completes one while writing |
 | `:` | command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before |
 | `Ctrl-S` | save, from anywhere |
-| `?` | this screen — in the editor too |
+| `?` | this screen, from the editor too — h/l a column, / filters it down |
 
 ### On a board
 

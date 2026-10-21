@@ -9,7 +9,7 @@
   import DocumentPane from './lib/DocumentPane.svelte'
   import FilePane from './lib/FilePane.svelte'
   import Headings from './lib/Headings.svelte'
-  import Help from './lib/Help.svelte'
+  import Help, { focusHelpFilter, scrollHelp } from './lib/Help.svelte'
   import Hints from './lib/Hints.svelte'
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
@@ -378,6 +378,46 @@
     }
   }
 
+  /**
+   * The help's keys: its columns run on to the right, so h/l and j/k move a
+   * column, Ctrl-D/U a screen, g/G to either end, and `/` narrows it down.
+   */
+  function helpKey(event: KeyboardEvent): boolean {
+    if (event.ctrlKey) {
+      if (event.key !== 'd' && event.key !== 'u') return false
+      scrollHelp(event.key === 'd' ? 'pagedown' : 'pageup')
+      return true
+    }
+    switch (event.key) {
+      case 'l':
+      case 'j':
+      case 'ArrowRight':
+      case 'ArrowDown':
+        scrollHelp(1)
+        return true
+      case 'h':
+      case 'k':
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        scrollHelp(-1)
+        return true
+      case ' ':
+        scrollHelp(event.shiftKey ? 'pageup' : 'pagedown')
+        return true
+      case 'g':
+        scrollHelp('start')
+        return true
+      case 'G':
+        scrollHelp('end')
+        return true
+      case '/':
+        focusHelpFilter()
+        return true
+      default:
+        return false
+    }
+  }
+
   /** `gO`'s list: j/k down the headings, Enter to the one picked. */
   function outlineKey(event: KeyboardEvent): boolean {
     const last = Math.max(workspace.outline.length - 1, 0)
@@ -682,6 +722,12 @@
 
     // The command line over an overlay — `D` in the agenda — keeps its keys.
     const listening = cmdline === null && !isTypingTarget(event.target)
+    if (workspace.overlay === 'help' && listening && !event.metaKey && !event.altKey) {
+      if (helpKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'overview' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (overviewKey(event)) {
         event.preventDefault()
