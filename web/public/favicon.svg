@@ -1,14 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- ~/ and a block cursor: the prompt the app is named after. -->
-  <defs>
-    <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#181b17"/>
-      <stop offset="1" stop-color="#0c0d0b"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="url(#hull)"/>
-  <rect x="22" y="22" width="468" height="468" rx="92" fill="none" stroke="#2a2f28" stroke-width="8"/>
-  <path d="M64 282 C86 226 128 220 158 254 C188 288 228 282 250 226" fill="none" stroke="#eef1ea" stroke-width="40" stroke-linecap="round"/>
-  <path d="M332 136 L274 376" fill="none" stroke="#eef1ea" stroke-width="40" stroke-linecap="round"/>
-  <rect x="360" y="150" width="88" height="212" rx="12" fill="#c8684f"/>
+  <!-- ~/ and the cursor the boot screen waits with, in the theme's one light
+       on its hull, inside the corner brackets the desktop frames things in. -->
+  <rect width="512" height="512" rx="112" fill="#0c0d0b"/>
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="#2a2f28" stroke-width="6"/>
+  <path d="M60 116 V60 H116 M396 60 H452 V116 M452 396 V452 H396 M116 452 H60 V396" fill="none" stroke="#383e35" stroke-width="6"/>
+  <g fill="none" stroke="#eef1ea" stroke-width="30" stroke-linecap="square" stroke-linejoin="round">
+    <path d="M100 276 C100 244 118 230 138 230 C168 230 172 274 202 274 C222 274 240 260 240 228"/>
+    <path d="M318 160 L262 352"/>
+  </g>
+  <rect x="340" y="320" width="76" height="32" fill="#eef1ea"/>
 </svg>
