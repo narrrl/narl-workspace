@@ -37,7 +37,7 @@
         { icon: 'board', label: 'Board', keys: ['b'], run: () => (workspace.specialFocus = 'board'), on: workspace.specialFocus === 'board' },
         { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => (workspace.specialFocus = 'agenda'), on: workspace.specialFocus === 'agenda' },
         { icon: 'calendar', label: 'Calendar', keys: ['C'], run: () => (workspace.specialFocus = 'calendar'), on: workspace.specialFocus === 'calendar' },
-        { icon: 'list', label: 'Back to the tree', keys: ['S', 'q'], run: () => workspace.closeSpecial() },
+        { icon: 'list', label: 'Back to the tree', keys: ['Esc', 'S'], run: () => workspace.closeSpecial() },
       ]
       if (workspace.specialFocus !== 'board') return [tiles, [cmd, help]]
       // The card verbs are doors too, so a phone — which has no H, L or

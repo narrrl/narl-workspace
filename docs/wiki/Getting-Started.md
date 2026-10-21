@@ -71,9 +71,9 @@ The rail of buttons on the right does the same as the keys, for a mouse.
    add a name and press `Enter`. `l` or `Enter` on the folder goes into it, and
    `h` comes back up.
 6. Press `c`, type `try the board`, and press `Enter`. That is a card in the
-   inbox of this space's board. Press `b` to see the board, and `b` again to go
+   inbox of this space's board. Press `b` to see the board, and `Esc` to go
    back. It shares a special workspace with the agenda and the calendar: `S`
-   puts it up, and `Alt-h`/`Alt-l` move between them.
+   puts it up and away, and `Tab` walks between them.
 7. Press `T`. That is today's diary entry, started for you.
 8. Press `?` for the list of every key and command. `h` / `l` walk its columns, `/` narrows it down, and `Esc` closes it.
 

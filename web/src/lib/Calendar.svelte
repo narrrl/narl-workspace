@@ -42,7 +42,7 @@
     <span class="label rule"><span class="marker"></span><span class="title">{title}</span> {workspace.calendarEntries.length} entries</span>
     <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, -1))} aria-label="previous month">‹</button>
     <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, 1))} aria-label="next month">›</button>
-    <button onclick={() => workspace.closeSpecial()}>esc</button>
+    <span class="kbd tile-key" title="the key that comes to this tile">C</span>
   </header>
 
   <ol class="grid">
@@ -89,7 +89,9 @@
     <span class="gap"></span>
     <span class="kbd">↵</span> open
     <span class="gap"></span>
-    <span class="kbd">C</span><span class="kbd">esc</span> close
+    <span class="kbd">tab</span> tile
+    <span class="gap"></span>
+    <span class="kbd">esc</span> leave
   </footer>
 </div>
 

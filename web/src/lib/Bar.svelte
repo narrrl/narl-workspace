@@ -35,6 +35,15 @@
     <button class="pill add" title="new space (:space! <name>)" onclick={() => hooks.openCommandLine(':space! ')}>
       +
     </button>
+    <!-- The special workspace, beside the others as the desktop bar shows its own. -->
+    <button
+      class="pill special"
+      aria-current={workspace.view === 'special'}
+      title="the special workspace: board, agenda, calendar (S)"
+      onclick={() => workspace.guard(() => workspace.toggleSpecial())}
+    >
+      <span class="slug">special</span>
+    </button>
   </nav>
 
   <span class="divider path"></span>
@@ -114,6 +123,7 @@
   .pill:hover .n { color: var(--light-dim); }
   .pill[aria-current='true'] .n { color: var(--ink); opacity: 0.55; }
   .pill.add { color: var(--muted); }
+  .pill.special { margin-left: 6px; }
   .pill.add:hover { color: var(--light); }
 
   /* A crumb is a link along the path; a hairline grows under it on hover. */

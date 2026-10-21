@@ -332,7 +332,7 @@ export const commands: CommandSpec[] = [
     run: async () => {
       // A document `o` made and nothing was written in is not kept.
       if (await workspace.abandonIfBlank()) {
-        if (workspace.returnTo === 'board') await workspace.guard(() => workspace.returnToBoard())
+        if (workspace.returnTo === 'special') await workspace.guard(() => workspace.returnToSpecial())
         return hooks.focusList()
       }
       if (workspace.dirty) {
@@ -340,7 +340,7 @@ export const commands: CommandSpec[] = [
         return
       }
       if (workspace.editing) workspace.editing = false
-      else if (workspace.returnTo === 'board') return void workspace.guard(() => workspace.returnToBoard())
+      else if (workspace.returnTo === 'special') return void workspace.guard(() => workspace.returnToSpecial())
       else if (workspace.tiles.length > 1) return focusTile(closeFocused())
       else workspace.closeTile()
       hooks.focusList()
@@ -429,13 +429,13 @@ export const commands: CommandSpec[] = [
   {
     name: 'board',
     group: 'board',
-    help: "this space's board, in the special workspace — again puts it away",
-    run: () => workspace.guard(() => workspace.toggleSpecial('board')),
+    help: "this space's board, in the special workspace",
+    run: () => workspace.guard(() => workspace.showSpecial('board')),
   },
   {
     name: 'special',
     group: 'board',
-    help: 'the special workspace: the board, the agenda and the calendar side by side — S toggles it, Alt-h/j/k/l moves between them, 1 … 9 picks the board',
+    help: 'the special workspace: the board, the agenda and the calendar side by side — S puts it up and away, Tab walks its tiles, 1 … 9 picks the board',
     run: () => workspace.guard(() => workspace.toggleSpecial()),
   },
   {
@@ -599,7 +599,7 @@ export const commands: CommandSpec[] = [
     help: 'the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it',
     run: () =>
       workspace.guard(async () => {
-        if (workspace.view === 'special') return workspace.toggleSpecial('calendar')
+        if (workspace.view === 'special') return void (workspace.specialFocus = 'calendar')
         await workspace.openCalendar()
       }),
   },
@@ -611,7 +611,7 @@ export const commands: CommandSpec[] = [
     run: () =>
       workspace.guard(async () => {
         if (workspace.view !== 'special') workspace.agendaCursor = 0
-        await workspace.toggleSpecial('agenda')
+        await workspace.showSpecial('agenda')
       }),
   },
   {

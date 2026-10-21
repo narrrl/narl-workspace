@@ -26,7 +26,7 @@ agenda.
 | `H` / `L` | a month back / forward |
 | `.` | today |
 | `Enter` | open the day's entry, or start one dated that day |
-| `C`, `Esc` | put the special workspace away |
+| `q`, `Esc` | leave the special workspace; an entry opened here comes back on `q` |
 
 A dot marks a day with an entry. A number says how many when there are more
 than one.

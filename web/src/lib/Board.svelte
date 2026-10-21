@@ -57,7 +57,7 @@
 <div class="board">
   <div class="head label rule">
     <span class="marker"></span>
-    <span class="name">{workspace.space?.slug ?? ''}</span>
+    <span class="name">{workspace.boardSpace?.slug ?? ''}</span>
     <span>board</span>
     {#if workspace.board}<span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>{/if}
     <!-- Every board is a digit away: the digit switches space, and the board
@@ -65,12 +65,13 @@
     {#if boards.length > 1}
       <span class="boards">
         {#each boards as { space, digit } (space.id)}
-          <button class="other" class:here={space.id === workspace.spaceId} onclick={() => workspace.guard(() => workspace.switchSpace(digit === 0 ? 9 : digit - 1))}>
+          <button class="other" class:here={space.id === workspace.boardSpaceId} onclick={() => workspace.guard(() => workspace.switchSpace(digit === 0 ? 9 : digit - 1))}>
             <span class="n">{digit}</span>{space.slug}
           </button>
         {/each}
       </span>
     {/if}
+    <span class="kbd tile-key" title="the key that comes to this tile">b</span>
   </div>
 
   <div class="columns" bind:this={columns}>
@@ -132,8 +133,8 @@
       </section>
     {:else}
       <div class="empty muted">
-        {#if !workspace.space?.has_board}
-          {workspace.space?.slug ?? 'this space'} has no board — :set board turns one on{#if boards.length}, or a digit goes to one that has{/if}.
+        {#if !workspace.boardSpace}
+          no space has a board — :set board gives the one you are in one.
         {:else}
           no lists yet — :list &lt;name&gt; makes a column. then o adds a card to it.
         {/if}
@@ -152,6 +153,8 @@
     <span><span class="kbd">R</span> rename</span>
     <span><span class="kbd">dd</span> delete</span>
     <span><span class="kbd">1</span>…<span class="kbd">9</span> board</span>
+    <span><span class="kbd">tab</span> tile</span>
+    <span><span class="kbd">esc</span> leave</span>
     <span class="rule-hint">first list is the inbox · last list is done</span>
   </footer>
 </div>
@@ -172,6 +175,8 @@
   .head .marker { background: var(--light); }
   .head .name { color: var(--light); }
   .boards { display: flex; gap: 4px; margin-left: 8px; }
+  /* After the rule, at the right end, where the other tiles have theirs. */
+  .head .tile-key { order: 1; margin-left: 12px; }
   .other {
     display: flex;
     gap: 6px;

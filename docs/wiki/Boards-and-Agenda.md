@@ -4,30 +4,38 @@
 
 The board, the agenda and the [calendar](Diary.md#the-calendar) share one
 workspace of their own, as the desktop's special workspace holds what is
-looked at in passing. `S` (or `:special`) puts it up and away again. It is
-three tiles: the board on the left, the agenda over the calendar on the right.
+looked at in passing. `S` (or `:special`, or the `special` pill in the bar)
+puts it up and away again. It is three tiles: the board on the left, the
+agenda over the calendar on the right.
 
 ![The special workspace](../images/board.png)
 
 | key | what it does |
 | --- | --- |
 | `S` | put the special workspace up, or away |
-| `b`, `t`, `C` | straight to the board, the agenda or the calendar; again on the one with focus puts the workspace away |
-| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | focus the tile that way |
+| `b`, `t`, `C` | to the board, the agenda or the calendar, from anywhere |
+| `Tab` / `Shift-Tab` | the next / previous tile |
+| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | the tile that way |
+| `l` past the last list, `h` in the agenda, `j` past its end | on into the tile beside |
 | `f` | the focused tile fills the screen; again or `Esc` to leave |
 | `1` … `9` | switch space, and the board with it |
-| `q`, `Esc` | back to the tree |
+| `q`, `Esc` | leave, back to where you were |
 
-The keys go to the tile with focus, which wears the light border; the other
-tiles keep their cursors, dimmed. Everything in it is read again each time it
-comes up.
+The keys go to the tile with focus, which wears the light border and its key
+lit in its head; the other tiles keep their cursors, dimmed. `b`, `t` and `C`
+only ever go to their tile, and `Esc` only ever leaves — or, with a tile
+filling the screen, leaves that first. A document opened from the workspace —
+a card's notes, a day of the calendar, an entry of the agenda, `T` — comes
+back to the tile it was opened from on `q`. Everything in it is read again
+each time it comes up.
 
 ## The board
 
 Every space except the diary has a board. `b`, the board button on the rail, or
-`:board` shows it in the special workspace, and `q` goes back to the tree. The
-head of the board names every space that has one, with the digit that goes
-there.
+`:board` shows it in the special workspace, and `Esc` goes back to the tree.
+It is the board of the space being browsed, or, in a space without one such as
+the diary, the last board shown. The head of the board names every space that
+has one, with the digit that goes there.
 
 A new board has three lists: `backlog`, `doing` and `done`. The lists mean
 something by where they stand, not by their names:
@@ -55,7 +63,7 @@ a week fold away until `z` shows them.
 | `z` | show done cards older than a week |
 | `F` | a letter over every card; type it to jump there |
 | `x`, `dd` | delete the card |
-| `q`, `Esc` | put the special workspace away |
+| `q`, `Esc` | leave the special workspace |
 
 ### Capturing a card
 
@@ -121,14 +129,15 @@ special workspace beside the board.
 
 | key | what it does |
 | --- | --- |
-| `j` / `k` | down / up, on into the diary entries |
+| `j` / `k` | down / up, on into the diary entries, then into the calendar |
+| `h` | to the board |
 | `Enter` | to the card on its own board, in the tile beside, or open the entry |
 | `Space` | finish the card where it stands |
 | `D` | due date |
 | `H` / `L` | to the list left / right on its board |
 | `:` | the command line with the agenda kept up, so `:repeat` acts on the card |
 | `T` | today's diary entry |
-| `t`, `q`, `Esc` | put the special workspace away |
+| `q`, `Esc` | leave the special workspace |
 
 The agenda opens by itself once a day when something is late or due. "Today"
 is the day in `WORKSPACE_TIMEZONE`, the same as for the mails, so a browser in

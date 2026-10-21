@@ -13,7 +13,7 @@ The keys are the desktop's. On a phone, every one of these has a button; see
 The first time you open the workspace each day, the **agenda** opens by itself
 when anything is late or due. Any other time, press `t`. It opens in the
 **special workspace**, beside the board and the calendar; `S` puts that up and
-away from anywhere, and `Alt-h`/`Alt-l` move between its tiles.
+away from anywhere, and `Tab` walks its tiles.
 
 ![The agenda](../images/agenda.png)
 
@@ -35,7 +35,7 @@ Walk it with `j` and `k`. On a card:
 - `H` and `L` move it to the list left or right on its board;
 - `Enter` goes to the card on its own board, in the tile beside.
 
-`Esc` or `t` puts the special workspace away. The bar keeps showing the `late` and `today`
+`Esc` leaves the special workspace. The bar keeps showing the `late` and `today`
 counts while either is above zero. More in [Boards and the agenda](Boards-and-Agenda.md).
 
 ## At work: spaces, documents and tiles

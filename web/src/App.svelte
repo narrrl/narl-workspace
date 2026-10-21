@@ -295,7 +295,8 @@
 
   /**
    * The agenda's keys: j/k down the list, Enter to the card, Space finishes it.
-   * Past the cards the cursor walks on into what was written on this day.
+   * Past the cards the cursor walks on into what was written on this day, and
+   * past that into the calendar under it; `h` is the board to its left.
    */
   function agendaKey(event: KeyboardEvent): boolean {
     const cards = workspace.agendaCards
@@ -303,19 +304,20 @@
     const past = workspace.agenda.on_this_day[workspace.agendaCursor - cards.length]
     switch (event.key) {
       case 'j':
-      case 'ArrowDown':
-        workspace.agendaCursor = Math.min(workspace.agendaCursor + 1, Math.max(cards.length + workspace.agenda.on_this_day.length - 1, 0))
+      case 'ArrowDown': {
+        const last = Math.max(cards.length + workspace.agenda.on_this_day.length - 1, 0)
+        if (workspace.agendaCursor >= last) workspace.specialFocus = 'calendar'
+        else workspace.agendaCursor += 1
         return true
+      }
       case 'k':
       case 'ArrowUp':
         workspace.agendaCursor = Math.max(workspace.agendaCursor - 1, 0)
         return true
       case 'Enter':
         if (card) void workspace.guard(() => workspace.goToCard(card))
-        else if (past) {
-          workspace.closeSpecial()
-          void workspace.guard(() => workspace.openPath(past.path))
-        }
+        // Opened from the special workspace, so `q` on it comes back here.
+        else if (past) void workspace.guard(() => workspace.openPath(past.path))
         return true
       case ' ':
         if (card) void workspace.guard(() => workspace.finishCard(card))
@@ -337,10 +339,12 @@
         if (card) void workspace.guard(() => workspace.sendAgendaCard(card, event.key === 'H' ? -1 : 1))
         return true
       case 'T':
-        workspace.closeSpecial()
         void runCommand('today')
         return true
-      case 't':
+      case 'h':
+      case 'ArrowLeft':
+        workspace.specialFocus = 'board'
+        return true
       case 'q':
         workspace.closeSpecial()
         return true
@@ -369,7 +373,6 @@
       case 'Enter':
         void workspace.guard(() => workspace.openCalendarDay()).then(() => hooks.focusEditor())
         return true
-      case 'C':
       case 'q':
         workspace.closeSpecial()
         return true
@@ -638,7 +641,9 @@
         return true
       case 'l':
       case 'ArrowRight':
-        workspace.moveList(1)
+        // Right of the last list is the agenda, the tile beside the board.
+        if (workspace.listCursor >= (workspace.board?.lists.length ?? 0) - 1) workspace.specialFocus = 'agenda'
+        else workspace.moveList(1)
         return true
       case 'j':
       case 'ArrowDown':
@@ -854,6 +859,13 @@
     const previous = pending
     pending = ''
 
+    // In the special workspace Tab walks its tiles, as it walks the spaces
+    // everywhere else; the digits still switch space, and the board with it.
+    if (key === 'Tab' && workspace.view === 'special') {
+      event.preventDefault()
+      workspace.cycleSpecial(event.shiftKey ? -1 : 1)
+      return
+    }
     if (spaceKey(event)) {
       event.preventDefault()
       return
@@ -888,7 +900,8 @@
       return
     }
     // `S`, as the desktop's special workspace is bound: the board, the
-    // agenda and the calendar, put up and away again.
+    // agenda and the calendar, put up and away again. `b`, `t` and `C` only
+    // ever go to their tile.
     if (key === 'S') {
       event.preventDefault()
       void runCommand('special')
@@ -909,7 +922,6 @@
       }
       if (key === 'b') {
         event.preventDefault()
-        workspace.closeSpecial()
         return
       }
       if (previous === 'g' && key === 'g') {
@@ -1307,6 +1319,9 @@
   .special > .agenda { grid-area: agenda; }
   .special > .calendar { grid-area: calendar; }
   .special .fill { height: 100%; }
+  /* The focused tile's key is lit, as its border is. */
+  .special > .window.focused :global(.tile-key) { background: var(--light); border-color: var(--light); color: var(--ink); }
+
   /* One cursor is lit at a time: the other tiles keep theirs, dimmed. */
   .special > .window:not(.focused) :global(:is(.card.active, .row.at, .day.at)) {
     background: var(--surface-alt);

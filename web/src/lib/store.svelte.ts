@@ -76,7 +76,7 @@ export class Tile {
    * document goes back to the board — on the same card — rather than leaving
    * you in a tree you never asked for.
    */
-  returnTo = $state<'board' | null>(null)
+  returnTo = $state<'special' | null>(null)
   /*
    * The document `o` just made. If it is left with neither a name nor a word
    * in it, it is removed on the way out rather than left as an empty row.
@@ -170,7 +170,7 @@ class Workspace {
   get returnTo() {
     return this.tile.returnTo
   }
-  set returnTo(to: 'board' | null) {
+  set returnTo(to: 'special' | null) {
     this.tile.returnTo = to
   }
   get vimMode() {
@@ -299,6 +299,12 @@ class Workspace {
   overlay = $state<'none' | 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks'>('none')
   /** Which of the special workspace's tiles the keys go to. */
   specialFocus = $state<SpecialTile>('board')
+  /**
+   * The space whose board the special workspace shows: the one being browsed
+   * when it has a board, or else the last one shown, so that coming from the
+   * diary does not leave the board's tile empty.
+   */
+  boardSpaceId = $state<number | null>(null)
   /** `gO`: the headings of what is on screen, to jump between from the keyboard. */
   outline = $state.raw<Heading[]>([])
   outlineCursor = $state(0)
@@ -821,14 +827,12 @@ class Workspace {
         this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
       }
     }
-    // The board belongs to the space, so switching space with the special
-    // workspace up shows the new space's board — or says it has none, rather
-    // than leaving the previous board on screen.
-    if (this.view === 'special') {
+    // Switching space with the special workspace up shows the new space's
+    // board; a space without one leaves the last board where it is.
+    if (this.view === 'special' && this.space?.has_board) {
       this.listCursor = 0
       this.cardCursor = 0
-      if (this.space?.has_board) await this.reloadBoard(id, undefined)
-      else this.rawBoard = null
+      await this.reloadBoard(id, undefined)
     }
   }
 
@@ -910,7 +914,7 @@ class Workspace {
       if (isContainer(node)) this.closeSpecial()
       else {
         this.view = 'tree'
-        this.returnTo = 'board'
+        this.returnTo = 'special'
       }
     }
     if (isContainer(node)) {
@@ -1222,6 +1226,7 @@ class Workspace {
     for (const tile of this.tiles) tile.clear()
     this.prune()
     this.rawBoard = null
+    this.boardSpaceId = null
     this.view = 'tree'
     this.spaces = await api.listSpaces()
     const next = this.spaces.find((space) => space.role === 'diary') ?? this.spaces[0]
@@ -1351,7 +1356,7 @@ class Workspace {
   async openCalendarDay() {
     const day = this.calendarDay
     const entry = this.calendarEntries.find((e) => e.day === day)
-    this.closeSpecial()
+    // Opened from the special workspace, so `q` on the entry comes back here.
     if (entry) return this.openPath(entry.path)
     const home = this.spaces.find((space) => space.role === 'diary')
     if (!home) return this.say('there is no diary to write in', 'error')
@@ -1384,7 +1389,7 @@ class Workspace {
     if (!done) return
     const moved = await api.moveCard(card.id, done.id, done.cards.length)
     await this.loadAgenda()
-    if (this.view === 'special' && this.spaceId === card.space_id) await this.reloadBoard()
+    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
     this.say(doneSaid(moved))
   }
 
@@ -1397,7 +1402,7 @@ class Workspace {
     // It may have changed group; the cursor goes with it.
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
-    if (this.view === 'special' && this.spaceId === card.space_id) await this.reloadBoard()
+    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
     return updated
   }
 
@@ -1414,7 +1419,7 @@ class Workspace {
     await this.loadAgenda()
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
-    if (this.view === 'special' && this.spaceId === card.space_id) await this.reloadBoard()
+    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
     this.say(from + delta === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
   }
 
@@ -1489,13 +1494,18 @@ class Workspace {
    */
   async openSpecial(focus: SpecialTile = this.specialFocus) {
     const space = this.space
-    if (space?.has_board) await this.reloadBoard(space.id)
-    else this.rawBoard = null
+    const shown = this.boardSpace?.has_board ? this.boardSpace : this.spaces.find((s) => s.has_board)
+    const board = space?.has_board ? space : shown
+    if (board) await this.reloadBoard(board.id, board.id === this.boardSpaceId ? this.card?.id : undefined)
+    else {
+      this.rawBoard = null
+      this.boardSpaceId = null
+    }
     if (!this.calendarDay) this.calendarDay = formatDay(Math.floor(Date.now() / 1000))
     await Promise.all([this.loadAgenda(), this.loadCalendar()])
     this.view = 'special'
     this.specialFocus = focus
-    if (focus === 'board' && space && !space.has_board) this.say(`${space.slug} has no board — :set board turns one on`, 'error')
+    if (focus === 'board' && !board) this.say('no space has a board — :set board turns one on', 'error')
   }
 
   closeSpecial() {
@@ -1503,24 +1513,40 @@ class Workspace {
     this.returnTo = null
   }
 
+  /** `S`: the special workspace up, on the tile it was left on, or away again. */
+  async toggleSpecial() {
+    if (this.view === 'special') this.closeSpecial()
+    else await this.openSpecial()
+  }
+
   /**
-   * `b`, `t`, `C` and `S`: the special workspace on that tile. A key whose
-   * tile already has focus puts the workspace away again, as the desktop
-   * toggles its scratchpad; any other moves the focus there.
+   * `b`, `t` and `C`: to that tile of the special workspace, putting it up
+   * first when it is not. They only ever go somewhere; leaving is `S`,
+   * `q` or `Esc`, from whichever tile.
    */
-  async toggleSpecial(focus?: SpecialTile) {
-    if (this.view !== 'special') return this.openSpecial(focus)
-    if (focus === undefined || focus === this.specialFocus) return this.closeSpecial()
-    this.specialFocus = focus
+  async showSpecial(focus: SpecialTile) {
+    if (this.view === 'special') this.specialFocus = focus
+    else await this.openSpecial(focus)
+  }
+
+  /** `Tab` / `Shift-Tab` in the special workspace: the next tile round, or the one before. */
+  cycleSpecial(by: 1 | -1) {
+    const order: SpecialTile[] = ['board', 'agenda', 'calendar']
+    this.specialFocus = order[(order.indexOf(this.specialFocus) + by + order.length) % order.length]
   }
 
   async openBoard() {
     await this.openSpecial('board')
   }
 
-  async reloadBoard(spaceId = this.spaceId, keep = this.card?.id) {
+  get boardSpace(): NodeSummary | undefined {
+    return this.spaces.find((space) => space.id === this.boardSpaceId)
+  }
+
+  async reloadBoard(spaceId = this.boardSpaceId ?? this.spaceId, keep = this.card?.id) {
     if (spaceId === null) return
     this.rawBoard = await api.board(spaceId)
+    this.boardSpaceId = spaceId
     void this.loadAgenda()
     // Follow the card that was just moved rather than whatever now sits under
     // the cursor, so J J J walks one card down instead of shuffling three.
@@ -1576,7 +1602,7 @@ class Workspace {
     // The neighbour's own position, not its index: older done cards may be
     // hidden above it.
     await api.moveCard(card.id, list.id, list.cards[to].position)
-    await this.reloadBoard(this.spaceId, card.id)
+    await this.reloadBoard(this.boardSpaceId, card.id)
   }
 
   /** `H`/`L`: the same card, one list over — the move a board is really for. */
@@ -1594,7 +1620,7 @@ class Workspace {
     const target = lists[index]
     if (!card || !target || index === this.listCursor) return
     const moved = await api.moveCard(card.id, target.id, target.cards.length)
-    await this.reloadBoard(this.spaceId, card.id)
+    await this.reloadBoard(this.boardSpaceId, card.id)
     this.say(index === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
   }
 
@@ -1609,7 +1635,7 @@ class Workspace {
       const list = this.list
       if (!list) return this.say('no list to put it on', 'error')
       const card = await api.createCard(list.id, { title, node_id: nodeId })
-      await this.reloadBoard(this.spaceId, card.id)
+      await this.reloadBoard(this.boardSpaceId, card.id)
       return this.say(nodeId === null ? `carded "${card.title}"` : `carded "${card.title}" → #${nodeId}`)
     }
 
@@ -1626,7 +1652,7 @@ class Workspace {
     const card = this.card
     if (!card) return this.say('no card selected', 'error')
     const updated = await api.updateCard(card.id, patch)
-    await this.reloadBoard(this.spaceId, card.id)
+    await this.reloadBoard(this.boardSpaceId, card.id)
     return updated
   }
 
@@ -1649,13 +1675,13 @@ class Workspace {
     const card = this.card
     if (!card) return this.say('no card selected', 'error')
     await api.deleteCard(card.id)
-    await this.reloadBoard(this.spaceId, undefined)
+    await this.reloadBoard(this.boardSpaceId, undefined)
     this.say(`deleted "${card.title}"`)
   }
 
   async createList(name: string) {
-    if (this.spaceId === null) return
-    this.rawBoard = await api.createList(this.spaceId, name)
+    if (this.boardSpaceId === null) return
+    this.rawBoard = await api.createList(this.boardSpaceId, name)
     // It goes in front of the done list, so it is not simply the last one.
     const names = this.rawBoard.lists.map((list) => list.name)
     this.listCursor = Math.max(names.lastIndexOf(name), 0)
@@ -1686,7 +1712,7 @@ class Workspace {
    */
   async openCard() {
     const card = this.card
-    const space = this.spaceId
+    const space = this.boardSpaceId
     if (!card || space === null) return
     let nodeId = card.node_id
     if (nodeId !== null) {
@@ -1718,16 +1744,19 @@ class Workspace {
     await this.openNode(nodeId, card.node_id === null)
     this.prune()
     if (card.node_id === null) this.enterInsert = true
-    this.returnTo = 'board'
+    this.returnTo = 'special'
   }
 
-  /** Back to the board a card's document was opened from. */
-  async returnToBoard() {
+  /**
+   * Back to the special workspace a document was opened from — a card's
+   * notes, a day of the calendar, an entry of the agenda — on the tile it
+   * was opened from.
+   */
+  async returnToSpecial() {
     this.returnTo = null
     this.closeTile()
     this.pane = 'list'
-    await this.reloadBoard()
-    this.view = 'special'
+    await this.openSpecial(this.specialFocus)
   }
 
   /** Turn a space's board on or off. The diary ships with it off. */
@@ -1737,7 +1766,11 @@ class Workspace {
     await api.updateNode(space.id, { has_board: on })
     this.spaces = await api.listSpaces()
     if (on) await this.openBoard()
-    else this.rawBoard = null
+    else if (this.boardSpaceId === space.id) {
+      this.rawBoard = null
+      this.boardSpaceId = null
+      if (this.view === 'special') await this.openSpecial()
+    }
     this.say(on ? `${space.slug} has a board` : `${space.slug} has no board any more`)
   }
 

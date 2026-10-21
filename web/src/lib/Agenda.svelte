@@ -25,7 +25,6 @@
 
   /** An entry from an earlier year, in place in the diary. */
   function open(entry: DiaryEntry) {
-    workspace.closeSpecial()
     void workspace.guard(() => workspace.openPath(entry.path))
   }
 
@@ -38,7 +37,7 @@
 <div class="sheet" bind:this={sheet}>
   <header>
     <span class="label rule"><span class="marker"></span><span class="title">agenda</span> {total} open</span>
-    <button onclick={() => workspace.closeSpecial()}>esc</button>
+    <span class="kbd tile-key" title="the key that comes to this tile">t</span>
   </header>
 
   {#if workspace.agenda.diary_today === false}
@@ -125,7 +124,9 @@
     <span class="gap"></span>
     <span class="kbd">T</span> diary
     <span class="gap"></span>
-    <span class="kbd">t</span><span class="kbd">esc</span> close
+    <span class="kbd">tab</span> tile
+    <span class="gap"></span>
+    <span class="kbd">esc</span> leave
   </footer>
 </div>
 
