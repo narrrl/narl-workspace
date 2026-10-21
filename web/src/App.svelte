@@ -17,6 +17,7 @@
   import MediaBrowser, { copyMedia, insertMedia, removeMedia } from './lib/MediaBrowser.svelte'
   import Trash, { purgeTrashed, restoreTrashed } from './lib/Trash.svelte'
   import Backlinks, { openBacklink } from './lib/Backlinks.svelte'
+  import CardSheet from './lib/CardSheet.svelte'
   import History, { moveHistory, restoreShown } from './lib/History.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
@@ -669,7 +670,7 @@
         workspace.cardCursor = Math.max((workspace.list?.cards.length ?? 0) - 1, 0)
         return true
       case 'Enter':
-        void workspace.guard(() => workspace.openCard())
+        workspace.openCardSheet()
         return true
       case 'o':
       case 'c':
@@ -708,6 +709,90 @@
     }
   }
 
+  /*
+   * The card sheet reads the list keys over its checklist, and the board's
+   * card keys for the card itself — `D`, `H`/`L`, `R` act on it as they do
+   * on the board under it. While the description is being written the keys
+   * are the editor's.
+   */
+  function cardKey(event: KeyboardEvent): boolean {
+    const key = event.key
+    const previous = pending
+    pending = ''
+    if (previous === 'g' && key === 'g') return void workspace.moveTask(-Infinity), true
+    if (previous === 'g' && key === 'f') {
+      workspace.overlay = 'none'
+      void workspace.guard(() => workspace.openCard())
+      return true
+    }
+    if (previous === 'd' && key === 'd') return void workspace.guard(() => workspace.deleteTask()), true
+    switch (key) {
+      case 'g':
+      case 'd':
+        pending = key
+        return true
+      case 'j':
+      case 'ArrowDown':
+        void workspace.moveTask(1)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        void workspace.moveTask(-1)
+        return true
+      case 'G':
+        void workspace.moveTask(Infinity)
+        return true
+      case 'J':
+        void workspace.guard(() => workspace.nudgeTask(1))
+        return true
+      case 'K':
+        void workspace.guard(() => workspace.nudgeTask(-1))
+        return true
+      case ' ':
+      case 'x':
+        void workspace.guard(() => workspace.toggleTask())
+        return true
+      case 'o':
+        cmdline = ':task '
+        return true
+      case 'r': {
+        const task = workspace.card?.checklist[workspace.taskCursor]
+        if (task) cmdline = `:task! ${task.text}`
+        return true
+      }
+      case 'e':
+      case 'i':
+      case 'Enter':
+        workspace.describe()
+        return true
+      case 'a':
+        cmdline = ':label '
+        return true
+      case 'R':
+        cmdline = `:name ${workspace.card?.title ?? ''}`
+        return true
+      case 'D':
+        cmdline = ':due '
+        return true
+      case 'H':
+        void workspace.guard(() => workspace.sendCard(-1))
+        return true
+      case 'L':
+        void workspace.guard(() => workspace.sendCard(1))
+        return true
+      case ':':
+        cmdGlobal = false
+        cmdline = ':'
+        return true
+      case 'q':
+      case 'Escape':
+        workspace.closeCardSheet()
+        return true
+      default:
+        return false
+    }
+  }
+
   function isTypingTarget(target: EventTarget | null) {
     const node = target as HTMLElement | null
     return (
@@ -722,7 +807,8 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.key === 's' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
-      if (workspace.open) void workspace.guard(() => workspace.save())
+      if (workspace.describing) void workspace.guard(() => workspace.saveDescription())
+      else if (workspace.open) void workspace.guard(() => workspace.save())
       return
     }
 
@@ -742,6 +828,12 @@
 
     // The command line over an overlay — `D` in the agenda — keeps its keys.
     const listening = cmdline === null && !isTypingTarget(event.target)
+    if (workspace.overlay === 'card' && !workspace.describing && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (cardKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'help' && listening && !event.metaKey && !event.altKey) {
       if (helpKey(event)) {
         event.preventDefault()
@@ -801,6 +893,8 @@
     }
 
     if (event.key === 'Escape') {
+      // The description's editor has had its Esc; the sheet stays up under it.
+      if (workspace.describing) return
       if (workspace.overlay !== 'none') {
         workspace.overlay = 'none'
         return
@@ -1285,9 +1379,9 @@
 
     {#if workspace.overlay !== 'none'}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
-      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay = 'none')}
+      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay === 'card' ? workspace.closeCardSheet() : (workspace.overlay = 'none'))}
       >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else}<MediaBrowser />{/if}
+        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else if workspace.overlay === 'card'}<CardSheet />{:else}<MediaBrowser />{/if}
       </div>
     {/if}
   </div>

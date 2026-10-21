@@ -17,6 +17,7 @@ import {
   type Revision,
   type RevisionSummary,
   type SpaceOverview,
+  type Task,
   type TrashItem,
   type VaultStatus,
 } from './api'
@@ -282,6 +283,13 @@ class Workspace {
   })
   listCursor = $state(0)
   cardCursor = $state(0)
+  /** The step of the open card's checklist under the cursor. */
+  taskCursor = $state(0)
+  /** The open card's description is being written, and what it says so far. */
+  describing = $state(false)
+  description = $state('')
+  descriptionDirty = $state(false)
+
   /** `z` on the board: show done cards older than a week too. */
   showOldDone = $state(false)
   /*
@@ -296,7 +304,7 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks'>('none')
+  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks' | 'card'>('none')
   /** Which of the special workspace's tiles the keys go to. */
   specialFocus = $state<SpecialTile>('board')
   /**
@@ -1677,6 +1685,153 @@ class Workspace {
     await api.deleteCard(card.id)
     await this.reloadBoard(this.boardSpaceId, undefined)
     this.say(`deleted "${card.title}"`)
+  }
+
+  /*
+   * The card sheet: one card opened up over its board, the way a card on a
+   * paper board is turned over to read its back — the description, the
+   * checklist, the labels. It is the card under the board's cursor, so the
+   * board keys that act on a card (`D`, `H`/`L`, `:repeat`) act on it here
+   * too, and the cursor follows it wherever a move puts it.
+   */
+
+  openCardSheet() {
+    if (!this.card) return this.say('no card selected', 'error')
+    this.taskCursor = 0
+    this.describing = false
+    this.overlay = 'card'
+  }
+
+  /** `q`: the sheet away, unless that would lose a description being written. */
+  closeCardSheet() {
+    if (this.describing && !this.stopDescribing()) return
+    this.overlay = 'none'
+  }
+
+  /** `e`: write the description, from what it says now. */
+  describe() {
+    const card = this.card
+    if (!card) return
+    this.description = card.body
+    this.descriptionDirty = false
+    this.describing = true
+  }
+
+  async saveDescription() {
+    const card = this.card
+    if (!card || !this.describing) return
+    await this.patchCard({ body: this.description })
+    this.descriptionDirty = false
+    this.say(`"${card.title}" described`)
+  }
+
+  /** Stop writing; false, and a word why, while something is unsaved. */
+  stopDescribing(discard = false): boolean {
+    if (this.descriptionDirty && !discard) {
+      this.say('unsaved description — :w to write, :q! to discard', 'error')
+      return false
+    }
+    this.describing = false
+    this.descriptionDirty = false
+    return true
+  }
+
+  /*
+   * The checklist and the labels are written back whole, so two keys pressed
+   * faster than the board reloads would each start from the card as it was,
+   * and the second would undo the first. Each change waits for the one
+   * before it, and reads the card as that one left it.
+   */
+  private cardWrites: Promise<unknown> = Promise.resolve()
+  private inTurn(change: () => Promise<unknown>): Promise<void> {
+    const next = this.cardWrites.then(change)
+    this.cardWrites = next.catch(() => {})
+    return next.then(() => {})
+  }
+
+  /** The checklist written back whole, with the cursor on step `at`. */
+  async writeChecklist(checklist: Task[], at = this.taskCursor) {
+    await this.patchCard({ checklist })
+    this.taskCursor = Math.min(Math.max(at, 0), Math.max(checklist.length - 1, 0))
+  }
+
+  /** `o` / `O`: a new step below or above the cursor. */
+  addTask(text: string, above = false) {
+    return this.inTurn(async () => {
+      const card = this.card
+      if (!card) return this.say('no card selected', 'error')
+      const tasks = [...card.checklist]
+      const at = tasks.length === 0 ? 0 : above ? this.taskCursor : this.taskCursor + 1
+      tasks.splice(at, 0, { text, done: false })
+      await this.writeChecklist(tasks, at)
+    })
+  }
+
+  /** Space: tick the step under the cursor, or untick it. */
+  toggleTask() {
+    return this.inTurn(async () => {
+      const tasks = this.card?.checklist ?? []
+      const task = tasks[this.taskCursor]
+      if (!task) return this.say('no step here — o adds one', 'error')
+      const next = tasks.map((t, i) => (i === this.taskCursor ? { ...t, done: !t.done } : t))
+      await this.writeChecklist(next)
+      this.say(`${next.filter((t) => t.done).length}/${next.length} done`)
+    })
+  }
+
+  renameTask(text: string) {
+    return this.inTurn(async () => {
+      const tasks = this.card?.checklist ?? []
+      if (!tasks[this.taskCursor]) return this.say('no step here — o adds one', 'error')
+      await this.writeChecklist(tasks.map((t, i) => (i === this.taskCursor ? { ...t, text } : t)))
+    })
+  }
+
+  deleteTask() {
+    return this.inTurn(async () => {
+      const tasks = this.card?.checklist ?? []
+      const task = tasks[this.taskCursor]
+      if (!task) return this.say('no step here', 'error')
+      await this.writeChecklist(tasks.filter((_, i) => i !== this.taskCursor))
+      this.say(`dropped "${task.text}"`)
+    })
+  }
+
+  /** `J` / `K`: the step takes the cursor with it. */
+  nudgeTask(delta: number) {
+    return this.inTurn(async () => {
+      const tasks = [...(this.card?.checklist ?? [])]
+      const to = this.taskCursor + delta
+      if (!tasks[this.taskCursor] || to < 0 || to >= tasks.length) return
+      ;[tasks[this.taskCursor], tasks[to]] = [tasks[to], tasks[this.taskCursor]]
+      await this.writeChecklist(tasks, to)
+    })
+  }
+
+  /** `j`/`k`, and `gg`/`G` as ±Infinity — in turn too, so a move lands on the steps as written. */
+  moveTask(delta: number) {
+    return this.inTurn(async () => {
+      const count = this.card?.checklist.length ?? 0
+      this.taskCursor = Math.min(Math.max(this.taskCursor + delta, 0), Math.max(count - 1, 0))
+    })
+  }
+
+  /** `:label work`: on the card, or off it when it is on already. */
+  toggleLabel(name: string) {
+    return this.inTurn(async () => {
+      const card = this.card
+      if (!card) return this.say('no card selected', 'error')
+      const label = name.trim().toLowerCase()
+      const on = card.labels.includes(label)
+      await this.patchCard({ labels: on ? card.labels.filter((l) => l !== label) : [...card.labels, label] })
+      this.say(on ? `${label} off` : `${label} on`)
+    })
+  }
+
+  /** Every label on the board, for Tab on `:label`. */
+  get boardLabels(): string[] {
+    const all = (this.rawBoard?.lists ?? []).flatMap((list) => list.cards.flatMap((card) => card.labels))
+    return [...new Set(all)].sort()
   }
 
   async createList(name: string) {

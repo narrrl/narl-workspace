@@ -4,9 +4,8 @@
    * idiom as the list. The keys live in App.svelte with every other key, so
    * this file only draws and — for a pointer — moves the two cursors.
    */
-  import type { Card } from './api'
   import { workspace } from './store.svelte'
-  import { formatDay } from './util'
+  import { formatDay, labelHue, urgency } from './util'
 
   let columns = $state<HTMLDivElement>()
 
@@ -16,19 +15,6 @@
     columns?.querySelector<HTMLElement>(`[data-at="${at}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   })
 
-  const midnight = () => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    return Math.floor(today.getTime() / 1000)
-  }
-
-  /** `overdue`, `today` or nothing — a date only earns colour when it bites. */
-  function urgency(card: Card): '' | 'today' | 'overdue' {
-    if (card.due_at === null || card.done_at !== null) return ''
-    const start = midnight()
-    if (card.due_at < start) return 'overdue'
-    return card.due_at < start + 86400 ? 'today' : ''
-  }
 
   const total = $derived(workspace.board?.lists.reduce((n, list) => n + list.cards.length, 0) ?? 0)
   const lastIndex = $derived((workspace.board?.lists.length ?? 0) - 1)
@@ -95,15 +81,27 @@
                 class:done={card.done_at !== null}
                 data-at="{listIndex}:{cardIndex}"
                 onclick={() => pick(listIndex, cardIndex)}
-                ondblclick={() => workspace.guard(() => workspace.openCard())}
-                title={card.node_id === null ? 'Enter starts a document for it' : 'Enter opens its document'}
+                ondblclick={() => workspace.openCardSheet()}
+                title="Enter turns the card over"
               >
+                {#if card.labels.length}
+                  <span class="labels">
+                    {#each card.labels as label (label)}<span class="chip {labelHue(label)}">{label}</span>{/each}
+                  </span>
+                {/if}
                 <span class="title">
                   <span class="tick" class:ticked={card.done_at !== null}></span>
                   <span class="text">{card.title}</span>
                 </span>
-                {#if card.due_at !== null || card.node_id !== null || card.repeat !== null}
+                {#if card.due_at !== null || card.node_id !== null || card.repeat !== null || card.checklist.length || card.body.trim()}
+                  {@const ticked = card.checklist.filter((task) => task.done).length}
                   <span class="meta">
+                    {#if card.body.trim()}
+                      <span title="has a description">≡</span>
+                    {/if}
+                    {#if card.checklist.length}
+                      <span class:complete={ticked === card.checklist.length} title="steps done">☑ {ticked}/{card.checklist.length}</span>
+                    {/if}
                     {#if card.due_at !== null}
                       <span class={urgency(card)}>due {formatDay(card.due_at)}</span>
                     {/if}
@@ -147,7 +145,7 @@
     <span><span class="kbd">h</span><span class="kbd">j</span><span class="kbd">k</span><span class="kbd">l</span> move</span>
     <span><span class="kbd">H</span><span class="kbd">L</span> send</span>
     <span><span class="kbd">␣</span> done</span>
-    <span><span class="kbd">↵</span> notes</span>
+    <span><span class="kbd">↵</span> open</span>
     <span><span class="kbd">o</span> new</span>
     <span><span class="kbd">D</span> due</span>
     <span><span class="kbd">R</span> rename</span>
@@ -286,7 +284,7 @@
   .card:hover { background: var(--surface-alt); color: var(--light); border-color: transparent; }
   .card:active { transform: none; }
   .card.active, .card:focus-visible { background: var(--light); color: var(--ink); }
-  .card.active :is(.meta, .today, .overdue, .doc) { color: var(--ink); }
+  .card.active :is(.meta, .today, .overdue, .doc, .complete) { color: var(--ink); }
   .card.active .tick { border-color: var(--ink); }
   .card.active .tick.ticked { background: var(--ink); }
   .card.done .text { text-decoration: line-through; color: var(--muted); }
@@ -304,6 +302,9 @@
   .tick.ticked { background: var(--light-dim); border-color: var(--light-dim); }
   .meta { display: flex; gap: 10px; font-size: 11px; padding-left: 18px; color: var(--muted); }
   .meta .today { color: var(--light); }
+  .meta .complete { color: var(--moss); }
+  .card.active .chip { color: var(--ink); background: color-mix(in oklab, var(--hue) 55%, transparent); }
+  .labels { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 18px; }
   .meta .overdue { color: var(--alarm); }
   .doc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 24ch; }
 

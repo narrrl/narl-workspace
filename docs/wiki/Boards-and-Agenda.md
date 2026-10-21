@@ -57,13 +57,46 @@ a week fold away until `z` shows them.
 | `H` / `L` | move the card to the list on the left / right |
 | `Space` | into the done list, or back out to the inbox |
 | `o`, `c` | a new card on this list |
-| `Enter` | the card's notes |
+| `Enter` | turn the card over: labels, description, checklist |
 | `D` | due date |
 | `R` | rename the card |
 | `z` | show done cards older than a week |
 | `F` | a letter over every card; type it to jump there |
 | `x`, `dd` | delete the card |
 | `q`, `Esc` | leave the special workspace |
+
+### The back of a card
+
+`Enter` on a card turns it over: a sheet floats over the board with its
+labels, its description and its checklist. The card stays the one under the
+board's cursor, so `D`, `R`, `H` and `L` act on it as they do on the board.
+
+| key | what it does |
+| --- | --- |
+| `j` / `k`, `gg` / `G` | down / up the checklist, its first / last step |
+| `Space`, `x` | tick the step, or untick it |
+| `o` | a new step below the cursor (`:task <text>`) |
+| `r` | reword the step (`:task! <text>`) |
+| `J` / `K` | move the step down / up |
+| `dd` | drop the step |
+| `e`, `i`, `Enter` | write the description |
+| `a` | put a label on, or take it off (`:label <name>`) |
+| `gf` | the card's notes, below |
+| `q`, `Esc` | back to the board |
+
+The description is markdown, written in the same editor as a document, vim
+and all: `:w` writes it to the card, `:q` or `Esc` in normal mode leaves, and
+`:q!` throws away what was not written. A fenced block in a language is
+coloured the way nvim colours it, written and read.
+
+Labels are lower case, and each name keeps its colour on every card and every
+board, without anything to set: the colour comes from the name. `Tab` on
+`:label` offers the ones the board already uses. The board shows a card's
+labels over its title, and `☑ 2/5` and `≡` under it when it has a checklist and
+a description.
+
+A repeating card comes back with the same labels and the same checklist, every
+step open again.
 
 ### Capturing a card
 
@@ -73,7 +106,7 @@ you stay where you were. From outside the browser, see [Capture](Capture.md).
 
 ### Notes
 
-`Enter` on a card opens its notes: a document named after the card, made in the
+`gf` on the back of a card opens its notes: a document named after the card, made in the
 root of the space the first time. Closing it goes back to the board, on the
 same card. `:card!` while reading a document makes a card that points at it.
 

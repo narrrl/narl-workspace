@@ -298,8 +298,8 @@ export const commands: CommandSpec[] = [
     name: 'write',
     aliases: ['w'],
     group: 'editing',
-    help: 'save the open document',
-    run: () => workspace.guard(() => workspace.save()),
+    help: "save the open document — or the card's description being written",
+    run: () => workspace.guard(() => (workspace.describing ? workspace.saveDescription() : workspace.save())),
     bang: {
       help: 'save even over a newer version saved somewhere else since this one was opened',
       run: () => workspace.guard(() => workspace.save({ force: true })),
@@ -311,6 +311,11 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'save and leave insert/editor mode',
     run: async () => {
+      if (workspace.describing) {
+        await workspace.guard(() => workspace.saveDescription())
+        workspace.stopDescribing()
+        return
+      }
       await workspace.guard(() => workspace.save())
       workspace.editing = false
       hooks.focusList()
@@ -330,6 +335,7 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'close the editor, or the document when already reading',
     run: async () => {
+      if (workspace.describing) return void workspace.stopDescribing()
       // A document `o` made and nothing was written in is not kept.
       if (await workspace.abandonIfBlank()) {
         if (workspace.returnTo === 'special') await workspace.guard(() => workspace.returnToSpecial())
@@ -348,6 +354,7 @@ export const commands: CommandSpec[] = [
     bang: {
       help: 'discard changes and close the editor',
       run: async () => {
+        if (workspace.describing) return void workspace.stopDescribing(true)
         const open = workspace.open
         workspace.editing = false
         workspace.dirty = false
@@ -506,6 +513,38 @@ export const commands: CommandSpec[] = [
     run: () => {
       if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
       return workspace.guard(() => workspace.toggleDone())
+    },
+  },
+  {
+    name: 'task',
+    aliases: ['step'],
+    args: '<text>',
+    group: 'board',
+    help: "add a step to the open card's checklist, below the cursor",
+    run: async (arg) => {
+      if (workspace.overlay !== 'card') return workspace.say('no card open — Enter on the board opens one', 'error')
+      if (!arg.trim()) return workspace.say('usage: :task <text>', 'error')
+      await workspace.guard(() => workspace.addTask(arg.trim()))
+    },
+    bang: {
+      help: 'reword the step under the cursor',
+      run: async (arg) => {
+        if (workspace.overlay !== 'card') return workspace.say('no card open — Enter on the board opens one', 'error')
+        if (!arg.trim()) return workspace.say('usage: :task! <text>', 'error')
+        await workspace.guard(() => workspace.renameTask(arg.trim()))
+      },
+    },
+  },
+  {
+    name: 'label',
+    args: '<name>',
+    group: 'board',
+    help: 'put a label on the card, or take it off when it has it — each name keeps its colour everywhere',
+    complete: () => workspace.boardLabels,
+    run: async (arg) => {
+      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      if (!arg.trim()) return workspace.say(workspace.card?.labels.join(' · ') || 'no labels — :label <name> adds one')
+      await workspace.guard(() => workspace.toggleLabel(arg))
     },
   },
   {

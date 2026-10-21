@@ -106,7 +106,7 @@
     ['J / K', 'move the card down / up its list'],
     ['H / L', 'move the card to the list left / right'],
     ['Space', 'into the done list, or back out to the inbox'],
-    ['Enter', "the card's notes — a document, made on first use; q comes back"],
+    ['Enter', 'turn the card over: its labels, description and checklist'],
     ['o · c', 'new card on this list'],
     ['D', 'due date: fri, tm, +3d, 10-31 …'],
     ['R', 'rename the card, or the list when it is empty'],
@@ -115,6 +115,22 @@
     ['r', 'read the board again, for changes made elsewhere'],
     ['x · dd', 'delete the card (asks y/N)'],
     ['q · Esc', 'leave the special workspace'],
+  ]
+
+  const cardKeys: [string, string][] = [
+    ['j / k', 'down / up the checklist'],
+    ['gg / G', 'first / last step'],
+    ['Space · x', 'tick the step, or untick it'],
+    ['o', 'a new step below the cursor — :task on the line'],
+    ['r', 'reword the step'],
+    ['J / K', 'move the step down / up'],
+    ['dd', 'drop the step'],
+    ['e · i · Enter', 'write the description, in the editor — :w writes it, :q or Esc in normal mode leaves'],
+    ['a', 'put on a label, or take it off — :label on the line, Tab offers the board\'s'],
+    ['R · D', 'rename the card, its due date'],
+    ['H / L', 'send the card to the list left / right'],
+    ['gf', "the card's notes — a document, made on first use; q comes back"],
+    ['q · Esc', 'back to the board'],
   ]
 
   const agendaKeys: [string, string][] = [
@@ -159,6 +175,7 @@
     ['vim', 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros; :w writes'],
     ['drop · paste', 'an image, video or audio file attaches it'],
     ['$x^2$ · $$…$$', 'set as math'],
+    ['```rust', 'a fenced block in a language is coloured as nvim colours it, written and read'],
     ['```typst', 'a block typst sets, shown as an image — math, tables, figures; no packages or files'],
     [':12', 'jumps straight to entry 12'],
     ['y · d', 'copied to the system clipboard — :set noclipboard keeps them in the registers'],
@@ -168,6 +185,7 @@
   const sections: [string, Row[]][] = [
     ['keys', fromPairs(keys)],
     ['board keys', fromPairs(boardKeys)],
+    ['card keys', fromPairs(cardKeys)],
     ['agenda keys', fromPairs(agendaKeys)],
     ['in the editor', fromPairs(editorKeys)],
     ...groups.map((group: Group) => [titles[group], fromSpecs(commands.filter((spec) => spec.group === group))] as [string, Row[]]),

@@ -227,7 +227,8 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             .map(|row| (row.get("id"), row.get("space_id"), row.get("name")))
             .collect();
     let cards: Vec<(i64, CardMeta, Option<i64>)> = sqlx::query(
-        "SELECT list_id, title, body, due_at, done_at, repeat, created_at, updated_at, node_id
+        "SELECT list_id, title, body, due_at, done_at, repeat, checklist, labels,
+                created_at, updated_at, node_id
          FROM cards ORDER BY position, id",
     )
     .fetch_all(&state.db)
@@ -240,6 +241,8 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
             due_at: row.get("due_at"),
             done_at: row.get("done_at"),
             repeat: row.get("repeat"),
+            checklist: serde_json::from_str(row.get("checklist")).unwrap_or_default(),
+            labels: serde_json::from_str(row.get("labels")).unwrap_or_default(),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             document: None,

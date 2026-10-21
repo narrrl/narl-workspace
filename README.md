@@ -29,7 +29,8 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
   on a phone. Math by KaTeX, `$x^2$` and `$$…$$`, and ` ```typst ` blocks
   typeset by Typst on the server. `[[Title]]` links that are
   rewritten when what they point at is renamed or moved, and backlinks.
-- **Plan.** A kanban board per space, due dates said the way you say them
+- **Plan.** A kanban board per space, cards with a checklist, labels and a
+  markdown description, due dates said the way you say them
   (`fri`, `+3d`), cards that come back once done, and an agenda of what is late,
   due or in hand on every board.
 - **Remember.** A diary with a calendar, templates, the entries from this day
@@ -266,7 +267,7 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `j` / `k` | down / up the cards of that list |
 | `J` / `K` | move the card down / up its list |
 | `H` / `L` | move the card to the list on the left / right |
-| `Enter` | the card's notes: its document, made on first use; `q` comes back |
+| `Enter` | turn the card over: labels, a markdown description, a checklist |
 | `Space` | into the done column, or back out to the inbox |
 | `o`, `c` | a new card on this list |
 | `D` | due date — `fri`, `tm`, `+3d`, `+2w`, `10-31`, `2026-10-31` |
@@ -276,8 +277,14 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `x`, `dd` | delete the card |
 | `q`, `Esc` | back to the tree |
 
+On the back of a card, `j`/`k` walk the checklist, `Space` ticks a step, `o`
+adds one and `dd` drops it; `e` writes the description in the vim editor, `:w`
+saving it to the card; `a` puts a label on. Code in the description is
+coloured as nvim colours it. See the
+[wiki](docs/wiki/Boards-and-Agenda.md#the-back-of-a-card) for every key.
+
 A card can point at a document: `:card!` while reading one makes a card for it,
-and `Enter` on that card opens it again. `Enter` on a card without one makes a
+and `gf` on its back opens it again. `gf` on a card without one makes a
 document named after the card in the space's root and opens it to write in, and
 closing that document returns to the board on the same card. The link is deliberately loose —
 deleting the document leaves the card standing, because the work is still open

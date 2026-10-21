@@ -76,7 +76,7 @@ The first list is the inbox, the last list is done.
 | `J / K` | move the card down / up its list |
 | `H / L` | move the card to the list left / right |
 | `Space` | into the done list, or back out to the inbox |
-| `Enter` | the card's notes — a document, made on first use; q comes back |
+| `Enter` | turn the card over: its labels, description and checklist |
 | `o · c` | new card on this list |
 | `D` | due date: fri, tm, +3d, 10-31 … |
 | `R` | rename the card, or the list when it is empty |
@@ -131,6 +131,9 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:due <when\|->` | due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
 | `:done` | move the selected card into the done list, or back out to the inbox |
+| `:task, :step <text>` | add a step to the open card's checklist, below the cursor |
+| `:task!` | reword the step under the cursor |
+| `:label <name>` | put a label on the card, or take it off when it has it — each name keeps its colour everywhere |
 | `:list <name>` | add a column to the board |
 | `:list!` | delete the column under the cursor and every card on it |
 | `:agenda, :ag` | what is late, due this week, or in hand — across every board |
@@ -172,7 +175,7 @@ do: `:w!`, `:space! <name>`, `:import!`.
 
 | command | what it does |
 | --- | --- |
-| `:write, :w` | save the open document |
+| `:write, :w` | save the open document — or the card's description being written |
 | `:write!` | save even over a newer version saved somewhere else since this one was opened |
 | `:wq, :x` | save and leave insert/editor mode |
 | `:wq!` | save over a newer version, as :w! does, and leave the editor |

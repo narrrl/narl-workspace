@@ -170,9 +170,18 @@ export interface Card {
   done_at: number | null
   /** `daily`, `weekly`, `monthly`, `yearly`, `+3d`, `+2w`, `+6m` — or none. */
   repeat: string | null
+  checklist: Task[]
+  /** Lower case, each once. */
+  labels: string[]
   position: number
   created_at: number
   updated_at: number
+}
+
+/** A step on a card's checklist. */
+export interface Task {
+  text: string
+  done: boolean
 }
 
 /** A card after a move or an edit, and the copy a repeating card it finished left in the inbox. */
@@ -564,6 +573,9 @@ export const api = {
       node_id?: number | null
       due_at?: number | null
       repeat?: string | null
+      /** The whole checklist, as it should now read. */
+      checklist?: Task[]
+      labels?: string[]
       done?: boolean
     },
   ) => request<Moved>(`/cards/${id}`, { method: 'PUT', body: body(patch) }),

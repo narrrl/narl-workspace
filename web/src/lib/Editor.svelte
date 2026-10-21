@@ -120,7 +120,7 @@
     Vim.mapCommand('gT', 'action', 'workspacePrevTile', {}, { context: 'normal' })
   }
 
-  function bindVim() {
+  export function bindVim() {
     if (vimBound) return
     vimBound = true
     bridgeExCommands()
@@ -136,7 +136,7 @@
   import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-  import { HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
+  import { indentOnInput } from '@codemirror/language'
   import { EditorState } from '@codemirror/state'
   import {
     drawSelection,
@@ -145,10 +145,10 @@
     keymap,
     placeholder,
   } from '@codemirror/view'
-  import { tags } from '@lezer/highlight'
   import { onDestroy, onMount } from 'svelte'
   import { api } from './api'
   import { hooks } from './commands'
+  import { editorTheme, highlighting, languages } from './editorTheme'
   import { embedSnippet } from './markdown'
   import { workspace, type Tile } from './store.svelte'
 
@@ -158,71 +158,6 @@
   let host = $state<HTMLDivElement>()
   let view: EditorView | undefined
   const focus = () => view?.focus()
-
-  const markdownHighlight = HighlightStyle.define([
-    { tag: tags.heading, color: 'var(--light)', fontWeight: '600' },
-    { tag: tags.strong, color: 'var(--light)', fontWeight: '700' },
-    { tag: tags.emphasis, color: 'var(--subtle)', fontStyle: 'italic' },
-    { tag: tags.link, color: 'var(--light)', textDecoration: 'underline', textDecorationColor: 'var(--overlay)' },
-    { tag: tags.url, color: 'var(--light-dim)' },
-    { tag: tags.monospace, color: 'var(--light-soft)', backgroundColor: 'var(--surface)' },
-    { tag: tags.quote, color: 'var(--subtle)', fontStyle: 'italic' },
-    { tag: tags.list, color: 'var(--light-dim)' },
-    { tag: tags.contentSeparator, color: 'var(--muted)' },
-    { tag: tags.processingInstruction, color: 'var(--muted)' },
-  ])
-
-  /*
-   * CodeMirror's base theme paints panels and the caret for a light editor
-   * (`&light .cm-panels { color: black }`), and those selectors outrank
-   * anything the app stylesheet can say. Theme rules do win, so the parts that
-   * would otherwise render black on black live here rather than in app.css.
-   * `dark: true` also stops the light defaults applying in the first place.
-   */
-  const editorTheme = EditorView.theme(
-    {
-      '&': { color: 'var(--fg)', backgroundColor: 'transparent', height: '100%' },
-      '.cm-content': { padding: '12px 28px', maxWidth: '90ch' },
-      '.cm-line': { padding: '0' },
-      '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--light)' },
-      '.cm-panels': {
-        backgroundColor: 'var(--hull)',
-        color: 'var(--fg)',
-        borderColor: 'var(--rim)',
-      },
-      '.cm-panels-bottom': { borderTop: '1px solid var(--rim)' },
-      /*
-       * The `:` prompt is a bare text node in the panel; the input follows it.
-       * The input is an inline-block whose baseline sits below the text node's,
-       * so the two are laid out as flex items instead of aligned by baseline.
-       */
-      '.cm-vim-panel': {
-        padding: '4px 12px',
-        color: 'var(--light)',
-        display: 'flex',
-        alignItems: 'center',
-      },
-      '.cm-tooltip': {
-        backgroundColor: 'var(--hull)',
-        color: 'var(--fg)',
-        border: '1px solid var(--rim)',
-      },
-      '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-        backgroundColor: 'var(--surface-alt)',
-        color: 'var(--light)',
-      },
-      '.cm-completionDetail': { color: 'var(--muted)', fontStyle: 'normal', marginLeft: '1ch' },
-      '.cm-vim-panel input': {
-        fontFamily: 'inherit',
-        fontSize: 'inherit',
-        lineHeight: 'inherit',
-        color: 'var(--light)',
-        caretColor: 'var(--light)',
-        flex: '1',
-      },
-    },
-    { dark: true },
-  )
 
   /*
    * `[[` offers the titles of documents as the search finds them, each with
@@ -298,9 +233,9 @@
       indentOnInput(),
       highlightActiveLine(),
       EditorState.allowMultipleSelections.of(true),
-      markdown({ base: markdownLanguage, codeLanguages: [] }),
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
       autocompletion({ override: [titleCompletions], icons: false }),
-      syntaxHighlighting(markdownHighlight),
+      highlighting,
       EditorView.lineWrapping,
       placeholder('write…'),
       editorTheme,

@@ -362,3 +362,25 @@ export function hitParts(excerpt: string): { text: string; lit: boolean }[] {
   }
   return parts
 }
+
+/*
+ * A label's colour, from its name alone, so the same label is the same hue on
+ * every card and every board without anything to set. The hues are the
+ * terminal's earth tones; rust stays out, because rust means wrong.
+ */
+const LABEL_HUES = ['sand', 'moss', 'dusk', 'slate', 'heather'] as const
+export function labelHue(name: string): (typeof LABEL_HUES)[number] {
+  let hash = 0
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0
+  return LABEL_HUES[hash % LABEL_HUES.length]
+}
+
+/** `overdue`, `today` or nothing — a card's date only earns colour when it bites. */
+export function urgency(card: { due_at: number | null; done_at: number | null }): '' | 'today' | 'overdue' {
+  if (card.due_at === null || card.done_at !== null) return ''
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const start = Math.floor(today.getTime() / 1000)
+  if (card.due_at < start) return 'overdue'
+  return card.due_at < start + 86400 ? 'today' : ''
+}

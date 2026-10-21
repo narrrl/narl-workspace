@@ -70,9 +70,81 @@ pub struct Card {
     pub done_at: Option<i64>,
     /// The rule it comes back by once finished, as `Repeat::name` writes it.
     pub repeat: Option<String>,
+    pub checklist: Vec<Task>,
+    pub labels: Vec<String>,
     pub position: i64,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// A step on a card's checklist.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Task {
+    pub text: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// The most a card holds of each, so a runaway client cannot grow one row
+/// without end.
+const MAX_TASKS: usize = 200;
+const MAX_LABELS: usize = 12;
+const MAX_LABEL_LEN: usize = 32;
+
+/// A checklist as it is kept: each step trimmed, the empty ones dropped.
+fn tidy_checklist(tasks: Vec<Task>) -> AppResult<Vec<Task>> {
+    let tasks: Vec<Task> = tasks
+        .into_iter()
+        .filter_map(|task| {
+            let text = task.text.trim();
+            (!text.is_empty()).then(|| Task {
+                text: text.to_string(),
+                done: task.done,
+            })
+        })
+        .collect();
+    if tasks.len() > MAX_TASKS {
+        return Err(AppError::BadRequest(format!(
+            "a checklist holds at most {MAX_TASKS} steps"
+        )));
+    }
+    Ok(tasks)
+}
+
+/// Labels as they are kept: lower case, trimmed, each once, in the order given.
+fn tidy_labels(labels: Vec<String>) -> AppResult<Vec<String>> {
+    let mut kept: Vec<String> = Vec::new();
+    for label in labels {
+        let label = label.trim().to_lowercase();
+        if label.is_empty() || kept.contains(&label) {
+            continue;
+        }
+        if label.chars().count() > MAX_LABEL_LEN {
+            return Err(AppError::BadRequest(format!(
+                "a label is at most {MAX_LABEL_LEN} characters"
+            )));
+        }
+        kept.push(label);
+    }
+    if kept.len() > MAX_LABELS {
+        return Err(AppError::BadRequest(format!(
+            "a card carries at most {MAX_LABELS} labels"
+        )));
+    }
+    Ok(kept)
+}
+
+/// A JSON column read back, or empty when it does not parse: a card with a
+/// mangled checklist still shows, which beats the whole board failing.
+fn json_column<T: serde::de::DeserializeOwned + Default>(
+    row: &sqlx::sqlite::SqliteRow,
+    name: &str,
+) -> T {
+    serde_json::from_str(row.get::<&str, _>(name)).unwrap_or_default()
+}
+
+fn to_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("a checklist or label list serialises")
 }
 
 #[derive(Deserialize)]
@@ -107,6 +179,11 @@ pub struct CardPatch {
     pub due_at: Option<Option<i64>>,
     #[serde(default, deserialize_with = "double_option")]
     pub repeat: Option<Option<String>>,
+    /// The whole checklist, as it should now read.
+    #[serde(default)]
+    pub checklist: Option<Vec<Task>>,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
     pub done: Option<bool>,
 }
 
@@ -229,7 +306,7 @@ async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard
              FROM board_lists GROUP BY space_id
          )
          SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.position, c.created_at, c.updated_at,
+                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name,
                 s.id AS space_id, s.slug AS space_slug, l.name AS list_name,
                 l.position = b.first AS is_first
@@ -303,6 +380,8 @@ fn row_to_card(row: &sqlx::sqlite::SqliteRow) -> Card {
         due_at: row.get("due_at"),
         done_at: row.get("done_at"),
         repeat: row.get("repeat"),
+        checklist: json_column(row, "checklist"),
+        labels: json_column(row, "labels"),
         position: row.get("position"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
@@ -470,8 +549,8 @@ pub(crate) async fn restore(
         for card in &list.cards {
             sqlx::query(
                 "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, repeat,
-                                    position, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                    checklist, labels, position, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )
             .bind(id)
             .bind(card.document.as_ref().and_then(|path| documents.get(path)))
@@ -487,6 +566,8 @@ pub(crate) async fn restore(
                     .and_then(Repeat::parse)
                     .map(Repeat::name),
             )
+            .bind(to_json(&tidy_checklist(card.checklist.clone())?))
+            .bind(to_json(&tidy_labels(card.labels.clone())?))
             .bind(position)
             .bind(card.created_at)
             .bind(card.updated_at)
@@ -541,7 +622,7 @@ async fn load(state: &AppState, space_id: i64, space_name: String) -> AppResult<
     // is small, and the round trips are what would be felt.
     let card_rows = sqlx::query(
         "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.position, c.created_at, c.updated_at,
+                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
          FROM cards c
          JOIN board_lists l ON l.id = c.list_id
@@ -814,18 +895,28 @@ pub async fn update_card(
         Some(None) => None,
         None => current.repeat.clone(),
     };
+    let checklist = match patch.checklist {
+        Some(tasks) => tidy_checklist(tasks)?,
+        None => current.checklist.clone(),
+    };
+    let labels = match patch.labels {
+        Some(labels) => tidy_labels(labels)?,
+        None => current.labels.clone(),
+    };
 
     let mut tx = crate::db::begin_write(&state.db).await?;
     sqlx::query(
         "UPDATE cards SET title = ?1, body = ?2, node_id = ?3, due_at = ?4, repeat = ?5,
-                          updated_at = ?6
-         WHERE id = ?7",
+                          checklist = ?6, labels = ?7, updated_at = ?8
+         WHERE id = ?9",
     )
     .bind(&title)
     .bind(patch.body.as_ref().unwrap_or(&current.body))
     .bind(patch.node_id.unwrap_or(current.node_id))
     .bind(patch.due_at.unwrap_or(current.due_at))
     .bind(&repeat)
+    .bind(to_json(&checklist))
+    .bind(to_json(&labels))
     .bind(now)
     .bind(card_id)
     .execute(&mut *tx)
@@ -838,6 +929,8 @@ pub async fn update_card(
         node_id: patch.node_id.unwrap_or(current.node_id),
         due_at: patch.due_at.unwrap_or(current.due_at),
         repeat,
+        checklist,
+        labels,
         ..current
     };
 
@@ -1011,8 +1104,9 @@ async fn relocate(
 }
 
 /// The next one of a repeating card that has just been finished, at the
-/// bottom of its board's inbox: the same title, notes, document and rule,
-/// due on the rule's next date from today on. A card without a date counts
+/// bottom of its board's inbox: the same title, notes, document, labels and
+/// rule, and the same checklist with every step open again, due on the
+/// rule's next date from today on. A card without a date counts
 /// from the moment it was finished. The finished card gives its rule up, so
 /// taking it out of done and finishing it again leaves no second copy.
 async fn come_back(
@@ -1038,11 +1132,11 @@ async fn come_back(
     .fetch_one(&mut *db)
     .await?;
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO cards (list_id, node_id, title, body, due_at, repeat, position,
-                            created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+        "INSERT INTO cards (list_id, node_id, title, body, due_at, repeat, checklist, labels,
+                            position, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                  (SELECT COALESCE(MAX(position), -1) + 1 FROM cards WHERE list_id = ?1),
-                 ?7, ?7)
+                 ?9, ?9)
          RETURNING id",
     )
     .bind(inbox)
@@ -1051,6 +1145,8 @@ async fn come_back(
     .bind(&card.body)
     .bind(due_at)
     .bind(rule.name())
+    .bind(to_json(&reopened(&card.checklist)))
+    .bind(to_json(&card.labels))
     .bind(now)
     .fetch_one(&mut *db)
     .await?;
@@ -1062,10 +1158,21 @@ async fn come_back(
     Ok(Some(id))
 }
 
+/// A checklist to go through again: the same steps, none of them ticked.
+fn reopened(tasks: &[Task]) -> Vec<Task> {
+    tasks
+        .iter()
+        .map(|task| Task {
+            done: false,
+            ..task.clone()
+        })
+        .collect()
+}
+
 async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
     let row = sqlx::query(
         "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.position, c.created_at, c.updated_at,
+                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
                 (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
          FROM cards c WHERE c.id = ?1",
     )
@@ -1079,7 +1186,10 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::{agenda_cards, card, done_after_move, relocate, reordered, restore, settle};
+    use super::{
+        agenda_cards, card, done_after_move, relocate, reordered, restore, settle, tidy_checklist,
+        tidy_labels, Task,
+    };
     use crate::routes::manifest::{CardMeta, ListMeta};
     use std::collections::HashMap;
 
@@ -1132,8 +1242,11 @@ mod tests {
         let (inbox, doing, done) = (lists[0], lists[1], lists[2]);
         let day = 86400;
         let id: i64 = sqlx::query_scalar(
-            "INSERT INTO cards (list_id, title, body, due_at, repeat, position, created_at, updated_at)
-             VALUES (?1, 'water the plants', 'the big one too', ?2, 'weekly', 0, 0, 0) RETURNING id",
+            r#"INSERT INTO cards (list_id, title, body, due_at, repeat, checklist, labels,
+                                position, created_at, updated_at)
+             VALUES (?1, 'water the plants', 'the big one too', ?2, 'weekly',
+                     '[{"text":"ferns","done":true},{"text":"cactus","done":false}]',
+                     '["home"]', 0, 0, 0) RETURNING id"#,
         )
         .bind(doing)
         .bind(10 * day + 12 * 3600)
@@ -1150,6 +1263,14 @@ mod tests {
         assert_eq!(copy.due_at, Some(17 * day + 12 * 3600));
         assert_eq!(copy.repeat.as_deref(), Some("weekly"));
         assert_eq!(copy.done_at, None);
+        // The same steps to go through again, none of them ticked yet.
+        let steps: Vec<(&str, bool)> = copy
+            .checklist
+            .iter()
+            .map(|t| (t.text.as_str(), t.done))
+            .collect();
+        assert_eq!(steps, [("ferns", false), ("cactus", false)]);
+        assert_eq!(copy.labels, ["home"]);
         assert_eq!(card(&db, id).await.unwrap().repeat, None);
 
         assert_eq!(finish(&db, id, inbox, done, 12 * day).await, None);
@@ -1210,6 +1331,8 @@ mod tests {
             due_at: Some(0),
             done_at: None,
             repeat: repeat.map(String::from),
+            checklist: Vec::new(),
+            labels: Vec::new(),
             created_at: 0,
             updated_at: 0,
             document: None,
@@ -1392,6 +1515,34 @@ mod tests {
             .await
             .unwrap();
         assert!(done_at(db.clone()).await.is_some());
+    }
+
+    #[test]
+    fn a_checklist_keeps_its_steps_trimmed_and_drops_the_empty_ones() {
+        let task = |text: &str, done| Task {
+            text: text.into(),
+            done,
+        };
+        let kept = tidy_checklist(vec![
+            task("  buy paint ", true),
+            task("   ", false),
+            task("paint", false),
+        ])
+        .unwrap();
+        assert_eq!(kept, [task("buy paint", true), task("paint", false)]);
+        assert!(tidy_checklist(vec![task("x", false); 201]).is_err());
+    }
+
+    #[test]
+    fn labels_are_lower_case_and_each_once() {
+        let labels = |names: &[&str]| tidy_labels(names.iter().map(|n| n.to_string()).collect());
+        assert_eq!(
+            labels(&["Bug", " bug ", "", "uni"]).unwrap(),
+            ["bug", "uni"]
+        );
+        assert!(labels(&[&"x".repeat(33)]).is_err());
+        let many: Vec<String> = (0..13).map(|n| n.to_string()).collect();
+        assert!(tidy_labels(many).is_err());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { marked, type TokenizerAndRendererExtension } from 'marked'
+import { highlighted } from './code.svelte'
 import { mathEngine } from './math.svelte'
 import { typeset } from './typst.svelte'
 import { hardWrapped, titleHref } from './util'
@@ -94,7 +95,9 @@ marked.use({
     code(token) {
       if (token.lang === 'math') return tex(token.text, true)
       if (token.lang === 'typst' || token.lang === 'typ') return typst(token.text)
-      return false
+      const html = token.lang ? highlighted(token.text, token.lang) : null
+      if (html === null) return false
+      return `<pre><code class="language-${escapeHtml(token.lang!.split(/\s/)[0])}">${html}</code></pre>\n`
     },
   },
 })

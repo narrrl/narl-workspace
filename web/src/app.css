@@ -1,9 +1,11 @@
 /* ── palette ─────────────────────────────────────────────────────────────── */
 /*
  * YoRHa dark, the palette of the desktop this runs on (quickshell Theme.qml,
- * hypr palette.lua) and of narl.io. A green-black ramp, sage-grey text, and
- * only two colours that mean anything: `light` is focus, selection and
- * whatever is live; `alarm` is something wrong. Nothing else carries hue.
+ * hypr palette.lua, nvim's yorha.lua) and of narl.io. A green-black ramp,
+ * sage-grey text, and only two colours that mean anything: `light` is focus,
+ * selection and whatever is live; `alarm` is something wrong. The earth hues
+ * below are the terminal's, pulled down so they sit in the void: they colour
+ * code, the way nvim colours it, and a card's labels — and nothing else.
  */
 :root {
   --ink: #090a08;
@@ -23,6 +25,17 @@
   --light-dim: #8e978d;
   --light-soft: #bcc1bf;
   --alarm: #c8684f;
+
+  --sand: #c9b27c;
+  --sand-br: #d8c491;
+  --moss: #8fa37e;
+  --moss-br: #a5b893;
+  --slate: #7f9aa8;
+  --slate-br: #96afbc;
+  --heather: #a48ba0;
+  --heather-br: #b8a0b4;
+  --dusk: #86a8a0;
+  --dusk-br: #9cbdb4;
 
   --font-sans: "Noto Sans Variable", "Noto Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
@@ -512,7 +525,77 @@ input::placeholder { color: var(--muted); }
   overflow-x: auto;
   margin: 0 0 1em;
 }
-.md pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.md pre code { background: none; border: 0; padding: 0; font-size: inherit; color: var(--fg); }
+/* Inline code is moss on a lift and a block sits on the hull, as
+   render-markdown draws them in nvim. */
+.md :not(pre) > code { color: var(--moss); }
+.md pre { background: var(--hull); }
+
+/* A card's label: its hue on a breath of the same, as nvim draws virtual text. */
+.chip {
+  padding: 0 7px;
+  border-radius: var(--radius-s);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  color: var(--hue);
+  background: color-mix(in oklab, var(--hue) 14%, transparent);
+}
+.chip.sand { --hue: var(--sand); }
+.chip.moss { --hue: var(--moss); }
+.chip.dusk { --hue: var(--dusk); }
+.chip.slate { --hue: var(--slate-br); }
+.chip.heather { --hue: var(--heather); }
+
+/* ── syntax ────────────────────────────────────────────────────────────── */
+/*
+ * nvim's yorha.lua, group for group: structure is sand, names are the text,
+ * data is moss and heather, shapes are dusk, punctuation recedes into the
+ * grey. The classes are `highlight.ts`'s, and the same in the editor and in
+ * a rendered code block, so code reads alike in both.
+ */
+.tok-comment { color: var(--muted); font-style: italic; }
+.tok-keyword { color: var(--sand); }
+.tok-string { color: var(--moss); }
+.tok-escape { color: var(--dusk-br); }
+.tok-regexp { color: var(--dusk); }
+.tok-number { color: var(--heather-br); }
+.tok-constant { color: var(--heather); }
+.tok-builtin { color: var(--heather); font-style: italic; }
+.tok-variable { color: var(--fg); }
+.tok-parameter { color: var(--subtle); font-style: italic; }
+.tok-property { color: var(--slate-br); }
+.tok-function { color: var(--light); }
+.tok-type { color: var(--dusk); }
+.tok-type-builtin { color: var(--dusk); font-style: italic; }
+.tok-namespace { color: var(--light-soft); }
+.tok-macro { color: var(--heather); }
+.tok-tag { color: var(--sand); }
+.tok-attribute { color: var(--slate-br); font-style: italic; }
+.tok-operator { color: var(--subtle); }
+.tok-punctuation { color: var(--muted); }
+.tok-invalid { color: var(--alarm); font-weight: 700; }
+.tok-inserted { color: var(--moss); }
+.tok-deleted { color: var(--alarm); }
+.tok-changed { color: var(--sand); }
+/* markdown, as @markup.* is drawn */
+.tok-heading1 { color: var(--light); font-weight: 700; }
+.tok-heading2 { color: var(--light-soft); font-weight: 700; }
+.tok-heading3 { color: var(--fg); font-weight: 700; }
+.tok-heading4 { color: var(--subtle); font-weight: 700; }
+.tok-heading5 { color: var(--subtle); }
+.tok-heading6 { color: var(--muted); }
+.tok-strong { color: var(--light); font-weight: 700; }
+.tok-emphasis { font-style: italic; }
+.tok-strikethrough { text-decoration: line-through; }
+.tok-link { color: var(--slate-br); }
+.tok-url { color: var(--slate); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--slate) 50%, transparent); }
+.tok-raw { color: var(--moss); }
+.tok-quote { color: var(--muted); font-style: italic; }
+.tok-list { color: var(--light-dim); }
+.tok-mark { color: var(--muted); }
+.tok-rule { color: var(--rim); }
 /* A long equation scrolls on its own rather than widening the page. */
 .md .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 

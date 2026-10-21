@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::routes::boards::Task;
+
 pub const FILE_NAME: &str = ".workspace.json";
 
 /// Bumped when a change would make an older import misread a newer file.
@@ -76,6 +78,12 @@ pub struct CardMeta {
     /// as one that does not repeat, which loses the rule but misreads nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<String>,
+    /// The checklist and the labels, added the same way as `repeat`: an older
+    /// build imports the card without them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checklist: Vec<Task>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// The archive path of the document that holds the card's notes.
