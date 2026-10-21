@@ -1,0 +1,51 @@
+# What `make check` runs, on every push and pull request.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # The binary embeds web/dist, so nothing compiles before the frontend is built.
+      - name: frontend
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # Fails when a generated page is stale or a link between pages leads nowhere.
+      - run: bun scripts/wiki.ts --check
