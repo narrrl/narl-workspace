@@ -6,118 +6,31 @@ Written on 2026-10-21, after the seven slices of the feature plan had landed
 `909abf5`). That plan has fully landed, and git keeps it.
 
 These came out of writing the wiki, taking the screenshots against a fresh
-workspace, and probing the API on a throwaway server. Each entry says what
-happens, where, and a way to fix it. None of them loses data outright. Several
-can overwrite text, but a revision of it is kept.
+workspace, and probing the API on a throwaway server. All of them are fixed
+now, except two limits of search noted at the end of the list.
 
-## Bugs
+## Fixed
 
-### 1. A rename can overwrite a newer save without asking
+| | finding | fix |
+| --- | --- | --- |
+| 1 | A rename sent the whole node without the version it had seen, so it could write a stale draft over a save made elsewhere. | `3a6ad94`: a rename sends the name alone, with the tile's `updated_at` when the document is open, and is refused like `:w` when it was saved since. |
+| 2 | `PUT /api/nodes/{id}` without `body` emptied the document. | `3a6ad94`: every field changes only when it is sent. |
+| 3 | A search of only punctuation answered with the list of spaces. | `a1f6f60`: it finds nothing. |
+| 4 | The agenda grouped cards and opened itself by the browser's day, not `WORKSPACE_TIMEZONE`, and took a day to be 24 hours. | `0e0d215`: the agenda answer carries `today` with its bounds, from the same `day_bounds` the mails use. |
+| 5 | Two spaces could share a name. | `a1f6f60`: refused, in any case or by slug, for a new space, a rename, and `mkdir` at the root of the mount. |
+| 6 | Names had no length limit. | `a1f6f60`: at most 200 characters. |
+| 7 | A hard-wrapped paragraph rendered with a break in every line. | `767dd07`: a paragraph that looks wrapped at a width has its soft breaks read as spaces; hand-broken lines and explicit breaks stay. |
+| 8 | A fresh clone did not compile before the frontend was built. | `a59ba4a`: `allow_missing` on the embed. |
+| 9 | Indexing a file walked every file node on each write, and the excerpt did not mark the match. | `c72b65f`: a write reads only the folder it wrote into, and the matched words are lit. |
 
-`renameNode` (`web/src/lib/store.svelte.ts:1171`) renames by sending the whole
-node: name, body and date, and no `base_updated_at`. That has two effects:
+### Still open, on purpose
 
-- For the document open in a tile, the body sent is the local draft. If the
-  document was saved somewhere else since it was opened (another tab, the
-  phone, the SFTP mount), the rename writes the draft over that save. `:w`
-  would have refused and offered `:e!`; `:name` does not.
-- For any other node, the body is fetched with `api.getNode` and sent back. A
-  save that lands between the two requests is overwritten.
-
-The server keeps a `force` revision in both cases (`nodes.rs:757`), so the
-other text can be brought back with `gh`. Nothing says that it is needed.
-
-**Fix:** send `base_updated_at` from the tile, or from the node just fetched,
-and handle the 409 the way `save` does. Better still, see 2.
-
-### 2. `PUT /api/nodes/{id}` without `body` empties the document
-
-`UpdateInput.body` defaults to `""` (`src/routes/nodes.rs:161`). A script, or a
-future client, that renames a document with `{"name": "…"}` alone erases its
-text. A `force` revision is kept, so it can be restored, but the API invites
-the mistake.
-
-**Fix:** make `body` an `Option<String>` and leave the text alone when it is
-absent. The same for `created_at`, which already is optional. Then
-`renameNode` can send only the name, and 1 goes away for every node that is not
-being edited.
-
-### 3. A search made only of punctuation lists the spaces
-
-`fts_query` (`nodes.rs:251`) turns `!!!` or `--` into no terms. `list` then
-falls through to browsing with `parent = None` (`nodes.rs:514`), and answers
-with the list of spaces, as if they were search results: on a throwaway
-server, `GET /api/nodes?q=%21%21%21` answered with every space.
-
-**Fix:** when `q` is present but yields no terms, answer an empty list.
-
-### 4. The agenda opens once per browser day, not per workspace day
-
-`openAgendaIfDue` (`store.svelte.ts:1311`) keys "seen today" on
-`new Date().toDateString()`, the browser's local day. The server counts days in
-`WORKSPACE_TIMEZONE`. A browser in another timezone than the setting (a laptop
-on a trip, a browser set to UTC) opens the agenda at the wrong moment, or twice
-on one workspace day.
-
-**Fix:** key it on the server's local day, which the agenda answer could carry
-next to `diary_today`.
-
-## Rough edges
-
-### 5. Two spaces can have the same name
-
-`create_space` (`nodes.rs:458`) makes the slug unique (`work-2`) but keeps the
-name, so the bar shows two pills that read alike, and `:space work` picks the
-first. Folders and documents may share names on purpose; spaces are a short,
-numbered list where that is only confusing.
-
-**Fix:** refuse a space whose name is taken, case-insensitively, with the
-reason.
-
-### 6. Names have no length limit
-
-A 5000-character name is accepted, and so is its slug, which ends up in every
-`/n/…` address and in the SFTP mount, where most filesystems refuse names over
-255 bytes.
-
-**Fix:** cap names (255 characters, say) on the server, and cut slugs shorter
-than that.
-
-### 7. A hard-wrapped paragraph renders with its line breaks
-
-`marked` runs with `breaks: true` (`web/src/lib/markdown.ts:6`), so a single
-newline is a `<br>`. That suits text typed in the browser, but markdown that
-comes from elsewhere is often wrapped at 80 columns: an import, a file saved
-over the SFTP mount from vim with `textwidth`, a pasted README. Those read with
-a break in the middle of every sentence, more visibly on a phone.
-
-**Fix:** a `:set nobreaks` per document or per space, or treating a line break
-as a space when the paragraph's lines are all close to the same width. At the
-least, say so in the docs; the wiki's Writing page now does.
-
-### 8. A fresh clone does not compile until the frontend is built
-
-`rust-embed` needs `web/dist` to exist (`src/static_files.rs:10`), so
-`cargo check`, `cargo test` and rust-analyzer fail on a fresh clone with a
-derive error that does not say what to do. CI builds the frontend first.
-
-**Fix:** `#[allow_missing = true]` on the embed, so a missing frontend is the
-404 the handler already answers with ("frontend not built"), not a compile
-error.
-
-### 9. Search inside files: known limits
-
-- `file_text::catch_up` scans every file node without a row on each upload,
-  import and SFTP write. That is fast at a few thousand files and will not
-  stay so.
 - Results from documents and from files are ranked by two separate BM25
-  indexes, so their order relative to each other is approximate.
-- The excerpt does not mark the words that matched.
-- PDFs and office documents are not read.
-
-**Fix:** refresh only the node that changed, and keep the full scan for start
-up. Mark the match in the snippet with a character the client draws as
-highlight.
+  indexes, so their order relative to each other is approximate. A shared
+  rank would mean one index for both, which costs more than it gives for a
+  list this short.
+- PDFs and office documents are not read for search. That needs a parser
+  crate, and waits until it is missed.
 
 ## Docs and tooling, done in this pass
 
@@ -153,6 +66,4 @@ Carried over from the last plan, still not started:
   picking nodes up, so choose the keys first.
 - Mail-in capture: IMAP polling of a plus-address into the inbox.
 
-Suggested order: 2 and 1 together (one change, and the only findings that can
-overwrite text), then 3, 8 and 5, which are small. Then the PWA, which the new
-icon makes cheap.
+Suggested next: the PWA, which the new icon makes cheap.
