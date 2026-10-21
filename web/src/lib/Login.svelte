@@ -37,7 +37,7 @@
 <main>
   <form class="resolve" onsubmit={submit}>
     <div class="brand">
-      <span class="mark" aria-hidden="true"></span>
+      <img class="mark" src="/favicon.svg" alt="" width="34" height="34" />
       <h1 class="display">workspace</h1>
     </div>
 
@@ -95,22 +95,8 @@
   .brand { display: flex; align-items: center; gap: 14px; }
   h1 { margin: 0; font-size: 26px; text-shadow: 0 2px 24px var(--ink); }
 
-  /* The ring-and-dot mark, larger than in the bar. */
-  .mark {
-    position: relative;
-    width: 18px;
-    height: 18px;
-    flex: none;
-    border: 2px solid var(--light);
-    border-radius: 999px;
-  }
-  .mark::after {
-    content: '';
-    position: absolute;
-    inset: 3px;
-    border-radius: 999px;
-    background: var(--light);
-  }
+  /* The app icon: ~/ and a block cursor. */
+  .mark { flex: none; display: block; }
 
   p { margin: 0 0 4px; font-size: 10px; }
 

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 # The Proton crates set the floor.
 rust-version = "1.96"
-description = "A terminal-themed personal diary for the browser"
+description = "A private, terminal-themed workspace for the browser: diary, notes, boards and files"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart", "macros"] }

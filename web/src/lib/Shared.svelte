@@ -78,7 +78,7 @@
 
 <div class="shell shared">
   <header class="bar">
-    <span class="mark" aria-hidden="true"></span>
+    <img class="mark" src="/favicon.svg" alt="" width="18" height="18" />
     <span class="divider"></span>
     <span class="pill" aria-current="true">shared</span>
     <span class="divider"></span>

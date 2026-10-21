@@ -330,20 +330,12 @@ input::placeholder { color: var(--muted); }
 }
 
 /* A ring with a dot in it: the favicon, and the desktop's launcher. */
+/* The app icon, ~/ and a block cursor, as on the login and the favicon. */
 .bar .mark {
-  position: relative;
-  width: 12px;
-  height: 12px;
+  display: block;
+  width: 18px;
+  height: 18px;
   flex: none;
-  border: 1.5px solid var(--light);
-  border-radius: 999px;
-}
-.bar .mark::after {
-  content: '';
-  position: absolute;
-  inset: 2px;
-  border-radius: 999px;
-  background: var(--light);
 }
 
 .bar .divider {

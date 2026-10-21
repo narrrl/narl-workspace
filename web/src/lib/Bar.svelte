@@ -17,7 +17,7 @@
 </script>
 
 <header class="bar">
-  <span class="mark" aria-hidden="true"></span>
+  <img class="mark" src="/favicon.svg" alt="" width="18" height="18" />
   <span class="divider"></span>
 
   <nav class="spaces" aria-label="spaces">
