@@ -116,7 +116,7 @@ fn open_master(kek: &Key, nonce: &[u8], sealed: &[u8]) -> Option<Key> {
 /// Seal one 32-byte key under another.
 fn wrap(kek: &Key, key: &Key, aad: &[u8]) -> Result<([u8; WRAP_NONCE], Vec<u8>)> {
     let nonce = random::<WRAP_NONCE>();
-    let sealed = Aes256Gcm::new(kek.as_ref().into())
+    let sealed = Aes256Gcm::new((&**kek).into())
         .encrypt(
             Nonce::from_slice(&nonce),
             Payload {
@@ -134,7 +134,7 @@ fn unwrap(kek: &Key, nonce: &[u8], sealed: &[u8], aad: &[u8]) -> Option<Key> {
         return None;
     }
     let plain = Zeroizing::new(
-        Aes256Gcm::new(kek.as_ref().into())
+        Aes256Gcm::new((&**kek).into())
             .decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad })
             .ok()?,
     );
@@ -157,7 +157,7 @@ impl Sealer {
         let wrap_nonce = random::<WRAP_NONCE>();
         let stream_nonce = random::<STREAM_NONCE>();
 
-        let sealed_key = Aes256Gcm::new(master.as_ref().into())
+        let sealed_key = Aes256Gcm::new((&**master).into())
             .encrypt(
                 Nonce::from_slice(&wrap_nonce),
                 Payload {
@@ -174,7 +174,7 @@ impl Sealer {
         header.extend_from_slice(&stream_nonce);
 
         let stream = EncryptorBE32::from_aead(
-            Aes256Gcm::new(file_key.as_ref().into()),
+            Aes256Gcm::new((&*file_key).into()),
             stream_nonce.as_slice().into(),
         );
         Ok((
@@ -1000,10 +1000,7 @@ mod tests {
         let kek = derive("correct horse", b"saltsaltsaltsalt", 256, 1, 1).expect("derive");
         let master = key(5);
         let (nonce, sealed) = seal_master(&kek, &master).expect("seal");
-        assert_eq!(
-            open_master(&kek, &nonce, &sealed).expect("opens").as_ref(),
-            master.as_ref()
-        );
+        assert_eq!(*open_master(&kek, &nonce, &sealed).expect("opens"), *master);
         let wrong = derive("correct horse!", b"saltsaltsaltsalt", 256, 1, 1).expect("derive");
         assert!(open_master(&wrong, &nonce, &sealed).is_none());
     }

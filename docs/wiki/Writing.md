@@ -59,6 +59,23 @@ Math is set by KaTeX:
 
 ![Math in a document](../images/math.png)
 
+### Typst
+
+A ` ```typst ` block (or ` ```typ `) is set by [Typst](https://typst.app) on
+the server and shows as an image where it stands: math, tables, figures,
+anything typst lays out. It shows its source while it is being set, and the
+error typst gives, with the line of the block, when it cannot be.
+
+- The page fits what is on it and is transparent, and the text is the
+  theme's. `#set page(width: 15cm)` makes a block of prose wrap, and any other
+  `#set` changes what it says.
+- A block is typeset with nothing but itself and the fonts built into the
+  binary: `#import "@preview/…"` and `#image("…")` are refused.
+- On a share page the blocks are set too, for the reader holding the key, and
+  only blocks the shared document holds.
+
+![A typst block in a document](../images/typst.png)
+
 ## Links
 
 A document links to another in two ways:

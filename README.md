@@ -26,7 +26,8 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
 
 - **Write.** Markdown documents in spaces (`diary`, `work`, `uni`, …) with
   folders to any depth. Real vim keys on the desktop (CodeMirror 6), plain taps
-  on a phone. Math by KaTeX, `$x^2$` and `$$…$$`. `[[Title]]` links that are
+  on a phone. Math by KaTeX, `$x^2$` and `$$…$$`, and ` ```typst ` blocks
+  typeset by Typst on the server. `[[Title]]` links that are
   rewritten when what they point at is renamed or moved, and backlinks.
 - **Plan.** A kanban board per space, due dates said the way you say them
   (`fri`, `+3d`), cards that come back once done, and an agenda of what is late,
@@ -883,6 +884,7 @@ sealed or not.
 | `POST` | `/api/backup/login/totp`, `/api/backup/login/captcha` | the two-factor code `{"code"}`, or the solved human check `{"token"}`, a waiting login asked for |
 | `GET`/`POST` | `/api/media` | list / upload (multipart) |
 | `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
+| `POST` | `/api/typst` | `{source}` of a ` ```typst ` block → `{svg}`, or `{error}` as typst words it |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
 | `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
 | `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
@@ -893,6 +895,7 @@ sealed or not.
 | `DELETE` | `/api/ssh-keys/{id}` | remove a key, which ends its mounts |
 | `POST` | `/api/share/{token}` | public: read a shared document, body `{"key"}`; sets the share's media cookie |
 | `GET` | `/api/share/{token}/media/{id}` | public: media inside a shared document, with that cookie |
+| `POST` | `/api/share/{token}/typst` | public: a typst block the shared document holds, with that cookie |
 
 ## Deploying
 

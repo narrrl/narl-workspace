@@ -631,6 +631,13 @@ export const api = {
   readShared: (token: string, key: string) =>
     request<SharedDocument>(`/share/${encodeURIComponent(token)}`, { method: 'POST', body: body({ key }) }),
 
+  /** A ```typst block as SVG — or, on a share page, a block of the shared document. */
+  typeset: (source: string, share?: string) =>
+    request<{ svg?: string; error?: string }>(share ? `/share/${encodeURIComponent(share)}/typst` : '/typst', {
+      method: 'POST',
+      body: body({ source }),
+    }),
+
   sessions: () => request<SignedIn[]>('/sessions'),
   revokeSession: (id: string) =>
     request<{ ok: true }>(`/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),

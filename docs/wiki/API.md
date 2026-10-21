@@ -47,6 +47,7 @@ sealed or not.
 | `POST` | `/api/backup/login/totp`, `/api/backup/login/captcha` | the two-factor code `{"code"}`, or the solved human check `{"token"}`, a waiting login asked for |
 | `GET`/`POST` | `/api/media` | list / upload (multipart) |
 | `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
+| `POST` | `/api/typst` | `{source}` of a ` ```typst ` block → `{svg}`, or `{error}` as typst words it |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
 | `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
 | `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
@@ -57,3 +58,4 @@ sealed or not.
 | `DELETE` | `/api/ssh-keys/{id}` | remove a key, which ends its mounts |
 | `POST` | `/api/share/{token}` | public: read a shared document, body `{"key"}`; sets the share's media cookie |
 | `GET` | `/api/share/{token}/media/{id}` | public: media inside a shared document, with that cookie |
+| `POST` | `/api/share/{token}/typst` | public: a typst block the shared document holds, with that cookie |

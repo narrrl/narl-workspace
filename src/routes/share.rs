@@ -16,7 +16,7 @@ use crate::{
     auth::{self, Session},
     config::Config,
     error::{AppError, AppResult},
-    routes::{media, trash},
+    routes::{media, trash, typeset},
     state::AppState,
 };
 
@@ -251,6 +251,34 @@ pub async fn serve_media(
         }
     }
     media::stream_media(&state, &id, false, headers.get(header::RANGE)).await
+}
+
+/// `POST /api/share/{token}/typst` — public, as the media are: a ```typst
+/// block of a shared document, typeset for a browser that read the document
+/// with its key. Only a block the document holds is typeset, so the link is
+/// not a typesetter for whoever has it.
+pub async fn typeset(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<typeset::TypesetRequest>,
+) -> AppResult<Json<typeset::Typeset>> {
+    let row = sqlx::query("SELECT id, body, share_key_hash FROM nodes WHERE share_token = ?1")
+        .bind(&token)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let stored: Option<String> = row.get("share_key_hash");
+    let allowed =
+        stored.is_some_and(|stored| holds_share_cookie(&state.config, &headers, &token, &stored));
+    let document: String = row.get("body");
+    if !allowed || body.source.trim().is_empty() || !document.contains(body.source.trim()) {
+        return Err(AppError::NotFound);
+    }
+    if trash::in_trash(&mut *state.db.acquire().await?, row.get("id")).await? {
+        return Err(AppError::NotFound);
+    }
+    typeset::answer(body.source).await.map(Json)
 }
 
 #[cfg(test)]

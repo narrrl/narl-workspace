@@ -250,6 +250,28 @@ $$
 The trace is the sum of the eigenvalues, $\\operatorname{tr} A = 4$, and the determinant their product, $\\det A = 3$.
 `,
 )
+await doc(
+  algebra.id,
+  'Spectral theorem',
+  `A symmetric matrix is diagonalised by an orthonormal basis of eigenvectors.
+
+\`\`\`typst
+#let A = $mat(2, 1; 1, 2)$
+$ A = Q Lambda Q^T, quad Q^T Q = I, quad Lambda = mat(3, 0; 0, 1) $
+
+#table(
+  columns: 3,
+  stroke: 0.5pt + rgb("#545c52"),
+  inset: 6pt,
+  [*eigenvalue*], [*eigenvector*], [*multiplicity*],
+  $3$, $1/sqrt(2) vec(1, 1)$, $1$,
+  $1$, $1/sqrt(2) vec(1, -1)$, $1$,
+)
+\`\`\`
+
+The block above is typst; the rest of the page is markdown.
+`,
+)
 await doc(algebra.id, 'Exercise sheet 4', `- [x] 4.1 characteristic polynomial\n- [x] 4.2 diagonalise\n- [ ] 4.3 Jordan form\n`)
 const thesis = await folder(uni, 'thesis')
 await doc(thesis.id, 'Outline', `## Chapters\n\n1. Introduction\n2. Related work\n3. Method\n4. Evaluation\n`)
@@ -387,6 +409,10 @@ await shot('editor')
 
 await open('/n/uni/linear-algebra/eigenvalues')
 await shot('math')
+
+await open('/n/uni/linear-algebra/spectral-theorem')
+await sleep(1500)
+await shot('typst')
 
 await open('/n/work')
 await keys('b')

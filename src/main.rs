@@ -13,6 +13,7 @@ mod static_files;
 mod sweep;
 mod tasks;
 mod throttle;
+mod typeset;
 mod vault;
 
 use std::sync::Arc;

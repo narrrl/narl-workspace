@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { marked, type TokenizerAndRendererExtension } from 'marked'
 import { mathEngine } from './math.svelte'
+import { typeset } from './typst.svelte'
 import { hardWrapped, titleHref } from './util'
 
 marked.setOptions({ gfm: true, breaks: true })
@@ -48,6 +49,8 @@ const WIKILINK = /^\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/
 
 /** What the page being rendered says about its `[[titles]]`, for the renderer. */
 let wikiContext: { leads: Record<string, string>; sharing: boolean } = { leads: {}, sharing: false }
+/** The share the page is read under, whose server route typesets its typst. */
+let shareToken: string | undefined
 
 const wikilink: TokenizerAndRendererExtension = {
   name: 'wikilink',
@@ -89,7 +92,9 @@ marked.use({
   },
   renderer: {
     code(token) {
-      return token.lang === 'math' ? tex(token.text, true) : false
+      if (token.lang === 'math') return tex(token.text, true)
+      if (token.lang === 'typst' || token.lang === 'typ') return typst(token.text)
+      return false
     },
   },
 })
@@ -103,6 +108,22 @@ function tex(source: string, display: boolean): string {
   }
   // An error shows in place, in red, rather than throwing away the page.
   return katex.renderToString(source, { displayMode: display, throwOnError: false })
+}
+
+/*
+ * A ```typst block as the SVG the server set it in, shown as an image: each
+ * SVG names its glyphs with the same ids, which inline on one page would
+ * draw each other's letters. Until it arrives, and when it does not compile,
+ * the source shows — with what typst said under it.
+ */
+function typst(source: string): string {
+  const answer = typeset(source, shareToken)
+  if (answer && 'svg' in answer) {
+    const data = encodeURIComponent(answer.svg)
+    return `<figure class="typst"><img src="data:image/svg+xml;charset=utf-8,${data}" alt="${escapeHtml(source)}" /></figure>`
+  }
+  const error = answer ? `<pre class="typst-error">${escapeHtml(answer.error)}</pre>` : ''
+  return `<pre class="typst-source${answer ? '' : ' pending'}"><code>${escapeHtml(source)}</code></pre>${error}`
 }
 
 /*
@@ -144,6 +165,7 @@ export function renderMarkdown(
     : source
 
   wikiContext = { leads: wikilinks, sharing: !!share }
+  shareToken = share?.token
   const html = marked.parse(md, { async: false }) as string
   if (!share) return DOMPurify.sanitize(html, SANITIZE)
 

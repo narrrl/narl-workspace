@@ -158,6 +158,7 @@
     ['vim', 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros; :w writes'],
     ['drop · paste', 'an image, video or audio file attaches it'],
     ['$x^2$ · $$…$$', 'set as math'],
+    ['```typst', 'a block typst sets, shown as an image — math, tables, figures; no packages or files'],
     [':12', 'jumps straight to entry 12'],
     ['y · d', 'copied to the system clipboard — :set noclipboard keeps them in the registers'],
     ['files', 'open in place — pdf, text and code, markdown, csv, certificates and keystores'],

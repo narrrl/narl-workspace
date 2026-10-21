@@ -73,6 +73,13 @@ pkcs8 = { version = "0.11", features = ["encryption", "3des", "std"] }
 sec1 = { version = "0.8", features = ["der"] }
 sha1 = "0.10"
 
+# ```typst blocks in markdown, typeset on the server into SVG. The fonts come
+# from typst-assets, inside the binary, so nothing is fetched to render.
+typst = "0.15"
+typst-svg = "0.15"
+typst-layout = "0.15"
+typst-assets = { version = "0.15", features = ["fonts"] }
+
 [dev-dependencies]
 # A paused clock, so tests of timed loops do not wait in real time.
 tokio = { version = "1", features = ["test-util"] }

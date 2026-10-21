@@ -18,6 +18,7 @@ pub mod share;
 pub mod ssh_keys;
 pub mod tokens;
 pub mod trash;
+pub mod typeset;
 pub mod vault;
 
 use axum::{
@@ -108,6 +109,8 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/media/{id}", get(media::serve).delete(media::remove))
         .route("/share/{token}", post(share::read))
         .route("/share/{token}/media/{id}", get(share::serve_media))
+        .route("/share/{token}/typst", post(share::typeset))
+        .route("/typst", post(typeset::render))
         .route("/trash", get(trash::list).delete(trash::empty))
         .route("/trash/{id}", delete(trash::purge))
         .route("/trash/{id}/restore", post(trash::restore))
@@ -139,6 +142,7 @@ pub(crate) mod tests {
         "/logout",
         "/share/{token}",
         "/share/{token}/media/{id}",
+        "/share/{token}/typst",
     ];
 
     async fn state() -> AppState {
