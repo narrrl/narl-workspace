@@ -1,30 +1,62 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="~/workspace" width="820" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/narrrl/narl-workspace/actions/workflows/ci.yml"><img src="https://github.com/narrrl/narl-workspace/actions/workflows/ci.yml/badge.svg" alt="ci" /></a>
+  <a href="https://github.com/narrrl/narl-workspace/wiki"><img src="https://img.shields.io/badge/docs-wiki-c8684f" alt="wiki" /></a>
+  <img src="https://img.shields.io/badge/rust-1.96%2B-eef1ea" alt="rust 1.96+" />
+  <img src="https://img.shields.io/badge/svelte-5-eef1ea" alt="svelte 5" />
+</p>
+
 # ~/workspace
 
 A private, terminal-themed workspace that runs in the browser: a diary, the
-notes for work and for uni, and a board per space. One user, one SQLite file,
-one binary. It was called `narl-diary` until it grew everything but the diary.
+notes for work and for uni, a board per space, and the files that go with them.
+One user, one SQLite file, one binary. It was called `narl-diary` until it grew
+everything but the diary.
 
-- **Rust + axum** backend, **SQLite** storage, **Svelte 5** frontend.
-- Spaces (`diary`, `work`, `uni`, …) with folders nested to any depth inside them.
-- Markdown documents with full-text search across a whole space (SQLite FTS5),
-  reaching into the text files in the tree too,
-  and math in them set by KaTeX: `$x^2$` inline, `$$…$$` or a ```` ```math ````
-  block on its own.
-- Import a folder — or a zip of one — as a tree of documents, links and all.
-- A kanban board per space, so what is open at work is not mixed up with uni.
-- Drag, drop or paste images, video and audio straight into an entry.
-- Files of any kind — PDFs, archives, recordings — live in the tree beside the
-  notes about them, streamed to disk however large — and PDFs, text, code,
-  tables and certificates open in place.
-- Share any document behind an unguessable link — revocable at any time.
-- A vault: files sealed with AES-256-GCM under a password that is never stored,
-  readable only while it is unlocked.
-- Backs itself up to Proton Drive, end-to-end encrypted, as a registered device.
-- Mails you — a reminder when the diary is empty, due cards, a weekly digest.
-- Real vim keybindings on the desktop (CodeMirror 6 + vim mode), plain taps on
-  mobile.
-- The whole frontend is embedded in the release binary, so deploying is copying
-  one file.
+![A document open in the reader, the tree beside it](docs/images/document.png)
+
+**New here?** The [guide](docs/wiki/Guide.md) walks through a day with it, and
+[getting started](docs/wiki/Getting-Started.md) has it running in five minutes.
+Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
+
+## What it does
+
+- **Write.** Markdown documents in spaces (`diary`, `work`, `uni`, …) with
+  folders to any depth. Real vim keys on the desktop (CodeMirror 6), plain taps
+  on a phone. Math by KaTeX, `$x^2$` and `$$…$$`. `[[Title]]` links that are
+  rewritten when what they point at is renamed or moved, and backlinks.
+- **Plan.** A kanban board per space, due dates said the way you say them
+  (`fri`, `+3d`), cards that come back once done, and an agenda of what is late,
+  due or in hand on every board.
+- **Remember.** A diary with a calendar, templates, the entries from this day
+  in earlier years, and an evening reminder when nothing was written.
+- **Keep files.** PDFs, archives and recordings live in the tree beside the
+  notes about them, streamed to disk however large. PDFs, text, code, tables
+  and certificates open in place, and search reads the text files too.
+- **Find.** Full-text search across a space or all of them (SQLite FTS5).
+- **Lose nothing.** Autosave that survives a dropped network, every earlier
+  version of a document as a diff, a trash with undo, an export that reads
+  without this app, and an import that takes it back.
+- **Seal.** A vault: files sealed with AES-256-GCM under a password that is
+  never stored.
+- **Capture.** A token per phone or script that puts a card in an inbox or a
+  line in today's entry, and nothing else.
+- **Share.** Any document behind an unguessable, revocable read-only link.
+- **Mount.** The whole workspace over SFTP, for an editor on another machine.
+- **Back up.** A mirror to Proton Drive, end-to-end encrypted, as a registered
+  device, and mail for reminders, due cards and a weekly digest.
+- **Deploy.** Rust and axum on the server, Svelte 5 in the browser, and the
+  whole frontend embedded in the release binary, so deploying is copying one
+  file.
+
+| | |
+| --- | --- |
+| ![Two documents side by side in tiles](docs/images/tiles.png) | ![The board of a space](docs/images/board.png) |
+| ![The agenda across every board](docs/images/agenda.png) | ![The diary by month](docs/images/calendar.png) |
+| ![Search finding a line inside a log file](docs/images/search.png) | ![A document's earlier versions as diffs](docs/images/history.png) |
 
 ## Quick start
 
@@ -59,7 +91,15 @@ make dev-web   # vite dev server on :4243, proxying /api to :4242
 ```
 
 In debug builds the binary reads `web/dist` from disk, so `cargo run` alone also
-works once the frontend has been built at least once.
+works once the frontend has been built at least once — and not before: the
+binary embeds `web/dist`, so a fresh clone builds the frontend first.
+
+`make check` runs what CI runs: format, clippy, the tests, svelte-check, and a
+check that the generated wiki pages are current. The wiki is written in
+`docs/wiki` and published by CI on every push to `main`; `make wiki`
+regenerates the pages read out of the code, and `make screenshots` takes the
+pictures in `docs/images` again. See
+[Development](docs/wiki/Development.md).
 
 ## Keys
 
