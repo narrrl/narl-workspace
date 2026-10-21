@@ -27,7 +27,15 @@ function cleanup() {
   for (const child of children) child.kill()
   rmSync(dir, { recursive: true, force: true })
 }
+// A crash still stops the server and the browser; the directory may outlive
+// them then, since Chromium writes its profile until it has exited.
 process.on('exit', cleanup)
+async function finish() {
+  for (const child of children) child.kill()
+  await Promise.all(children.map((child) => child.exited))
+  rmSync(dir, { recursive: true, force: true })
+  process.exit(0)
+}
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms))
 
@@ -427,4 +435,4 @@ await open('/n/work')
 await shot('mobile-tree')
 
 socket.close()
-process.exit(0)
+await finish()
