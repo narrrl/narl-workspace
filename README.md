@@ -44,6 +44,8 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
   without this app, and an import that takes it back.
 - **Seal.** A vault: files sealed with AES-256-GCM under a password that is
   never stored.
+- **Jot.** A scratchpad that drops down over whatever is on screen, for notes
+  taken in passing; one worth keeping becomes a document with one key.
 - **Capture.** A token per phone or script that puts a card in an inbox or a
   line in today's entry, and nothing else.
 - **Share.** Any document behind an unguessable, revocable read-only link.
@@ -145,6 +147,7 @@ it; in the document pane it is that document. In the browse pane:
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
 | `c` | capture a card into this space's inbox without leaving where you are |
+| `Q` | the scratchpad, lowered over whatever is on screen — see [The scratchpad](docs/wiki/Writing.md#the-scratchpad) |
 | `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
@@ -874,8 +877,10 @@ sealed or not.
 | `POST` | `/api/spaces/{id}/lists` | add a list |
 | `PUT`/`DELETE` | `/api/lists/{id}` | rename / delete a list and its cards |
 | `POST` | `/api/lists/{id}/cards` | add a card |
-| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, done, link) / delete; finishing a repeating card answers its copy as `again` |
+| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
+| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
+| `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |

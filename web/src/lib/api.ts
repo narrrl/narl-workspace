@@ -226,6 +226,14 @@ export interface Template {
   slug: string
 }
 
+/** A note on the scratchpad: a body and nothing else, until it is kept as a document. */
+export interface ScratchNote {
+  id: number
+  body: string
+  created_at: number
+  updated_at: number
+}
+
 export interface BoardList {
   id: number
   name: string
@@ -579,6 +587,13 @@ export const api = {
       done?: boolean
     },
   ) => request<Moved>(`/cards/${id}`, { method: 'PUT', body: body(patch) }),
+
+  /** The scratchpad's notes, the one touched last first. */
+  scratch: () => request<ScratchNote[]>('/scratch'),
+  createScratch: (text: string) => request<ScratchNote>('/scratch', { method: 'POST', body: body({ body: text }) }),
+  updateScratch: (id: number, text: string) =>
+    request<ScratchNote>(`/scratch/${id}`, { method: 'PUT', body: body({ body: text }) }),
+  deleteScratch: (id: number) => request<{ ok: true }>(`/scratch/${id}`, { method: 'DELETE' }),
 
   deleteCard: (id: number) => request<{ ok: true }>(`/cards/${id}`, { method: 'DELETE' }),
 

@@ -27,6 +27,7 @@ use crate::{
         manifest::{self, Manifest, NodeMeta},
         media,
         nodes::{self, next_slug, slugify, DOCUMENT, FILE, FOLDER, SPACE},
+        scratch,
     },
     state::AppState,
     vault,
@@ -976,9 +977,11 @@ async fn build(
         links::index(&mut tx, *id, &rewritten).await?;
     }
 
-    // The boards come back only where spaces do.
+    // The boards come back only where spaces do, and the scratchpad with
+    // them: both belong to the workspace as a whole, not to a folder.
     let mut cards = 0usize;
     if let (Into::Root, Some(manifest)) = (into, &manifest) {
+        scratch::restore(&mut tx, &manifest.scratch).await?;
         for (dir, space) in &manifest.spaces {
             let Some(&space_id) = dir_ids.get(dir) else {
                 continue;

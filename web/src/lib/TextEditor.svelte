@@ -1,10 +1,9 @@
 <script lang="ts">
   /*
-   * A card's description, written in place on its sheet: the same editor as
-   * a document's — vim, markdown, the colours — over `workspace.description`
-   * instead of a tile. `:w` writes it to the card, `:q` leaves, and Esc in
-   * normal mode leaves too when nothing is unsaved, since there is no tree
-   * underneath to go back to.
+   * A short text written in place — a card's description, a scratch note —
+   * in the same editor as a document: vim, markdown, the colours. The owner
+   * keeps the text and says what writing and leaving do; Esc in normal mode
+   * leaves, since there is no tree underneath to go back to.
    */
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -17,6 +16,22 @@
   import { editorTheme, highlighting, languages } from './editorTheme'
   import { workspace } from './store.svelte'
 
+  const {
+    doc,
+    placeholder: hint,
+    dirty = false,
+    onchange,
+    onsave,
+    onleave,
+  }: {
+    doc: string
+    placeholder: string
+    dirty?: boolean
+    onchange: (text: string) => void
+    onsave: () => void
+    onleave: () => void
+  } = $props()
+
   let host = $state<HTMLDivElement>()
   let view: EditorView | undefined
   let mode = $state('normal')
@@ -26,7 +41,7 @@
     if (event.key !== 'Escape' || (workspace.vimEnabled && mode !== 'normal')) return
     event.preventDefault()
     event.stopPropagation()
-    workspace.stopDescribing()
+    onleave()
   }
 
   onMount(() => {
@@ -34,7 +49,7 @@
     view = new EditorView({
       parent: host!,
       state: EditorState.create({
-        doc: workspace.description,
+        doc,
         extensions: [
           ...(workspace.vimEnabled ? [vim({ status: false })] : []),
           history(),
@@ -44,23 +59,21 @@
           markdown({ base: markdownLanguage, codeLanguages: languages }),
           highlighting,
           EditorView.lineWrapping,
-          placeholder('what this card is about…'),
+          placeholder(hint),
           editorTheme,
           EditorView.theme({ '.cm-content': { padding: '10px 14px', maxWidth: 'none' } }),
           keymap.of([
             {
               key: 'Mod-s',
               preventDefault: true,
-              run: () => (void workspace.guard(() => workspace.saveDescription()), true),
+              run: () => (onsave(), true),
             },
             ...defaultKeymap,
             ...historyKeymap,
             indentWithTab,
           ]),
           EditorView.updateListener.of((update) => {
-            if (!update.docChanged) return
-            workspace.description = update.state.doc.toString()
-            workspace.descriptionDirty = true
+            if (update.docChanged) onchange(update.state.doc.toString())
           }),
         ],
       }),
@@ -71,8 +84,8 @@
     if (cm) {
       const emitter = cm as unknown as { on?: (event: string, handler: (e: { mode: string }) => void) => void }
       emitter.on?.('vim-mode-change', (event) => (mode = event.mode))
-      // An empty description is there to be written, so it starts in insert mode.
-      if (!workspace.description.trim()) Vim.handleKey(cm, 'i', 'workspace')
+      // An empty text is there to be written, so it starts in insert mode.
+      if (!doc.trim()) Vim.handleKey(cm, 'i', 'workspace')
     } else mode = 'insert'
   })
 
@@ -87,7 +100,7 @@
   <div class="editor" bind:this={host}></div>
   <div class="modeline label">
     <span class="mode" class:insert={mode !== 'normal'}>{mode}</span>
-    {#if workspace.descriptionDirty}<span class="dirty">+</span>{/if}
+    {#if dirty}<span class="dirty">+</span>{/if}
     <span class="hint"><span class="kbd">:w</span> write · <span class="kbd">:q</span> leave · <span class="kbd">:q!</span> discard</span>
   </div>
 </div>

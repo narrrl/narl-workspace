@@ -16,6 +16,7 @@ import {
   type NodeSummary,
   type Revision,
   type RevisionSummary,
+  type ScratchNote,
   type SpaceOverview,
   type Task,
   type TrashItem,
@@ -283,6 +284,22 @@ class Workspace {
   })
   listCursor = $state(0)
   cardCursor = $state(0)
+  /*
+   * The scratchpad: a drawer that comes down from under the bar over whatever
+   * is on screen, as the desktop's scratchpad does, with the notes taken in
+   * passing. `scratchEditing` is the note under the cursor being written;
+   * `scratchNew` a note not yet saved, which is only kept once it says
+   * something.
+   */
+  scratchOpen = $state(false)
+  scratchNotes = $state<ScratchNote[]>([])
+  scratchCursor = $state(0)
+  scratchEditing = $state(false)
+  scratchNew = $state(false)
+  scratchDraft = $state('')
+  /** Counts the times a note was opened to write, so the editor is made anew only then. */
+  scratchSession = $state(0)
+
   /** The step of the open card's checklist under the cursor. */
   taskCursor = $state(0)
   /** The open card's description is being written, and what it says so far. */
@@ -1700,6 +1717,136 @@ class Workspace {
     this.taskCursor = 0
     this.describing = false
     this.overlay = 'card'
+  }
+
+  get scratchNote(): ScratchNote | undefined {
+    return this.scratchNotes[this.scratchCursor]
+  }
+
+  /** `Q`: the drawer down, read again, or up and away. */
+  async toggleScratch() {
+    if (this.scratchOpen) return this.closeScratch()
+    this.scratchNotes = await api.scratch()
+    this.scratchCursor = Math.min(this.scratchCursor, Math.max(this.scratchNotes.length - 1, 0))
+    this.scratchEditing = false
+    this.scratchOpen = true
+  }
+
+  async closeScratch() {
+    if (this.scratchEditing) await this.leaveScratchNote()
+    this.scratchOpen = false
+  }
+
+  /** `o`: a new note at the top, written straight away. */
+  newScratchNote() {
+    this.scratchNew = true
+    this.scratchDraft = ''
+    this.scratchSession++
+    this.scratchEditing = true
+  }
+
+  /** `e`, `i`, Enter: write the note under the cursor. */
+  editScratchNote() {
+    const note = this.scratchNote
+    if (!note) return this.newScratchNote()
+    this.scratchNew = false
+    this.scratchDraft = note.body
+    this.scratchSession++
+    this.scratchEditing = true
+  }
+
+  #scratchTimer: ReturnType<typeof setTimeout> | undefined
+  #scratchSaving: Promise<unknown> = Promise.resolve()
+
+  /*
+   * A scratch note saves itself: nothing is asked of a note taken in passing,
+   * not even `:w`. Each change waits a moment for the next before it is
+   * written, and saves run one after another, so the first save of a new note
+   * has made it before the second looks for its id.
+   */
+  scratchChanged(text: string) {
+    this.scratchDraft = text
+    clearTimeout(this.#scratchTimer)
+    this.#scratchTimer = setTimeout(() => void this.guard(() => this.saveScratchNote()), 800)
+  }
+
+  saveScratchNote(): Promise<void> {
+    clearTimeout(this.#scratchTimer)
+    const run = this.#scratchSaving.then(async () => {
+      if (!this.scratchEditing) return
+      const text = this.scratchDraft
+      if (this.scratchNew) {
+        if (!text.trim()) return
+        const note = await api.createScratch(text)
+        this.scratchNotes = [note, ...this.scratchNotes]
+        this.scratchCursor = 0
+        this.scratchNew = false
+        return
+      }
+      const note = this.scratchNote
+      if (!note || note.body === text) return
+      const saved = await api.updateScratch(note.id, text)
+      // The note touched last goes to the top, and the cursor with it.
+      this.scratchNotes = [saved, ...this.scratchNotes.filter((n) => n.id !== saved.id)]
+      this.scratchCursor = 0
+    })
+    this.#scratchSaving = run.catch(() => {})
+    return run
+  }
+
+  /** Esc, `:q`: back to the list, saved — and a note left empty is not kept. */
+  async leaveScratchNote() {
+    await this.guard(() => this.saveScratchNote())
+    const note = this.scratchNote
+    if (!this.scratchNew && note && !this.scratchDraft.trim()) await this.guard(() => this.dropScratchNote(false))
+    this.scratchEditing = false
+    this.scratchNew = false
+  }
+
+  async dropScratchNote(say = true) {
+    const note = this.scratchNote
+    if (!note) return
+    await api.deleteScratch(note.id)
+    this.scratchNotes = this.scratchNotes.filter((n) => n.id !== note.id)
+    this.scratchCursor = Math.min(this.scratchCursor, Math.max(this.scratchNotes.length - 1, 0))
+    if (say) this.say('scratch note dropped')
+  }
+
+  /** `:scratch <text>`: a note from the command line, without the drawer. */
+  async scratch(text: string) {
+    const note = await api.createScratch(text)
+    this.scratchNotes = [note, ...this.scratchNotes.filter((n) => n.id !== note.id)]
+    this.say('scratched — Q shows the scratchpad')
+  }
+
+  /**
+   * `:keep [title]`: the note under the cursor made a document in the folder
+   * being browsed, and taken off the scratchpad. Without a title, the first
+   * line is the title — a `# heading` or not — and the rest the body.
+   */
+  async keepScratchNote(title = '') {
+    if (this.scratchEditing) await this.saveScratchNote()
+    const note = this.scratchNote
+    if (!note) return this.say('no scratch note to keep', 'error')
+    const parent = this.parentId ?? this.spaceId ?? this.spaces.find((space) => space.role !== 'diary')?.id
+    if (parent === undefined || parent === null) return this.say('no space to keep it in', 'error')
+
+    let name = title.trim()
+    let body = note.body
+    if (!name) {
+      const [first, ...rest] = note.body.replace(/^\s+/, '').split('\n')
+      name = first.replace(/^#+\s*/, '').trim().slice(0, 200)
+      body = rest.join('\n').replace(/^\n+/, '')
+    }
+    const node = await api.createNode({ parent_id: parent, name, body })
+    // Made first, dropped after: a failure in between leaves two copies, never none.
+    await this.dropScratchNote(false)
+    this.scratchEditing = false
+    this.scratchOpen = false
+    if (this.view === 'special') this.closeSpecial()
+    await this.refresh(node.id)
+    await this.openNode(node.id)
+    this.say(`kept as ${node.path.map((crumb) => crumb.slug).join('/')}`)
   }
 
   /** `q`: the sheet away, unless that would lose a description being written. */

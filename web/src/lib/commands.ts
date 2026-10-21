@@ -299,7 +299,14 @@ export const commands: CommandSpec[] = [
     aliases: ['w'],
     group: 'editing',
     help: "save the open document — or the card's description being written",
-    run: () => workspace.guard(() => (workspace.describing ? workspace.saveDescription() : workspace.save())),
+    run: () =>
+      workspace.guard(() =>
+        workspace.scratchEditing
+          ? workspace.saveScratchNote()
+          : workspace.describing
+            ? workspace.saveDescription()
+            : workspace.save(),
+      ),
     bang: {
       help: 'save even over a newer version saved somewhere else since this one was opened',
       run: () => workspace.guard(() => workspace.save({ force: true })),
@@ -311,6 +318,7 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'save and leave insert/editor mode',
     run: async () => {
+      if (workspace.scratchEditing) return workspace.leaveScratchNote()
       if (workspace.describing) {
         await workspace.guard(() => workspace.saveDescription())
         workspace.stopDescribing()
@@ -335,6 +343,7 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     help: 'close the editor, or the document when already reading',
     run: async () => {
+      if (workspace.scratchEditing) return workspace.leaveScratchNote()
       if (workspace.describing) return void workspace.stopDescribing()
       // A document `o` made and nothing was written in is not kept.
       if (await workspace.abandonIfBlank()) {
@@ -513,6 +522,27 @@ export const commands: CommandSpec[] = [
     run: () => {
       if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
       return workspace.guard(() => workspace.toggleDone())
+    },
+  },
+  {
+    name: 'scratch',
+    aliases: ['sc'],
+    args: '[text]',
+    group: 'documents',
+    help: 'the scratchpad, lowered over whatever is on screen — Q does the same; with text, a note on it without leaving',
+    run: async (arg) => {
+      if (!arg.trim()) return workspace.guard(() => workspace.toggleScratch())
+      await workspace.guard(() => workspace.scratch(arg.trim()))
+    },
+  },
+  {
+    name: 'keep',
+    args: '[title]',
+    group: 'documents',
+    help: 'make the scratch note a document in the folder being browsed — titled by its first line unless given one — and take it off the scratchpad',
+    run: async (arg) => {
+      if (!workspace.scratchOpen) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
+      await workspace.guard(() => workspace.keepScratchNote(arg))
     },
   },
   {

@@ -142,6 +142,8 @@ do: `:w!`, `:space! <name>`, `:import!`.
 
 | command | what it does |
 | --- | --- |
+| `:scratch, :sc [text]` | the scratchpad, lowered over whatever is on screen — Q does the same; with text, a note on it without leaving |
+| `:keep [title]` | make the scratch note a document in the folder being browsed — titled by its first line unless given one — and take it off the scratchpad |
 | `:new, :n, :o [template] [yyyy-mm-dd] [name]` | start a new document here — from one of the space's templates, dated, named; in the diary from templates/day |
 | `:cal, :calendar` | the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it |
 | `:today` | open today's diary entry, starting one if there is none yet |

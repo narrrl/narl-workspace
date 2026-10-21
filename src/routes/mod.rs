@@ -12,6 +12,7 @@ pub mod media;
 pub mod nodes;
 pub mod repeat;
 pub mod revisions;
+pub mod scratch;
 pub mod seal;
 pub mod session;
 pub mod share;
@@ -63,6 +64,11 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/diary/days", get(diary::days))
         .route("/diary/around/{id}", get(diary::around_entry))
         .route("/capture", post(capture::capture))
+        .route("/scratch", get(scratch::list).post(scratch::create))
+        .route(
+            "/scratch/{id}",
+            put(scratch::update).delete(scratch::remove),
+        )
         .route("/spaces/{id}/board", get(boards::board))
         .route("/spaces/{id}/lists", post(boards::create_list))
         .route(

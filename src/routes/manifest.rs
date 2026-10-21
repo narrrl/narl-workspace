@@ -36,6 +36,17 @@ pub struct Manifest {
     /// they were uploaded under.
     #[serde(default)]
     pub media: BTreeMap<String, String>,
+    /// The scratchpad's notes, oldest first. Added without a bump of `FORMAT`:
+    /// an older build leaves them out of an import and misreads nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scratch: Vec<ScratchMeta>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ScratchMeta {
+    pub body: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

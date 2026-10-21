@@ -43,6 +43,37 @@ typed, and to the server a couple of seconds after typing stops.
 Each save keeps the text it replaces, so nothing written is lost. See
 [Not losing things](Not-Losing-Things.md#history).
 
+## The scratchpad
+
+Not every note knows yet where it belongs. `Q` (or `:scratch`) lowers the
+scratchpad from under the bar, over whatever is on screen, the way the
+desktop lowers its own; `Q`, `q` or `Esc` raises it again, and what was on
+screen is as it was. Its notes have no name, no space and no folder: a note is
+a body and the time it was last touched, newest on top.
+
+| key | what it does |
+| --- | --- |
+| `j` / `k`, `gg` / `G` | down / up the notes |
+| `o` | a new note, written straight away |
+| `Enter`, `e`, `i` | write the note under the cursor |
+| `K` | keep it: a document in the folder being browsed (`:keep [title]`) |
+| `dd` | drop the note (asks y/N) |
+| `Q`, `q`, `Esc` | raise the scratchpad |
+
+A note is written in the same editor as a document, and saves itself a moment
+after each change: there is nothing to `:w`, though it does no harm. `Esc` in
+normal mode, or `:q`, goes back to the notes; a note left empty is not kept.
+`:scratch <text>` takes a note from the command line without lowering the
+drawer.
+
+Keeping a note makes it a document in the folder the tree is showing, and
+takes it off the scratchpad. Its first line is the title — `# Plan` or plain
+`Plan` alike — and the rest the body; `:keep <title>` names it instead and
+keeps every line. The document opens, and the drawer goes up.
+
+The notes are in the backup, and an export of the whole workspace carries
+them in `.workspace.json`, so `:import! /` puts them back.
+
 ## Markdown
 
 Documents are GitHub-flavoured markdown: headings, lists, task lists, tables,
@@ -51,6 +82,11 @@ the way it was typed, with one exception: a paragraph that an editor wrapped
 at a fixed width, as imported notes and files saved over the SFTP mount often
 are, is read as the running text it is. A break asked for outright, with two
 spaces or a `\` at the end of the line, is always kept.
+
+A fenced block that names its language — ` ```rust `, ` ```python `, ` ```sh ` and
+the rest CodeMirror knows — is coloured the way nvim's `yorha` theme colours it:
+keywords in sand, strings in moss, numbers in heather, types in dusk, comments
+muted and italic. The editor colours it the same as it is written.
 
 Math is set by KaTeX:
 

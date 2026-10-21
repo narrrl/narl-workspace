@@ -18,6 +18,7 @@
   import Trash, { purgeTrashed, restoreTrashed } from './lib/Trash.svelte'
   import Backlinks, { openBacklink } from './lib/Backlinks.svelte'
   import CardSheet from './lib/CardSheet.svelte'
+  import Scratch from './lib/Scratch.svelte'
   import History, { moveHistory, restoreShown } from './lib/History.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
@@ -793,6 +794,74 @@
     }
   }
 
+  /*
+   * The scratchpad's keys, while it is down and its note is not being
+   * written: the list keys over its notes. It sits over whatever was on
+   * screen, so nothing else hears a key until it is raised again.
+   */
+  function scratchKey(event: KeyboardEvent): boolean {
+    const key = event.key
+    const previous = pending
+    pending = ''
+    const last = Math.max(workspace.scratchNotes.length - 1, 0)
+    if (previous === 'g' && key === 'g') return (workspace.scratchCursor = 0), true
+    if (previous === 'd' && key === 'd') {
+      const note = workspace.scratchNote
+      if (note) {
+        void (async () => {
+          if (await workspace.ask('drop this scratch note?')) await workspace.guard(() => workspace.dropScratchNote())
+        })()
+      }
+      return true
+    }
+    switch (key) {
+      case 'g':
+      case 'd':
+        pending = key
+        return true
+      case 'j':
+      case 'ArrowDown':
+        workspace.scratchCursor = Math.min(workspace.scratchCursor + 1, last)
+        return true
+      case 'k':
+      case 'ArrowUp':
+        workspace.scratchCursor = Math.max(workspace.scratchCursor - 1, 0)
+        return true
+      case 'G':
+        workspace.scratchCursor = last
+        return true
+      case 'o':
+      case 'O':
+      case 'c':
+        workspace.newScratchNote()
+        return true
+      case 'e':
+      case 'i':
+      case 'a':
+      case 'Enter':
+        workspace.editScratchNote()
+        return true
+      case 'K':
+        void workspace.guard(() => workspace.keepScratchNote())
+        return true
+      case ':':
+        cmdGlobal = false
+        cmdline = ':'
+        return true
+      case '?':
+        void runCommand('help')
+        return true
+      case 'Q':
+      case 'q':
+      case 'Escape':
+        void workspace.closeScratch()
+        return true
+      default:
+        // Nothing under the drawer hears a key while it is down.
+        return true
+    }
+  }
+
   function isTypingTarget(target: EventTarget | null) {
     const node = target as HTMLElement | null
     return (
@@ -807,7 +876,8 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.key === 's' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
-      if (workspace.describing) void workspace.guard(() => workspace.saveDescription())
+      if (workspace.scratchEditing) void workspace.guard(() => workspace.saveScratchNote())
+      else if (workspace.describing) void workspace.guard(() => workspace.saveDescription())
       else if (workspace.open) void workspace.guard(() => workspace.save())
       return
     }
@@ -828,6 +898,19 @@
 
     // The command line over an overlay — `D` in the agenda — keeps its keys.
     const listening = cmdline === null && !isTypingTarget(event.target)
+    // `Q`, a quick note: the scratchpad lowered from anywhere a key is not
+    // being typed — a letter, since a backtick is a dead key on many layouts.
+    if (event.key === 'Q' && listening && !workspace.scratchOpen && workspace.overlay === 'none' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault()
+      void workspace.guard(() => workspace.toggleScratch())
+      return
+    }
+    if (workspace.scratchOpen && !workspace.scratchEditing && workspace.overlay === 'none' && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (scratchKey(event)) {
+        event.preventDefault()
+        return
+      }
+    }
     if (workspace.overlay === 'card' && !workspace.describing && listening && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (cardKey(event)) {
         event.preventDefault()
@@ -894,7 +977,7 @@
 
     if (event.key === 'Escape') {
       // The description's editor has had its Esc; the sheet stays up under it.
-      if (workspace.describing) return
+      if (workspace.describing || workspace.scratchEditing) return
       if (workspace.overlay !== 'none') {
         workspace.overlay = 'none'
         return
@@ -1368,6 +1451,10 @@
 
     {#if cmdline !== null}
       <CommandLine initial={cmdline} global={cmdGlobal} close={() => ((cmdline = null), (cmdGlobal = false))} />
+    {/if}
+
+    {#if workspace.scratchOpen}
+      <Scratch />
     {/if}
 
     <Prompt />

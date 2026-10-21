@@ -268,6 +268,8 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
     // diary with photographs in it does not fit comfortably in a Vec. The file
     // is made in the data directory, which is sized for the workspace, rather
     // than in a /tmp that may be a small tmpfs.
+    let notes = crate::routes::scratch::export(&state.db).await?;
+
     let file = tokio::task::spawn_blocking(move || -> AppResult<std::fs::File> {
         let mut zip = ZipWriter::new(tempfile::tempfile_in(&scratch)?);
         let text = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -322,6 +324,7 @@ pub async fn export(_: Session, State(state): State<AppState>) -> AppResult<Resp
 
         let mut meta = Manifest {
             format: manifest::FORMAT,
+            scratch: notes,
             ..Manifest::default()
         };
         let mut note = |path: &str, node: &ExportNode| {

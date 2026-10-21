@@ -30,8 +30,10 @@ sealed or not.
 | `POST` | `/api/spaces/{id}/lists` | add a list |
 | `PUT`/`DELETE` | `/api/lists/{id}` | rename / delete a list and its cards |
 | `POST` | `/api/lists/{id}/cards` | add a card |
-| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, done, link) / delete; finishing a repeating card answers its copy as `again` |
+| `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
+| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
+| `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |

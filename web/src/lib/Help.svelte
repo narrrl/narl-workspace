@@ -117,6 +117,16 @@
     ['q · Esc', 'leave the special workspace'],
   ]
 
+  const scratchKeys: [string, string][] = [
+    ['Q', 'lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it'],
+    ['j / k', 'down / up the notes, the one touched last on top'],
+    ['o', 'a new note, written straight away — it saves itself'],
+    ['Enter · e · i', 'write the note — Esc in normal mode, or :q, comes back to the notes'],
+    ['K', 'keep the note: a document in the folder being browsed, titled by its first line — :keep <title> names it'],
+    ['dd', 'drop the note (asks y/N)'],
+    ['q · Esc · Q', 'raise the scratchpad'],
+  ]
+
   const cardKeys: [string, string][] = [
     ['j / k', 'down / up the checklist'],
     ['gg / G', 'first / last step'],
@@ -186,6 +196,7 @@
     ['keys', fromPairs(keys)],
     ['board keys', fromPairs(boardKeys)],
     ['card keys', fromPairs(cardKeys)],
+    ['scratchpad keys', fromPairs(scratchKeys)],
     ['agenda keys', fromPairs(agendaKeys)],
     ['in the editor', fromPairs(editorKeys)],
     ...groups.map((group: Group) => [titles[group], fromSpecs(commands.filter((spec) => spec.group === group))] as [string, Row[]]),
