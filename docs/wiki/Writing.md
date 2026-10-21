@@ -46,7 +46,11 @@ Each save keeps the text it replaces, so nothing written is lost. See
 ## Markdown
 
 Documents are GitHub-flavoured markdown: headings, lists, task lists, tables,
-quotes, code blocks and links. A single line break is kept as a line break.
+quotes, code blocks and links. A single line break is kept as a line break,
+the way it was typed, with one exception: a paragraph that an editor wrapped
+at a fixed width, as imported notes and files saved over the SFTP mount often
+are, is read as the running text it is. A break asked for outright, with two
+spaces or a `\` at the end of the line, is always kept.
 
 Math is set by KaTeX:
 

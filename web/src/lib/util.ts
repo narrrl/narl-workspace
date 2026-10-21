@@ -322,3 +322,27 @@ export function neighbour(rects: Rect[], from: number, direction: Direction): nu
   })
   return best
 }
+
+/**
+ * Whether a paragraph was wrapped by an editor at a fixed width rather than
+ * broken by hand: every line but the last is long, and each break comes
+ * where the next word would not have fitted on the line before. Markdown
+ * written elsewhere — an import, a save over the SFTP mount from vim with
+ * `textwidth`, a pasted README — is wrapped that way, and keeping its breaks
+ * puts one in the middle of every sentence. Lines broken by hand rarely pass:
+ * a short sentence followed by a short word would have fitted, and a line
+ * broken by hand mostly ends where a sentence does, which a wrapped one
+ * seldom does.
+ */
+export function hardWrapped(paragraph: string): boolean {
+  const lines = paragraph.trimEnd().split('\n').map((line) => line.trimEnd())
+  if (lines.length < 2) return false
+  const body = lines.slice(0, -1)
+  const width = Math.max(...lines.map((line) => line.length))
+  const fits = body.every((line, at) => {
+    const next = lines[at + 1].trimStart().split(/\s/, 1)[0]
+    return line.length >= 40 && line.length + 1 + next.length > width
+  })
+  const sentences = body.filter((line) => /[.!?:;]$/.test(line)).length
+  return fits && sentences <= Math.floor((body.length - 1) / 3)
+}

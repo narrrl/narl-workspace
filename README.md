@@ -181,6 +181,12 @@ longer than 200 characters. The board has
 `:board`, `:card <title>` (`:card!` links the open document to it),
 `:due <when|->`, `:repeat <rule|->`, `:done` and `:list <name>` (`:list!` deletes one).
 
+A single line break in a document is a line break, the way it was typed. A
+paragraph an editor wrapped at a fixed width — an import, a save over the mount
+from vim with `textwidth` — is the exception: every line but the last is long
+and each break comes where the next word would not have fitted, so it is read
+as running text. Two spaces or a `\` at the end of a line always break it.
+
 On a touch device modal editing is off by default (`:set vim` turns it on) and
 the same actions are buttons: the `⋯` on a row — or a long press — opens what
 the keys do to it: rename, move, share, seal, delete. A move is picked up

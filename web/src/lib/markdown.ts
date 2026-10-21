@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify'
 import { marked, type TokenizerAndRendererExtension } from 'marked'
 import { mathEngine } from './math.svelte'
-import { titleHref } from './util'
+import { hardWrapped, titleHref } from './util'
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -68,8 +68,25 @@ const wikilink: TokenizerAndRendererExtension = {
   },
 }
 
+/*
+ * A line break typed in the browser is meant: the diary is written a line at a
+ * time, so `breaks` is on. A paragraph an editor wrapped at its width is the
+ * exception, and its breaks are read as the spaces they stand for. A break
+ * asked for outright — two spaces or a `\` at the end of the line — stays.
+ */
+type Inline = { type: string; raw: string; tokens?: Inline[] }
+function unwrap(tokens: Inline[]) {
+  for (const [at, token] of tokens.entries()) {
+    if (token.type === 'br' && /^ ?\n$/.test(token.raw)) tokens[at] = { type: 'text', raw: token.raw, text: ' ' } as Inline
+    else if (token.tokens) unwrap(token.tokens)
+  }
+}
+
 marked.use({
   extensions: [mathBlock, mathInline, wikilink],
+  walkTokens(token) {
+    if (token.type === 'paragraph' && hardWrapped(token.raw)) unwrap(token.tokens as Inline[])
+  },
   renderer: {
     code(token) {
       return token.lang === 'math' ? tex(token.text, true) : false
