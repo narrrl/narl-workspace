@@ -478,6 +478,7 @@ export const api = {
     request<{ prev: DiaryEntry | null; next: DiaryEntry | null }>(`/diary/around/${id}`),
 
   /**
+   * Only what is sent changes: a rename sends the name alone.
    * `base_updated_at`: refused with 409 if the node was saved since then.
    * `restore`: the text is a revision brought back, so what it replaces is
    * kept as a revision whatever the last one was.
@@ -485,8 +486,8 @@ export const api = {
   updateNode: (
     id: number,
     input: {
-      name: string
-      body: string
+      name?: string
+      body?: string
       created_at?: number
       has_board?: boolean
       base_updated_at?: number

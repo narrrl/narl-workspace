@@ -160,10 +160,12 @@ pub struct CreateInput {
 
 #[derive(Deserialize)]
 pub struct UpdateInput {
+    /// Left out, the name stays as it is: a write changes only what it sends,
+    /// so a rename cannot empty a document and a save cannot rename one.
     #[serde(default)]
-    pub name: String,
+    pub name: Option<String>,
     #[serde(default)]
-    pub body: String,
+    pub body: Option<String>,
     #[serde(default)]
     pub created_at: Option<i64>,
     /// Spaces only, and only when it is sent at all.
@@ -713,12 +715,13 @@ pub async fn update(
     // here is still free when it is written, and a file's name and its
     // download name never disagree.
     let mut tx = crate::db::begin_write(&state.db).await?;
-    let row =
-        sqlx::query("SELECT parent_id, kind, name, slug, updated_at FROM nodes WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(AppError::NotFound)?;
+    let row = sqlx::query(
+        "SELECT parent_id, kind, name, slug, body, updated_at FROM nodes WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
 
     if input
         .base_updated_at
@@ -732,7 +735,11 @@ pub async fn update(
     let parent_id: Option<i64> = row.get("parent_id");
     let kind: String = row.get("kind");
     let previous_name: String = row.get("name");
-    let name = input.name.trim();
+    let previous_body: String = row.get("body");
+    let name = input
+        .name
+        .as_deref()
+        .map_or(previous_name.as_str(), str::trim);
 
     // The slug follows the name, because a path nobody can read is no better
     // than an id. It only moves when the name does, so a link to an unrenamed
@@ -752,7 +759,7 @@ pub async fn update(
     let body = if kind == FILE {
         ""
     } else {
-        input.body.as_str()
+        input.body.as_deref().unwrap_or(&previous_body)
     };
     let reason = if input.restore {
         revisions::Reason::Restore

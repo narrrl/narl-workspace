@@ -319,6 +319,54 @@ mod tests {
         );
     }
 
+    /// A write changes what it sends and nothing else: a rename leaves the
+    /// text, and keeps no revision since none was lost. One that carries the
+    /// version it saw is refused once the document has moved on.
+    #[tokio::test]
+    async fn a_rename_leaves_the_text() {
+        use axum::extract::{Path, State};
+
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let id = document(&state.db, "plan", "the text").await;
+        let update = |input: serde_json::Value| {
+            let state = state.clone();
+            async move {
+                crate::routes::nodes::update(
+                    crate::auth::Session { id: "test".into() },
+                    State(state),
+                    Path(id),
+                    axum::Json(serde_json::from_value(input).unwrap()),
+                )
+                .await
+            }
+        };
+
+        let renamed = update(serde_json::json!({ "name": "the plan" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (renamed.name.as_str(), renamed.body.as_str()),
+            ("the plan", "the text")
+        );
+        let edited = update(serde_json::json!({ "body": "new text" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (edited.name.as_str(), edited.body.as_str()),
+            ("the plan", "new text")
+        );
+
+        let stale = update(serde_json::json!({ "name": "late", "base_updated_at": 0 })).await;
+        assert!(matches!(stale, Err(crate::error::AppError::Conflict(_))));
+
+        let kept: Vec<String> = sqlx::query_scalar("SELECT body FROM revisions WHERE node_id = ?1")
+            .bind(id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(kept, ["the text"]);
+    }
+
     /// Old revisions go, except the newest few of every document.
     #[tokio::test]
     async fn the_newest_stay_however_old() {

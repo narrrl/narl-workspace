@@ -1163,19 +1163,16 @@ class Workspace {
   }
 
   /**
-   * Rename anything in the tree — a document, a folder or a space. The body
-   * has to ride along because the update is a whole-node write; for the node
-   * being edited that is the draft, which would otherwise be rolled back to
-   * whatever the server still holds.
+   * Rename anything in the tree — a document, a folder or a space. Only the
+   * name is sent, so the text on the server stays as it is and a draft still
+   * being typed is saved by autosave as before. When the document is open
+   * here, the rename carries the version this tab last saw: one saved
+   * somewhere else since is not stamped over, which would let the next
+   * autosave write the draft over that save without a word.
    */
   async renameNode(id: number, name: string) {
-    const current =
-      this.open?.id === id ? { ...this.open, body: this.draft.body } : await api.getNode(id)
-    const saved = await api.updateNode(id, {
-      name: name.trim(),
-      body: current.body,
-      created_at: current.created_at,
-    })
+    const open = this.tilesWith(id)[0]?.open
+    const saved = await api.updateNode(id, { name: name.trim(), base_updated_at: open?.updated_at })
     for (const tile of this.tilesWith(id)) {
       tile.open = saved
       tile.draft.name = saved.name
@@ -1712,7 +1709,7 @@ class Workspace {
   async setBoard(on: boolean) {
     const space = this.space
     if (!space) return
-    await api.updateNode(space.id, { name: space.name, body: '', has_board: on })
+    await api.updateNode(space.id, { has_board: on })
     this.spaces = await api.listSpaces()
     if (on) await this.openBoard()
     else {

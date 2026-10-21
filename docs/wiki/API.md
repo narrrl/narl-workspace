@@ -15,7 +15,7 @@ sealed or not.
 | `DELETE` | `/api/sessions/{id}` | sign another browser out, and lock the vault |
 | `GET`/`POST` | `/api/spaces` | the spaces / create one |
 | `GET`/`POST` | `/api/nodes` | children (`?parent=`) or search (`?q=`, `?space=`; a file matched by its text has `in_text` and the words around the match as `excerpt`) / create, from a template with `template_id` |
-| `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update / delete into the trash, subtree and all — or for good, for something already in it |
+| `GET`/`PUT`/`DELETE` | `/api/nodes/{id}` | read / update only the fields sent — `name`, `body`, `created_at`, `has_board`; with `base_updated_at`, refused with `409` once it was saved since / delete into the trash, subtree and all — or for good, for something already in it |
 | `GET`/`DELETE` | `/api/trash` | what was deleted, the last first / empty it |
 | `DELETE` | `/api/trash/{id}` | delete one thing in the trash for good |
 | `POST` | `/api/trash/{id}/restore` | back where it was deleted from, or to its space when that folder is gone |
