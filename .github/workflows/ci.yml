@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      # The binary embeds web/dist, so nothing compiles before the frontend is built.
+      # Built first so the binary under test embeds the app it ships with.
       - name: frontend
         working-directory: web
         run: |

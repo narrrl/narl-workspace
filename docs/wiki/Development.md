@@ -7,9 +7,11 @@ make dev-api   # cargo run, serving the API on :4242
 make dev-web   # vite on :4243, proxying /api to :4242
 ```
 
-Open <http://127.0.0.1:4243>. The Rust build embeds `web/dist`, so build the
-frontend once (`cd web && bun install && bun run build`) before the first
-`cargo build`; a debug build reads `web/dist` from disk after that.
+Open <http://127.0.0.1:4243>. The release binary embeds `web/dist`, and a
+debug build reads it from disk, so build the frontend once
+(`cd web && bun install && bun run build`) for `cargo run` alone to serve the
+app. Without it the Rust side still compiles and tests, and the pages answer
+"frontend not built".
 
 Point `WORKSPACE_DATA_DIR` at a throwaway directory while trying things, so the
 real data stays out of it.
@@ -57,8 +59,8 @@ block at the bottom.
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- **rust**: builds the frontend (the binary embeds it), then format, clippy
-  and the tests;
+- **rust**: builds the frontend, so the tests see the app the binary ships,
+  then format, clippy and the tests;
 - **web**: svelte-check;
 - **docs**: checks that the generated wiki pages are up to date and that every
   link between the pages resolves.

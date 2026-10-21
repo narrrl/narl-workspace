@@ -91,8 +91,8 @@ make dev-web   # vite dev server on :4243, proxying /api to :4242
 ```
 
 In debug builds the binary reads `web/dist` from disk, so `cargo run` alone also
-works once the frontend has been built at least once — and not before: the
-binary embeds `web/dist`, so a fresh clone builds the frontend first.
+works once the frontend has been built at least once. Before that it compiles,
+tests and runs the API, and answers every page with "frontend not built".
 
 `make check` runs what CI runs: format, clippy, the tests, svelte-check, and a
 check that the generated wiki pages are current. The wiki is written in

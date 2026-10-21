@@ -5,9 +5,12 @@ use axum::{
 use rust_embed::Embed;
 
 /// The built Svelte app. In debug builds rust-embed reads from disk, so a
-/// `vite build --watch` next to `cargo run` is enough for iteration.
+/// `vite build --watch` next to `cargo run` is enough for iteration. A clone
+/// that has not built the frontend yet still compiles, tests and checks; it
+/// serves the "frontend not built" answer below until it has.
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/web/dist"]
+#[allow_missing = true]
 struct Assets;
 
 pub async fn handler(uri: Uri) -> Response {
