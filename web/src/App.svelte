@@ -246,8 +246,8 @@
     [[...keysOf('tree', 'down'), ...keysOf('tree', 'up')], 'browse, l opens, L opens beside'],
     [keysOf('global', 'space'), 'switch space, Tab cycles'],
     [keysOf('global', 'overview'), 'overview of every space'],
-    [keysOf('global', 'plan'), 'board, agenda and calendar'],
-    [[...keysOf('global', 'board'), ...keysOf('global', 'agenda'), ...keysOf('global', 'calendar')], 'one of them, in a tile'],
+    [keysOf('global', 'plan'), 'the plan: board, agenda, calendar'],
+    [[...keysOf('global', 'board'), ...keysOf('global', 'agenda'), ...keysOf('global', 'calendar')], 'one of them, on the plan'],
     [keysOf('tree', 'capture'), 'capture a card to the inbox'],
     [keysOf('global', 'find'), 'find in every space'],
     [keysOf('tree', 'search'), 'search this space'],
@@ -293,6 +293,7 @@
           class="panes switch"
           class:reading={workspace.tiles.all.some((tile) => !tile.empty)}
           class:full={workspace.fullscreen}
+          class:plan={workspace.tiles.planning}
           class:focus-doc={workspace.focus !== 'list'}
           style="--dir: {workspace.switchDirection}"
         >
@@ -432,6 +433,10 @@
     width: calc(var(--w) * 100% - var(--gap));
     height: calc(var(--h) * 100% - var(--gap));
   }
+
+  /* The plan screen: the views alone, with no list beside them. */
+  .panes.plan { grid-template-columns: 1fr; }
+  .panes.plan .window.list { display: none; }
 
   /* `f`: the focused pane fills the porthole — the list, or one tile. */
   .panes.full { grid-template-columns: 1fr; }

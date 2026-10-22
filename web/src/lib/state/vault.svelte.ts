@@ -51,6 +51,6 @@ export class Vault {
       failed > 0 || shared > 0 ? 'error' : undefined,
     )
     await this.ws.tree.refresh()
-    for (const tile of this.ws.tiles.all) if (tile.open?.kind === 'file') tile.open = await api.getNode(tile.open.id)
+    for (const tile of this.ws.tiles.every) if (tile.open?.kind === 'file') tile.open = await api.getNode(tile.open.id)
   }
 }

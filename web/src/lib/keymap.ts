@@ -46,7 +46,7 @@ export interface Binding {
   context: Context
   /**
    * What is pressed, as `keyName` spells it: `j`, `G`, `Enter`, `Space`,
-   * `Shift-Tab`, `Ctrl-d`, `Alt-h`, `1`, `Shift-1`, a two-key `gg`, or `*`
+   * `Shift-Tab`, `Ctrl-d`, `Ctrl-H`, `1`, `Shift-1`, a two-key `gg`, or `*`
    * for any key without Ctrl, Alt or Meta. A binding without keys only
    * describes — a mouse gesture, the editor's own keymap.
    */
@@ -78,12 +78,11 @@ export const bindings = [
   { context: 'global', keys: ['Tab', 'Shift-Tab'], action: 'cycle', label: 'Tab · Shift-Tab', help: 'next / previous space' },
   { context: 'global', keys: ['w'], action: 'overview', help: 'overview of every space — hjkl, then Enter' },
   { context: 'global', keys: ['f'], action: 'fullscreen', help: 'fullscreen the focused pane or tile; again or Esc to leave' },
-  { context: 'always', keys: ['Alt-h', 'Alt-j', 'Alt-k', 'Alt-l'], action: 'focus', typing: true, label: 'Alt-h/j/k/l', help: 'focus the tile that way, from the editor too — left of the leftmost is the list', essential: true },
-  { context: 'always', keys: ['Alt-Shift-h', 'Alt-Shift-j', 'Alt-Shift-k', 'Alt-Shift-l'], action: 'swap', typing: true, label: 'Alt-Shift-h/j/k/l', help: 'move the focused tile that way' },
+  { context: 'always', keys: ['Ctrl-h', 'Ctrl-j', 'Ctrl-k', 'Ctrl-l'], action: 'focus', typing: true, label: 'Ctrl-h/j/k/l', help: 'focus the tile that way, from the editor too — left of the leftmost is the list; h / l do the same while reading', essential: true },
+  { context: 'always', keys: ['Ctrl-H', 'Ctrl-J', 'Ctrl-K', 'Ctrl-L'], action: 'swap', typing: true, label: 'Ctrl-Shift-h/j/k/l', help: 'move the focused tile that way' },
   { context: 'tree', keys: ['L'], action: 'beside', label: 'L · Shift-Enter', help: 'open the row in a new tile beside the others' },
   { context: 'global', keys: ['gt'], action: 'nextTile', label: 'gt / gT', help: 'next / previous tile — a view too' },
   { context: 'global', keys: ['gT'], action: 'previousTile' },
-  { context: 'always', keys: ['Alt-q'], action: 'close', typing: true, help: 'close the focused tile — :close; :only closes the others' },
   { context: 'tree', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k · ↓ ↑', help: 'move down / up the list — scroll the document when it has focus', essential: true },
   { context: 'tree', keys: ['k', 'ArrowUp'], action: 'up' },
   { context: 'tree', keys: ['gg'], action: 'top', label: 'gg / G', help: 'first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line' },
@@ -109,14 +108,14 @@ export const bindings = [
   { context: 'tree', keys: ['za'], action: 'files', help: "a document's own files, folded open under it in the list — again folds them away; p drops marked files in there" },
   { context: 'tree', keys: ['M'], action: 'markAll', help: 'pick up the whole folder — again puts it all back' },
   { context: 'tree', label: 'Ctrl / Shift-click', help: 'pick a row up · every row up to it — drag them onto a folder' },
-  { context: 'global', keys: ['S'], action: 'plan', help: 'the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away', essential: true },
-  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — in a tile of its own', essential: true },
+  { context: 'global', keys: ['S'], action: 'plan', help: 'the plan screen: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were', essential: true },
+  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — on the plan screen', essential: true },
   { context: 'global', keys: ['T'], action: 'today', help: "today's diary entry, started if there is none — from templates/day when the diary has one", essential: true },
-  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, in a tile: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day beside it' },
+  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, on the plan screen: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents' },
   { context: 'tree', keys: ['[d'], action: 'previousEntry', label: '[d / ]d', help: 'the diary entry before / after the one open, by date' },
   { context: 'tree', keys: [']d'], action: 'nextEntry' },
   { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'find anything, in every space — Enter opens the result lit beside them, n goes on', essential: true },
-  { context: 'global', keys: ['b'], action: 'board', help: "the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's" },
+  { context: 'global', keys: ['b'], action: 'board', help: "the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's" },
   { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry", essential: true },
   { context: 'tree', keys: ['q'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several — Esc first puts down what m picked up', essential: true },
   { context: 'tree', keys: ['Escape'], action: 'escape' },
@@ -136,12 +135,13 @@ export const bindings = [
   // --- the workspace around the panes ------------------------------------------
   { context: 'workspace', keys: ['Escape'], action: 'escape', typing: true },
   { context: 'workspace', keys: ['Q'], action: 'scratch', section: 'scratch', help: 'lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it', essential: true },
+  { context: 'always', keys: ['Ctrl-q'], action: 'scratch', typing: true, section: 'scratch', label: 'Ctrl-Q', help: 'from anywhere, the editor too: the scratchpad down with the last note being written, and again back to where you were, still writing — Firefox quits on it instead', essential: true },
   // While a document is being written, a key that lands outside the editor
   // hands the focus back to it instead of walking the list unseen.
   { context: 'writing', keys: ['*'], action: 'refocus' },
 
   // --- what the views share: the board, the agenda, the calendar, a card's back
-  { context: 'views', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: "in a view — the board, the agenda, the calendar, a card's back — close its tile; the focus goes back to the tile before" },
+  { context: 'views', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: "on the plan screen: from a card's back to the board, from the board, the agenda or the calendar back to the documents" },
 
   // --- on a board ---------------------------------------------------------------
   { context: 'board', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h / l', caps: ['h', 'j', 'k', 'l'], hint: 'move', help: 'to the list left / right — right of the last, to the tile beside' },
@@ -156,7 +156,7 @@ export const bindings = [
   { context: 'board', keys: ['L'], action: 'sendRight' },
   { context: 'board', keys: ['Space'], action: 'done', hint: 'done', help: 'into the done list, or back out to the inbox' },
   { context: 'board', keys: ['Enter'], action: 'turn', hint: 'turn over', help: 'turn the card over, in a tile beside: its labels, description and checklist' },
-  { context: 'board', keys: ['gf'], action: 'notes', help: "the card's notes — a document, made on first use; q comes back" },
+  { context: 'board', keys: ['gf'], action: 'notes', help: "the card's notes — a document, made on first use, opened among the documents; S comes back" },
   { context: 'board', keys: ['o', 'c'], action: 'new', label: 'o · c', caps: ['o'], hint: 'new', help: 'new card on this list' },
   { context: 'board', keys: ['D'], action: 'due', hint: 'due', help: 'due date: fri, tm, +3d, 10-31 …' },
   { context: 'board', keys: ['R'], action: 'rename', hint: 'rename', help: 'rename the card, or the list when it is empty' },
@@ -183,7 +183,7 @@ export const bindings = [
   { context: 'card', keys: ['D'], action: 'due', hint: 'due' },
   { context: 'card', keys: ['H'], action: 'sendLeft', label: 'H / L', caps: ['H', 'L'], hint: 'send', help: 'send the card to the list left / right' },
   { context: 'card', keys: ['L'], action: 'sendRight' },
-  { context: 'card', keys: ['gf'], action: 'notes', hint: 'notes', help: "the card's notes — a document, made on first use; q comes back" },
+  { context: 'card', keys: ['gf'], action: 'notes', hint: 'notes', help: "the card's notes — a document, made on first use, opened among the documents; S comes back" },
   { context: 'card', keys: [':'], action: 'line' },
 
   // --- the scratchpad, while it is down --------------------------------------------

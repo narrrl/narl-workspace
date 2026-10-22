@@ -43,6 +43,18 @@ export class Scratchpad {
     this.open = false
   }
 
+  /**
+   * Ctrl-Q, from anywhere: the drawer down with the note written last being
+   * written on, at its end — or, when it is down, up again.
+   */
+  async jot() {
+    if (this.open) return this.close()
+    await this.toggle()
+    this.cursor = 0
+    this.editNote()
+    if (this.ws.drafts.writing) this.ws.drafts.writing.append = true
+  }
+
   /** `o`: a new note at the top, written straight away. */
   newNote() {
     this.#writeNote(null, '')

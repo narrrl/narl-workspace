@@ -89,7 +89,7 @@ export class Drafts {
   /** Back online: what is waiting goes now rather than at the next retry. */
   watchConnection() {
     window.addEventListener('online', () => {
-      for (const tile of this.ws.tiles.all) {
+      for (const tile of this.ws.tiles.every) {
         if (!tile.dirty) continue
         tile.stopAutosave()
         void this.#writeBack(tile)
@@ -107,7 +107,7 @@ export class Drafts {
    * unsaved work without a word.
    */
   async flush() {
-    for (const tile of this.ws.tiles.all) await this.flushTile(tile)
+    for (const tile of this.ws.tiles.every) await this.flushTile(tile)
   }
 
   /** The same for one tile only, as it is about to show something else. */
@@ -173,7 +173,7 @@ export class Drafts {
    * then refused, and `:e!` takes the rewritten text.
    */
   async reread() {
-    for (const tile of this.ws.tiles.all) {
+    for (const tile of this.ws.tiles.every) {
       if (!tile.open || tile.editing || tile.dirty) continue
       const node = await api.getNode(tile.open.id).catch(() => null)
       if (!node) continue
@@ -236,7 +236,7 @@ export class Drafts {
 
   /** Every tile showing `id` reads it again, after it was written somewhere else. */
   async rereadNode(id: number) {
-    for (const tile of this.ws.tiles.all) {
+    for (const tile of this.ws.tiles.every) {
       if (tile.open?.id !== id || tile.dirty) continue
       const node = await api.getNode(id)
       tile.open = node

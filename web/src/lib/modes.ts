@@ -3,7 +3,7 @@
  * contexts in keymap.ts, the topmost first. A key goes down the stack until
  * a context takes it.
  *
- *   always     Ctrl-S, Alt-h/j/k/l — heard in the editor too
+ *   always     Ctrl-S, Ctrl-Q, Ctrl-h/j/k/l — heard in the editor too
  *   a sheet    help, info, trash …; nothing under one hears a key
  *   drawer     the scratchpad, while it is down
  *   workspace  Esc out of fullscreen, Q
@@ -52,7 +52,7 @@ const lone = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'CapsLock',
 
 /**
  * A key as the table spells it: `j`, `G`, `Enter`, `Shift-Tab`, `Ctrl-d`,
- * `Alt-Shift-h`, `1`, `Shift-1`. Digits, and letters under Alt, are read
+ * `Ctrl-H`, `1`, `Shift-1`. Digits, and letters under Alt, are read
  * from `event.code`, so they are the same key on every layout — and on a
  * Mac, where Alt turns h into ˙. Shift is only spelled out where the key
  * itself does not already say it. A modifier on its own is no key at all.
@@ -133,4 +133,20 @@ export function dispatch(event: KeyboardEvent, pending: string, line: boolean, t
     if (listening && plain(name) && heard(rest) && take(rest!, name)) return ''
   }
   return ''
+}
+
+/**
+ * A Ctrl key heard in every context, taken before the editor sees it: vim
+ * has uses of its own for Ctrl-h and Ctrl-k, and what it handles never
+ * reaches `dispatch`. Ctrl-S is left to the editor, which saves its own
+ * text. True when it was taken.
+ */
+export function claim(event: KeyboardEvent): boolean {
+  const name = keyName(event)
+  if (!name?.startsWith('Ctrl-')) return false
+  const binding = find('always', name)
+  if (!binding?.typing || binding.action === 'save' || !run(binding, name, event)) return false
+  event.preventDefault()
+  event.stopPropagation()
+  return true
 }

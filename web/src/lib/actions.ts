@@ -82,7 +82,7 @@ function focusPane(pane: 'list' | 'document') {
 }
 
 /*
- * Alt + h/j/k/l: the focus goes to the tile that way, out of the editor
+ * Ctrl + h/j/k/l: the focus goes to the tile that way, out of the editor
  * too; left of the leftmost tile is the list. With Shift the focused tile
  * goes that way instead, swapping places with the one it lands on.
  */
@@ -93,7 +93,8 @@ function tileKey(direction: Direction, shift: boolean) {
   }
   const next = neighbour(dwindle(workspace.tiles.all.length), workspace.tiles.focused, direction)
   if (next < 0) {
-    if (direction === 'h' && !shift) focusPane('list')
+    // The plan screen has no list beside it.
+    if (direction === 'h' && !shift && !workspace.tiles.planning) focusPane('list')
     return
   }
   if (!shift) return void focusTile(next)
@@ -103,15 +104,24 @@ function tileKey(direction: Direction, shift: boolean) {
   workspace.tiles.focused = next
 }
 
+/** The drawer up, and the keys back where they were: in the editor, when a document was being written. */
+async function raise() {
+  await workspace.scratch.close()
+  if (!workspace.scratch.open && workspace.editing && workspace.pane === 'document') hooks.focusEditor()
+}
+
 export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   always: {
     save: () => {
       if (workspace.drafts.writing) guard(() => workspace.drafts.saveWriting())
       else if (workspace.open) guard(() => workspace.drafts.save())
     },
-    close: () => void runCommand('close'),
-    focus: (key) => tileKey(key.slice(-1) as Direction, false),
-    swap: (key) => tileKey(key.slice(-1) as Direction, true),
+    // Under the drawer the tiles are out of sight, so the keys are the note's.
+    focus: (key) => (workspace.scratch.open ? false : tileKey(key.slice(-1) as Direction, false)),
+    swap: (key) => (workspace.scratch.open ? false : tileKey(key.slice(-1).toLowerCase() as Direction, true)),
+    // Ctrl-Q: down with the last note being written, and up again back to
+    // what was being done — the document still in the mode it was left in.
+    scratch: () => guard(() => (workspace.scratch.open ? raise() : workspace.scratch.jot())),
   },
 
   sheet: {
@@ -318,7 +328,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
     line: () => line(':'),
     help: () => void runCommand('help'),
-    raise: () => void workspace.scratch.close(),
+    raise: () => guard(raise),
     nothing: () => {},
   },
 
@@ -355,6 +365,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     open: (key) => {
       const enter = key === 'Enter' || key === 'Shift-Enter'
       if (enter && reading() && hooks.fileAction()) return
+      // Reading, `l` is the tile to the right, as `h` is the one to the left.
+      if (!enter && workspace.pane === 'document' && workspace.open) return tileKey('l', false)
       // Shift-Enter, like `L`: beside what is open, in a tile of its own.
       if (key === 'Shift-Enter' && !reading()) return guard(() => workspace.tiles.openBeside())
       const shown = workspace.tiles.all.findIndex((tile) => tile.open && tile.open.id === workspace.tree.selected?.id)
@@ -364,10 +376,10 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     beside: () => {
       if (!reading()) guard(() => workspace.tiles.openBeside())
     },
-    // Leftwards at every depth: from the document to the list, from the
-    // list up a level.
+    // Leftwards at every depth: from a document to the tile left of it, from
+    // the leftmost to the list, from the list up a level.
     left: () => {
-      if (workspace.open && workspace.pane === 'document') focusPane('list')
+      if (workspace.open && workspace.pane === 'document') tileKey('h', false)
       else guard(() => workspace.tree.up())
     },
     sideways: (key) => {
@@ -516,7 +528,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     open: () => void workspace.guard(() => workspace.diary.openCalendarDay()).then(() => hooks.focusEditor()),
   },
 
-  /** What every view shares: `q` closes its tile, back to the one before. */
+  /** What every view shares: `q` closes a card's back, and from the others goes back to the documents. */
   views: {
     close: () => void runCommand('close'),
   },
@@ -549,9 +561,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     agenda: () => void runCommand('agenda'),
     today: () => void runCommand('today'),
     calendar: () => void runCommand('cal'),
-    // `S`, as the desktop's special workspace is bound: the board, the
-    // agenda and the calendar, put up and away again. `b`, `t` and `C` only
-    // ever go to their tile.
+    // `S`, as the desktop's special workspace is bound: the plan screen —
+    // the board, the agenda and the calendar — and back to the documents.
+    // `b`, `t` and `C` go there too, to their own view.
     plan: () => void runCommand('plan'),
     line: () => line(':'),
     help: () => void runCommand('help'),

@@ -155,6 +155,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { api } from './api'
   import { hooks } from './commands'
+  import { claim } from './modes'
   import { editorTheme, highlighting, languages } from './editorTheme'
   import { embedSnippet } from './markdown'
   import { workspace, type Tile } from './store.svelte'
@@ -180,9 +181,11 @@
 
   /*
    * Esc, before vim sees it: in normal mode, or with no vim, it leaves, as
-   * `:q` does — unless it is closing the completions.
+   * `:q` does — unless it is closing the completions. The Ctrl keys heard
+   * everywhere — between the tiles, the scratchpad — go before vim too.
    */
   function onkeydown(event: KeyboardEvent) {
+    if (claim(event)) return
     if (event.key !== 'Escape' || (workspace.vimEnabled && mode !== 'normal')) return
     if (view && completionStatus(view.state) !== null) return
     event.preventDefault()
@@ -317,6 +320,7 @@
       parent: host!,
     })
 
+    if (writing?.append) view.dispatch({ selection: { anchor: text.length } })
     if (writing || workspace.tile === tile) view.focus()
 
     const cm = workspace.vimEnabled ? getCM(view) : null
@@ -333,7 +337,10 @@
       // A fresh entry starts in insert mode, and so does an empty short text,
       // which is there to be written; anything else starts in normal mode,
       // the way opening a file in vim does.
-      if (tile?.enterInsert || (writing && !text.trim())) {
+      if (writing?.append && text.trim()) {
+        Vim.handleKey(cm, 'G', 'workspace')
+        Vim.handleKey(cm, 'A', 'workspace')
+      } else if (tile?.enterInsert || (writing && !text.trim())) {
         if (tile) tile.enterInsert = false
         Vim.handleKey(cm, 'i', 'workspace')
       }

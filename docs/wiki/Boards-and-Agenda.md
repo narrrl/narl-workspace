@@ -3,42 +3,39 @@
 ## Views
 
 The board, the agenda, the [calendar](Diary.md#the-calendar) and the back of
-a card are views: tiles like the documents' tiles, opened beside what is on
-screen and walked the same way. `S` (or `:plan`) puts the board, the agenda
-and the calendar up together, ahead of the documents with the board focused —
-the board on the left, the agenda over the calendar on the right when nothing
-else is open — and puts every view away again.
+a card are views, and they have a screen of their own: the plan. `S` (or
+`:plan`) goes there — the board on the left, the agenda over the calendar on
+the right, and no list — and back to the documents, which wait behind it as
+they were left. The views are tiles like the documents', walked the same way.
 
 ![The board, the agenda and the calendar](../images/board.png)
 
 | key | what it does |
 | --- | --- |
-| `S` | the board, the agenda and the calendar up together, or every view away |
-| `b`, `t`, `C` | to the board, the agenda or the calendar, opening its tile when it is not up |
+| `S` | to the plan screen, or back to the documents |
+| `b`, `t`, `C` | to the board, the agenda or the calendar, on the plan screen |
 | `gt` / `gT` | the next / previous tile |
-| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | the tile that way; left of the leftmost is the list |
+| `Ctrl-h` / `Ctrl-j` / `Ctrl-k` / `Ctrl-l` | the tile that way |
 | `l` past the last list, `h` in the agenda, `j` past its end | on into the tile beside |
 | `f` | the focused tile fills the screen; again or `Esc` to leave |
-| `1` … `9` | switch space; with a view focused, the views come along |
-| `q`, `Esc` | close the view's tile, back to the tile focused before it |
+| `1` … `9` | switch space; the plan stays, and the board shows that space's |
+| `q`, `Esc` | from a card's back to the board; from the board, the agenda or the calendar back to the documents |
 
 The keys go to the tile with focus, which wears the light border and its key
-lit in its head; the other views keep their cursors, dimmed. A view is never
-replaced by what is opened from it — a card's notes, a day of the calendar, an
-entry of the agenda, a row of the list: that opens in a tile beside it, and
-`q` on it comes back to the view. Each view is read again whenever it is gone
-to.
+lit in its head; the other views keep their cursors, dimmed. What is opened
+from a view — a card's notes, a day of the calendar, an entry of the agenda —
+is a document, so it opens on the documents' screen, beside what is there, and
+`S` comes back to the plan. Each view is read again whenever it is gone to.
 
-Each space keeps its own tiles, views among them. Switching space with a view
-focused takes the board, the agenda and the calendar along, the way the
-special workspace used to stay up: a digit on the board shows that space's
-board, with the agenda still beside it. Switching with a document or the list
-focused leaves them in the space, and they are there again on coming back.
+The plan is the same in every space, the way the desktop's special workspace
+stays up: a digit on the board shows that space's board, with the agenda still
+beside it. Each space keeps its own documents behind it, and they are there
+again on going back.
 
 ## The board
 
 Every space except the diary has a board. `b`, the board button on the rail, or
-`:board` shows it in a tile beside what is open, and `q` or `Esc` closes it.
+`:board` shows it on the plan screen, and `q` or `Esc` goes back to the documents.
 It is the board of the space being browsed, or, in a space without one such as
 the diary, the last board shown. The head of the board names every space that
 has one, with the digit that goes there.
@@ -119,8 +116,8 @@ outside the browser, see [Capture](Capture.md).
 ### Notes
 
 `gf` on a card, or on its back, opens its notes: a document named after the card, made in the
-root of the space the first time, in a tile beside the board. Closing it goes
-back to the board, on the same card.
+root of the space the first time, among the documents. `S` goes back to the
+board, on the same card.
 
 The link is loose on purpose: deleting the document leaves the card, because the
 work is still open when its notes are gone.
@@ -186,8 +183,8 @@ does not make a second copy. The board and the agenda show the rule as
 
 ## The agenda
 
-`t` (or `:agenda`) gathers what needs you from every board at once, in a tile
-of its own.
+`t` (or `:agenda`) gathers what needs you from every board at once, on the
+plan screen.
 
 ![The agenda](../images/agenda.png)
 
@@ -201,7 +198,7 @@ of its own.
 | --- | --- |
 | `j` / `k` | down / up, on into the diary entries, then into the tile below |
 | `h` | to the tile on the left |
-| `Enter` | to the card on its own board, in the tile beside, or open the entry |
+| `Enter` | to the card on its own board, beside, or open the entry among the documents |
 | `Space` | finish the card where it stands |
 | `D` | due date |
 | `H` / `L` | to the list left / right on its board |

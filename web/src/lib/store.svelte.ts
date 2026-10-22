@@ -160,7 +160,7 @@ export class Workspace {
     // the draft included, so pick up where it stopped rather than start over.
     if (this.tree.spaces.length > 0) {
       await this.tree.refresh()
-      for (const tile of this.tiles.all) {
+      for (const tile of this.tiles.every) {
         if (tile.open && tile.dirty) await this.guard(() => this.drafts.save({ quiet: true, tile }))
       }
       if (this.drafts.writing?.dirty) await this.guard(() => this.drafts.saveWriting())
@@ -178,7 +178,8 @@ export class Workspace {
     this.vault.status = null
     this.tree.spaces = []
     this.tree.nodes = []
-    for (const tile of this.tiles.all) tile.clear()
+    if (this.tiles.planning) this.tiles.leavePlan()
+    for (const tile of this.tiles.every) tile.clear()
     this.tiles.prune()
   }
 

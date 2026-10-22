@@ -83,6 +83,7 @@
     <footer class="label">
       <span>writing — it saves itself</span>
       <span><span class="kbd">esc</span> back to the notes</span>
+      <span><span class="kbd">⌃ Q</span> back to where you were</span>
       <span><span class="kbd">:keep</span> make it a document</span>
     </footer>
   {:else}
@@ -92,31 +93,35 @@
 
 <style>
   /*
-   * Hung from under the bar across the frame's opening, as the desktop's
-   * scratchpad slides down from under its bar: hull, a rim, the lower corners
-   * rounded, and the light along its lower edge to say it has the keys.
+   * The upper part of the porthole, come down over what is in it: the same
+   * opening under the bar, the same rounded corners, and the focused
+   * window's lit rim, since it has the keys while it is down. It is
+   * uncovered from the top, as the desktop's scratchpad comes from under its
+   * bar.
    */
   .drawer {
+    --pane-bg: color-mix(in oklab, var(--surface) 40%, var(--hull));
     position: absolute;
-    top: calc(var(--bar-h) + var(--frame));
-    left: calc(var(--frame) + 24px);
-    right: calc(var(--rail-w) + 24px);
+    top: var(--bar-h);
+    left: var(--frame);
+    right: var(--rail-w);
     z-index: 25;
-    height: min(62vh, 640px);
+    height: min(62vh, 640px, calc(100% - var(--bar-h) - var(--status-h)));
     display: flex;
     flex-direction: column;
     gap: 10px;
     padding: 14px 20px 12px;
-    background: var(--hull);
-    border: 1px solid var(--surface-alt);
-    border-top: 0;
-    border-bottom-color: var(--light-dim);
-    border-radius: 0 0 var(--frame-radius) var(--frame-radius);
+    border: 1px solid transparent;
+    border-radius: var(--frame-radius);
+    background:
+      linear-gradient(var(--pane-bg), var(--pane-bg)) padding-box,
+      linear-gradient(135deg, var(--light), var(--light-dim)) border-box;
     box-shadow: 0 18px 40px color-mix(in oklab, var(--ink) 70%, transparent);
     animation: lower var(--t-slow) var(--ease-snap) both;
   }
   @keyframes lower {
-    from { transform: translateY(-104%); }
+    from { clip-path: inset(0 0 100% 0 round var(--frame-radius)); }
+    to { clip-path: inset(0 0 0 0 round var(--frame-radius)); }
   }
 
   header { display: flex; align-items: center; gap: 10px; }

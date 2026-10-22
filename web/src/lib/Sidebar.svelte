@@ -135,7 +135,7 @@
             actions(index)
           }}
           class:active={index === workspace.tree.cursor}
-          class:open={workspace.tiles.all.some((tile) => tile.open?.id === node.id)}
+          class:open={workspace.tiles.every.some((tile) => tile.open?.id === node.id)}
           class:marked={workspace.tree.isMarked(node.id)}
           class:nested
           data-index={index}

@@ -103,11 +103,12 @@ Several documents can be open at once, each in a tile of its own.
   it in the focused one.
 - Tiles share the space the way a tiling window manager does: two side by side,
   a third splits the newer one, and so on.
-- `Alt-h/j/k/l` moves the focus between tiles, and `Alt-h` past the leftmost
-  goes back to the list. `Alt-Shift-h/j/k/l` moves the tile itself.
+- `Ctrl-h/j/k/l` moves the focus between tiles, from the editor too, and
+  `Ctrl-h` past the leftmost goes back to the list. While reading, `h` and `l`
+  do the same. `Ctrl-Shift-h/j/k/l` moves the tile itself.
 - `gt` / `gT` (or `:bn` / `:bp`) cycle through them, `:ls` lists them, and
   `:b <n or name>` focuses one.
-- `Alt-q` (or `:close`) closes the focused tile, `:only` every other one, and
+- `q` (or `:close`) closes the focused tile, `:only` every other one, and
   `f` makes the focused tile fill the screen.
 
 Opening a document that is already in a tile focuses that tile rather than

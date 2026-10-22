@@ -83,14 +83,18 @@
 </div>
 
 <style>
-  /* A tile's window is its frame, so it only fills it. */
+  /*
+   * A tile's window is its frame, so it only fills it — and the month is
+   * fitted into what the tile leaves it, never scrolled: the weeks share the
+   * height, up to a row a pointer still hits comfortably.
+   */
   .sheet {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
     height: 100%;
-    overflow-y: auto;
-    padding: 20px 24px;
+    overflow: hidden;
+    padding: 16px 20px;
   }
 
   header { display: flex; align-items: center; gap: 12px; }
@@ -99,21 +103,26 @@
   header .title { color: var(--light); }
 
   .grid {
+    flex: 0 1 auto;
+    min-height: 0;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 4px;
+    grid-template-rows: auto;
+    grid-auto-rows: minmax(0, 40px);
+    gap: 3px;
     list-style: none;
     margin: 0;
     padding: 0;
   }
   .weekday { text-align: center; font-size: 10px; color: var(--muted); }
+  .grid > li { min-height: 0; }
 
   .day {
     position: relative;
     display: grid;
     place-items: center;
     width: 100%;
-    aspect-ratio: 1.4;
+    height: 100%;
     padding: 0;
     border: 1px solid transparent;
     border-radius: var(--radius-s);
@@ -126,12 +135,13 @@
   .day.written { color: var(--fg); }
   .day.today { border-color: var(--rim); }
   .day.at { background: var(--light); color: var(--ink); }
-  .dot, .many { position: absolute; bottom: 4px; }
+  .dot, .many { position: absolute; bottom: 3px; }
   .dot { width: 5px; height: 5px; border-radius: 999px; background: var(--light); }
   .many { font-size: 9px; color: var(--light); }
   .day.at :is(.dot) { background: var(--ink); }
   .day.at .many { color: var(--ink); }
 
+  .chosen { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .chosen h2 {
     display: flex;
     align-items: center;

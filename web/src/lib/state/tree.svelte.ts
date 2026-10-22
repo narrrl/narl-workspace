@@ -5,9 +5,10 @@ import type { Workspace, Pane } from '../store.svelte'
 
 /**
  * Where a space was left: the folder, the tiles, the row, the pane. A tile
- * is the id of the node it shows, or the name of the view. `openId` is the
- * focused tile's, all a spot held before there were tiles, and `open` the
- * documents alone, all it held before there were views.
+ * is the id of the node it shows; the name of a view is what a spot held
+ * while views were tiled among the documents, and is passed over now.
+ * `openId` is the focused tile's, all a spot held before there were tiles,
+ * and `open` the documents alone, all it held before there were views.
  */
 type Spot = {
   parentId: number
@@ -144,47 +145,49 @@ export class Tree {
     if (start) await this.enterSpace(start.id)
   }
 
-  /** `views` false: the views are leaving with the focus, and are not left behind. */
-  #rememberSpot(views = true) {
+  /** Where this space is left, its documents on screen. */
+  #rememberSpot() {
     if (this.spaceId === null || this.parentId === null) return
-    // A card's back is the card under the board's cursor, which is not kept.
-    const kept = this.ws.tiles.all.filter((tile) => !tile.empty && (tile.kind === 'node' || (views && tile.kind !== 'card')))
+    const kept = this.ws.tiles.all.filter((tile) => tile.open)
     this.#spots[this.spaceId] = {
       parentId: this.parentId,
       openId: this.ws.open?.id ?? null,
       cursor: this.cursor,
       pane: this.ws.pane,
-      tiles: kept.map((tile) => (tile.kind === 'node' ? tile.open!.id : tile.kind)),
+      tiles: kept.map((tile) => tile.open!.id),
       focused: Math.max(kept.indexOf(this.ws.tile), 0),
     }
     localStorage.setItem('diary:spots', JSON.stringify(this.#spots))
   }
 
   async enterSpace(id: number) {
-    const leaving = this.spaceId !== null && this.spaceId !== id
     /*
-     * The views look at every board and the whole diary, so with one of them
-     * focused they come along — moved, not copied — as the special workspace
-     * once did: a digit on the board shows that space's board, and the
-     * agenda stays beside it.
+     * The views look at every board and the whole diary, so the plan screen
+     * stays as it is — a digit on the board shows that space's board — and
+     * it is the documents behind it that are this space's.
      */
-    let carried: Tile[] = []
-    let carriedFocus: Tile | undefined
+    const planning = this.ws.tiles.planning
+    if (planning) this.ws.tiles.swap()
+    try {
+      await this.#enterSpace(id)
+    } finally {
+      if (planning) this.ws.tiles.swap()
+    }
+    await this.ws.tiles.loadViews()
+  }
+
+  async #enterSpace(id: number) {
+    const leaving = this.spaceId !== null && this.spaceId !== id
     if (leaving) {
       await this.ws.drafts.flush()
-      const carry = this.ws.focus !== 'list' && this.ws.focus !== 'node'
-      this.#rememberSpot(!carry)
+      this.#rememberSpot()
       const from = this.spaces.findIndex((s) => s.id === this.spaceId)
       const to = this.spaces.findIndex((s) => s.id === id)
       this.ws.switchDirection = to >= from ? 1 : -1
-      if (carry) {
-        carried = this.ws.tiles.all.filter((tile) => tile.kind !== 'node' && tile.kind !== 'card')
-        carriedFocus = this.ws.tile.kind === 'card' ? (this.ws.tiles.view('board') ?? carried[0]) : this.ws.tile
-      }
       // Each space has tiles of its own; these come back with this one.
       for (const tile of this.ws.tiles.all) tile.stopAutosave()
-      this.ws.tiles.replace(carried, carriedFocus)
-      this.ws.pane = carried.length > 0 ? 'document' : 'list'
+      this.ws.tiles.replace([])
+      this.ws.pane = 'list'
     }
     this.spaceId = id
     localStorage.setItem('diary:space', String(id))
@@ -204,12 +207,7 @@ export class Tree {
         spot.tiles ?? spot.open ?? (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId) ? [spot.openId] : [])
       const restored: Tile[] = []
       for (const entry of entries) {
-        if (typeof entry === 'string') {
-          let tile = this.ws.tiles.view(entry)
-          if (!tile) this.ws.tiles.all.push((tile = new Tile(entry)))
-          restored.push(tile)
-          continue
-        }
+        if (typeof entry === 'string') continue
         const empty = this.ws.tiles.all.findIndex((tile) => tile.empty)
         if (empty >= 0) this.ws.tiles.focused = empty
         else {
@@ -224,25 +222,23 @@ export class Tree {
         }
       }
       this.ws.tiles.prune()
-      const back = carriedFocus ?? restored[Math.min(spot.focused ?? 0, restored.length - 1)]
+      const back = restored[Math.min(spot.focused ?? 0, restored.length - 1)]
       if (back && this.ws.tiles.all.includes(back)) {
         this.ws.tiles.focusOn(this.ws.tiles.all.indexOf(back))
-        if (!carriedFocus) this.ws.pane = spot.pane
+        this.ws.pane = spot.pane
       } else {
         this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
       }
     }
     this.ws.tiles.trail = []
-    await this.ws.tiles.loadViews()
   }
 
   /** Show the children of `id`, which must be a space or a folder. */
   async goTo(id: number, keep?: number) {
     await this.ws.drafts.flush()
     const folder = await api.getNode(id)
-    // Walking into another space by a link leaves this one where it was; the
-    // views stay on screen, so they go along rather than stay behind too.
-    if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot(false)
+    // Walking into another space by a link leaves this one where it was.
+    if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
     this.parentId = id
     this.parentSealed = folder.sealed
     this.query = ''
@@ -347,7 +343,14 @@ export class Tree {
   }
 
   async openNode(id: number, edit = false) {
-    if (this.ws.open?.id !== id) await this.ws.drafts.flushTile()
+    /*
+     * The plan screen holds the views alone: what is opened from it — a
+     * card's notes, a day of the calendar, a search — opens on the documents'
+     * screen, beside what is there, and `S` goes back.
+     */
+    const fromPlan = this.ws.tiles.planning
+    if (fromPlan) this.ws.tiles.leavePlan()
+    else if (this.ws.open?.id !== id) await this.ws.drafts.flushTile()
 
     const node = await api.getNode(id)
     if (isContainer(node)) {
@@ -362,10 +365,7 @@ export class Tree {
       if (edit && node.kind === 'document') this.ws.editing = true
       return
     }
-    // A view is never put away by what is opened from it — a card's notes,
-    // a day of the calendar, a search from the board: that opens beside it,
-    // and closing it goes back there.
-    if (this.ws.tile.kind !== 'node') this.ws.tiles.add()
+    if (fromPlan && !this.ws.tile.empty) this.ws.tiles.add()
 
     this.ws.open = node
     this.ws.draft = { name: node.name, body: node.body, created_at: node.created_at }
@@ -549,7 +549,7 @@ export class Tree {
   async deleteSpace(id: number) {
     const { removed } = await api.deleteNode(id)
     this.lastDeleted = id
-    for (const tile of this.ws.tiles.all) tile.clear()
+    for (const tile of this.ws.tiles.every) if (tile.kind === 'node') tile.clear()
     this.ws.tiles.prune()
     this.ws.cards.rawBoard = null
     this.ws.cards.boardSpaceId = null
@@ -585,7 +585,7 @@ export class Tree {
    */
   async moveNodes(nodes: NodeSummary[], parent: number, where = 'here') {
     if (nodes.length === 0) return this.ws.say('nothing marked — press m on a row first', 'error')
-    const leaving = this.ws.tiles.all.filter((tile) => nodes.some((n) => n.id === tile.open?.id))
+    const leaving = this.ws.tiles.every.filter((tile) => nodes.some((n) => n.id === tile.open?.id))
     for (const tile of leaving) {
       await this.ws.drafts.flushTile(tile)
       tile.clear()

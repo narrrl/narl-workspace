@@ -19,11 +19,10 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Tab · Shift-Tab` | next / previous space |
 | `w` | overview of every space — hjkl, then Enter |
 | `f` | fullscreen the focused pane or tile; again or Esc to leave |
-| `Alt-h/j/k/l` | focus the tile that way, from the editor too — left of the leftmost is the list |
-| `Alt-Shift-h/j/k/l` | move the focused tile that way |
+| `Ctrl-h/j/k/l` | focus the tile that way, from the editor too — left of the leftmost is the list; h / l do the same while reading |
+| `Ctrl-Shift-h/j/k/l` | move the focused tile that way |
 | `L · Shift-Enter` | open the row in a new tile beside the others |
 | `gt / gT` | next / previous tile — a view too |
-| `Alt-q` | close the focused tile — :close; :only closes the others |
 | `j / k · ↓ ↑` | move down / up the list — scroll the document when it has focus |
 | `gg / G` | first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line |
 | `Ctrl-D / Ctrl-U` | half a page down / up the open document |
@@ -44,13 +43,13 @@ arguments and `↑` / `↓` recall earlier lines.
 | `za` | a document's own files, folded open under it in the list — again folds them away; p drops marked files in there |
 | `M` | pick up the whole folder — again puts it all back |
 | `Ctrl / Shift-click` | pick a row up · every row up to it — drag them onto a folder |
-| `S` | the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away |
-| `t` | agenda — late, due this week, in hand, on every board — in a tile of its own |
+| `S` | the plan screen: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were |
+| `t` | agenda — late, due this week, in hand, on every board — on the plan screen |
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
-| `C` | the diary by month, in a tile: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day beside it |
+| `C` | the diary by month, on the plan screen: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents |
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
-| `b` | the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's |
+| `b` | the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
 | `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
@@ -64,7 +63,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-S` | save, from anywhere |
 | `?` | this screen — the keys to start with, then on a second ? every key and command; h/l a column, / filters it down |
 | `,` | the settings sheet: vim and the clipboard, the vault, the backup, signed-in browsers, ssh keys, capture tokens |
-| `q · Esc` | in a view — the board, the agenda, the calendar, a card's back — close its tile; the focus goes back to the tile before |
+| `q · Esc` | on the plan screen: from a card's back to the board, from the board, the agenda or the calendar back to the documents |
 
 ### On a board
 
@@ -79,7 +78,7 @@ The first list is the inbox, the last list is done.
 | `H / L` | move the card to the list left / right |
 | `Space` | into the done list, or back out to the inbox |
 | `Enter` | turn the card over, in a tile beside: its labels, description and checklist |
-| `gf` | the card's notes — a document, made on first use; q comes back |
+| `gf` | the card's notes — a document, made on first use, opened among the documents; S comes back |
 | `o · c` | new card on this list |
 | `D` | due date: fri, tm, +3d, 10-31 … |
 | `R` | rename the card, or the list when it is empty |
@@ -103,7 +102,7 @@ The first list is the inbox, the last list is done.
 | `a` | put on a label, or take it off — :label on the line, Tab offers the board's |
 | `R · D` | rename the card, its due date |
 | `H / L` | send the card to the list left / right |
-| `gf` | the card's notes — a document, made on first use; q comes back |
+| `gf` | the card's notes — a document, made on first use, opened among the documents; S comes back |
 
 ### In the agenda
 
@@ -123,6 +122,7 @@ The first list is the inbox, the last list is done.
 | key | what it does |
 | --- | --- |
 | `Q` | lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it |
+| `Ctrl-Q` | from anywhere, the editor too: the scratchpad down with the last note being written, and again back to where you were, still writing — Firefox quits on it instead |
 | `j / k` | down / up the notes, the one touched last on top |
 | `o` | a new note, written straight away — it saves itself |
 | `Enter · e · i` | write the note — Esc in normal mode, or :q, comes back to the notes |
@@ -154,8 +154,8 @@ whole workspace. A command that does a second thing takes a word for it:
 
 | command | what it does |
 | --- | --- |
-| `:board` | this space's board, in a tile — the last one shown when this space has none |
-| `:plan, :special` | the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board |
+| `:board` | this space's board, on the plan screen — the last one shown when this space has none |
+| `:plan, :special` | the plan screen: the board, the agenda and the calendar, in place of the documents — S goes there and back again; 1 … 9 on the board picks the board |
 | `:card, :c [title]` | add a card — reading a document, one about it, titled after it unless named, and gf on it comes back; on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:due <when\|->` | due date of the card in focus — on the board, its back, in the agenda, or the open document's: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
@@ -196,7 +196,7 @@ whole workspace. A command that does a second thing takes a word for it:
 
 | command | what it does |
 | --- | --- |
-| `:close, :clo` | close the focused tile — Alt-q; asks when its draft could not be written |
+| `:close, :clo` | close the focused tile — q while reading; on the plan screen, back to the documents; asks when its draft could not be written |
 | `:only, :on` | close every tile but the focused one |
 | `:ls, :buffers, :files` | list the open tiles, % on the focused one |
 | `:buffer, :b <n\|name>` | focus a tile by its number in :ls, or by the start of its name |

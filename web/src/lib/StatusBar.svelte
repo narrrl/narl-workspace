@@ -7,7 +7,13 @@
   const { pending = '' }: { pending?: string } = $props()
 
   const mode = $derived(
-    workspace.editing ? (workspace.vimEnabled ? workspace.vimMode.toUpperCase() : 'EDIT') : 'BROWSE',
+    workspace.editing
+      ? workspace.vimEnabled
+        ? workspace.vimMode.toUpperCase()
+        : 'EDIT'
+      : workspace.tiles.planning
+        ? 'PLAN'
+        : 'BROWSE',
   )
 
   // The path is the file name here: work/einarbeiten/01-was-ist-eebus.

@@ -334,7 +334,7 @@ export class Cards {
   /** The cards about each document open in a tile, read again. */
   async #reloadCardsAbout() {
     await Promise.all(
-      this.ws.tiles.all.map(async (tile) => {
+      this.ws.tiles.every.map(async (tile) => {
         const id = tile.open?.kind === 'document' ? tile.open.id : null
         if (id === null) return
         const cards = await api.nodeCards(id).catch(() => null)

@@ -1,6 +1,6 @@
 import { isContainer, type WorkspaceNode } from '../api'
 import { formatDay } from '../util'
-import type { Workspace } from '../store.svelte'
+import type { Pane, Workspace } from '../store.svelte'
 
 /**
  * What a tile shows: a node of the tree — a document or a file — or one of
@@ -68,9 +68,10 @@ export class Tile {
 }
 
 /**
- * The tiles on screen and which has the focus: opened, closed, walked, and
- * the views — the board, the agenda, the calendar, a card's back — put up
- * among them.
+ * The tiles on screen and which has the focus: opened, closed, walked. There
+ * are two screens of them, and one is shown at a time: the documents, beside
+ * the list, and the plan — the board, the agenda, the calendar, a card's
+ * back — which `S` goes to and comes back from.
  */
 export class Tiles {
   readonly ws: Workspace
@@ -91,9 +92,19 @@ export class Tiles {
     return this.all[this.focused] ?? this.all[0]
   }
 
-  /** Every tile showing `id`. */
+  /** The plan screen is on show, and the documents are put away behind it. */
+  planning = $state(false)
+  /** The screen not on show, as it was left. */
+  #away = $state<{ all: Tile[]; focused: number; trail: Tile[]; pane: Pane }>({ all: [], focused: 0, trail: [], pane: 'list' })
+
+  /** The tiles of both screens: a draft behind the plan is still written. */
+  get every(): Tile[] {
+    return [...this.all, ...this.#away.all]
+  }
+
+  /** Every tile showing `id`, on either screen. */
   showing(id: number): Tile[] {
-    return this.all.filter((tile) => tile.open?.id === id)
+    return this.every.filter((tile) => tile.open?.id === id)
   }
 
   /*
@@ -158,8 +169,13 @@ export class Tiles {
     if (this.current.empty) this.ws.pane = 'list'
   }
 
-  /** `:close`: the focused tile goes, or with only one, what it shows. */
+  /**
+   * `:close`: the focused tile goes, or with only one, what it shows. On the
+   * plan only a card's back goes; closing the board, the agenda or the
+   * calendar goes back to the documents.
+   */
   close() {
+    if (this.planning && this.current.kind !== 'card') return this.leavePlan()
     this.ws.drafts.leaveCard()
     this.current.clear()
     this.prune()
@@ -201,46 +217,60 @@ export class Tiles {
 
   /*
    * The views — the board, the agenda, the calendar, a card's back — are
-   * tiles, opened beside what is on screen. Each is read again whenever it is
-   * gone to: it is looked at in passing, and what it says should be what is
-   * true now.
+   * the tiles of the plan screen. Each is read again whenever it is gone to:
+   * it is looked at in passing, and what it says should be what is true now.
    */
 
-  /** `b`, `t`, `C`, Enter on a card: to that view's tile, opening it first when it is not up. */
+  /** The views the plan screen holds, in the order they are tiled. */
+  static readonly PLAN: View[] = ['board', 'agenda', 'calendar']
+
+  /** The other screen on show, and this one put away as it is. */
+  swap() {
+    const away = this.#away
+    this.#away = { all: this.all, focused: this.focused, trail: this.trail, pane: this.ws.pane }
+    this.all = away.all.length > 0 ? away.all : [new Tile()]
+    this.focused = Math.min(away.focused, this.all.length - 1)
+    this.trail = away.trail
+    this.ws.pane = away.pane
+    this.planning = !this.planning
+  }
+
+  /** To the plan screen, with every view on it, from wherever the documents were. */
+  enterPlan() {
+    if (this.planning) return
+    this.ws.drafts.leaveCard()
+    this.swap()
+    const cards = this.all.filter((tile) => tile.kind === 'card')
+    this.all = [...Tiles.PLAN.map((kind) => this.view(kind) ?? new Tile(kind)), ...cards]
+    this.focused = Math.min(this.focused, this.all.length - 1)
+    this.ws.pane = 'document'
+  }
+
+  /** Back to the documents, as they were left. */
+  leavePlan() {
+    if (!this.planning) return
+    this.ws.drafts.leaveCard()
+    this.swap()
+    // What was closed behind the plan — deleted, moved away — is gone from here too.
+    this.prune()
+    if (!this.current.empty) this.focusOn(this.focused)
+  }
+
+  /** `b`, `t`, `C`, Enter on a card: to the plan screen, and that view on it focused. */
   async show(kind: View) {
-    await this.loadView(kind)
-    if (!this.view(kind)) {
-      // The one empty tile there can be takes it; otherwise it goes beside.
-      if (this.current.empty) this.current.kind = kind
-      else this.all.push(new Tile(kind))
-    }
+    // Coming to the plan, every view on it is read again, not only this one.
+    const kinds = this.planning ? [kind] : Tiles.PLAN
+    await Promise.all(kinds.map((each) => this.loadView(each)))
+    this.enterPlan()
+    if (!this.view(kind)) this.all.push(new Tile(kind))
     this.focusOn(this.all.indexOf(this.view(kind)!))
     if (kind === 'board' && this.ws.cards.boardSpaceId === null) this.ws.say('no space has a board — :set board turns one on', 'error')
   }
 
-  /** The views `S` puts up together, in the order they are tiled. */
-  static readonly PLAN: View[] = ['board', 'agenda', 'calendar']
-
-  /**
-   * `S`: the board, the agenda and the calendar, tiled ahead of the
-   * documents with the board focused — or, when all three are up, every view
-   * put away again.
-   */
+  /** `S`: the plan screen with the board focused, or back to the documents. */
   async togglePlan() {
-    if (Tiles.PLAN.every((kind) => this.view(kind))) {
-      for (const tile of this.all) if (tile.kind !== 'node') tile.clear()
-      this.prune()
-      if (!this.current.empty) this.focusOn(this.focused)
-      return
-    }
-    await Promise.all(Tiles.PLAN.map((kind) => this.loadView(kind)))
-    const current = this.current
-    const missing = Tiles.PLAN.filter((kind) => !this.view(kind)).map((kind) => new Tile(kind))
-    this.all = [...missing, ...this.all]
-    this.focused = this.all.indexOf(current)
-    this.prune()
-    this.focusOn(this.all.indexOf(this.view('board')!))
-    if (this.ws.cards.boardSpaceId === null) this.ws.say('no space has a board — :set board turns one on', 'error')
+    if (this.planning) return this.leavePlan()
+    await this.show('board')
   }
 
   /** Read again what a view shows. */
@@ -253,7 +283,7 @@ export class Tiles {
     }
   }
 
-  /** Every view on screen read again, after a space switch brought them. */
+  /** Every view on the plan read again, after a space switch. */
   async loadViews() {
     if (this.view('board') || this.view('card')) await this.ws.cards.loadBoard()
     if (this.view('calendar')) await this.loadView('calendar')

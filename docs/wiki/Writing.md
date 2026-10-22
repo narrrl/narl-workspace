@@ -60,7 +60,10 @@ Each save keeps the text it replaces, so nothing written is lost. See
 Not every note knows yet where it belongs. `Q` (or `:scratch`) lowers the
 scratchpad from under the bar, over whatever is on screen, the way the
 desktop lowers its own; `Q`, `q` or `Esc` raises it again, and what was on
-screen is as it was. Its notes have no name, no space and no folder: a note is
+screen is as it was. `Ctrl-Q` works from anywhere, the editor included: the
+scratchpad comes down with the last note being written, at its end, and
+`Ctrl-Q` again puts it away and goes back to the document, still writing where
+it was left. Firefox quits on `Ctrl-Q`, so there it is `Q` only. Its notes have no name, no space and no folder: a note is
 a body and the time it was last touched, newest on top.
 
 | key | what it does |
@@ -73,6 +76,7 @@ a body and the time it was last touched, newest on top.
 | `A` | put it at the end of a document (`:append [document]`) |
 | `dd` | drop the note (asks y/N) |
 | `Q`, `q`, `Esc` | raise the scratchpad |
+| `Ctrl-Q` | from anywhere, while writing too: down with the last note being written, and back again |
 
 A note is written in the same editor as a document, and saves itself the same
 way. `Esc` in normal mode, or `:q`, goes back to the notes; a note left empty is

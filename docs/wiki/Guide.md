@@ -11,9 +11,9 @@ The keys are the desktop's. On a phone, every one of these has a button; see
 ## Morning: what needs you
 
 The first time you open the workspace each day, the **agenda** opens by itself
-when anything is late or due. Any other time, press `t`. It opens in a tile
-beside what is open; `S` puts it up with the board and the calendar, and puts
-them away again, and `Alt-h`/`j`/`k`/`l` walk the tiles.
+when anything is late or due. Any other time, press `t`. It is on the plan
+screen, with the board and the calendar, in place of the documents; `S` goes
+there and back again, and `Ctrl-h`/`j`/`k`/`l` walk the tiles.
 
 ![The agenda](../images/agenda.png)
 
@@ -56,8 +56,9 @@ to it and press `L` instead: it opens in a **tile** of its own.
 
 ![Two documents in tiles](../images/tiles.png)
 
-`Alt-h` and `Alt-l` move between the tiles and back to the list, `Alt-q`
-closes one, and `f` makes the focused one fill the screen. Each space remembers
+`h` and `l` move between the tiles and back to the list, `Ctrl-h` and
+`Ctrl-l` from the editor too, `q` closes one, and `f` makes the focused one
+fill the screen. Each space remembers
 its tiles, so switching away and back finds them as they were. More in
 [Spaces and documents](Spaces-and-Documents.md).
 
@@ -89,8 +90,8 @@ on the same line makes it a note on the scratchpad, and `Tab` again a timed line
 in today's diary entry. A note waits there until `K`, `C` or `A` turns it into a
 document, a card, or more of a document.
 
-Press `b` to see the **board**, in a tile beside the document. A digit there
-shows the board of another space.
+Press `b` to see the **board**, on the plan screen. A digit there shows the
+board of another space.
 
 ![The board](../images/board.png)
 
@@ -99,9 +100,9 @@ hand. `h`/`l` move between lists and `j`/`k` between cards. `H`/`L` move a
 card across, `Space` finishes it, and `D` sets its due date. `Enter` turns a
 card over to its labels, description and checklist, in a tile beside, and
 `gf` opens its notes: a document made for the card the first time you ask,
-also beside, and `q` on it comes back to the board. `:repeat weekly` makes a
-card come back in the inbox each time it is finished. `q` on the board closes
-its tile.
+opened among the documents, and `S` comes back to the board. `:repeat weekly` makes a
+card come back in the inbox each time it is finished. `q` on the board goes
+back to the documents.
 
 ### Finding things
 

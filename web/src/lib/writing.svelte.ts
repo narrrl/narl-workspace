@@ -24,6 +24,8 @@ export class Writing {
   dirty = $state(false)
   /** The text was found in this browser, newer than what the server has. */
   readonly recovered: boolean
+  /** Opened to be typed into straight away: the editor starts in insert mode, at the end. */
+  append = false
 
   #write: (text: string) => Promise<void>
   #fail: (error: unknown, retry: number) => void
