@@ -4,7 +4,7 @@
  * a context takes it.
  *
  *   always     Ctrl-S, Alt-h/j/k/l — heard in the editor too
- *   a sheet    help, trash, the card's back …; nothing under one hears a key
+ *   a sheet    help, info, trash, the card's back …; nothing under one hears a key
  *   drawer     the scratchpad, while it is down
  *   workspace  Esc out of fullscreen, Q
  *   writing    a document being written takes every plain key back
@@ -19,16 +19,18 @@ import { actions, type Run } from './actions'
 import { bindings, type Binding, type Context } from './keymap'
 import { workspace } from './store.svelte'
 
-/** The contexts that are sheets: one is up when the overlay of that name is. */
-const sheets = new Set<string>(['help', 'overview', 'outline', 'media', 'trash', 'backlinks', 'history', 'card'])
+/** The sheets with keys of their own, under the same name as the sheet. */
+const sheets = new Set<string>(['help', 'overview', 'media', 'trash', 'card'])
 
 /** The stack, the topmost first. */
 export function stack(): Context[] {
   const modes: Context[] = ['always']
   const overlay = workspace.overlay
   if (overlay !== 'none') {
+    // The info sheet hears the keys of the part on show, then its own Tab.
+    if (overlay === 'info') modes.push(workspace.infoSection, 'info')
     // While the description is written, the card's back has no keys of its own.
-    if (sheets.has(overlay) && !(overlay === 'card' && workspace.describing)) modes.push(overlay as Context)
+    else if (sheets.has(overlay) && !(overlay === 'card' && workspace.describing)) modes.push(overlay as Context)
     return [...modes, 'sheet']
   }
   if (workspace.scratchOpen && !workspace.scratchEditing) modes.push('drawer')

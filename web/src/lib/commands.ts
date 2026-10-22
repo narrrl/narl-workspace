@@ -1,8 +1,9 @@
 import { tick } from 'svelte'
 import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
-import { workspace } from './store.svelte'
+import { infoSections } from './Info.svelte'
+import { workspace, type InfoSection } from './store.svelte'
 import { emptyTrash } from './Trash.svelte'
-import { formatDay, parseDay, parseDue, relative, sealedNote, titleHref, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
+import { formatDay, parseDay, parseDue, relative, titleHref, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
 
 export type { ScrollAmount, SidewaysAmount }
 
@@ -72,6 +73,26 @@ export interface CommandSpec {
 const closeFocused = () => {
   workspace.closeTile()
   return workspace.focused
+}
+
+/**
+ * The info sheet over the open document, at `section` or where it was last
+ * left. Every part is read now, so each one's count is in its tab: the
+ * headings from the pane, the versions and backlinks from the server.
+ */
+export async function openInfo(section?: InfoSection) {
+  if (!requireOpen()) return
+  const { headings, current } = hooks.headings()
+  workspace.outline = headings
+  workspace.outlineCursor = current
+  await workspace.guard(async () => {
+    // One after the other: each writes what is typed first, and two saves
+    // of the same text at once would race.
+    await workspace.loadHistory()
+    await workspace.loadBacklinks()
+    if (section) workspace.infoSection = section
+    workspace.openSheet('info')
+  })
 }
 
 const requireOpen = () => {
@@ -914,11 +935,7 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: "the open document's earlier versions as diffs — j/k, Enter brings one back (gh)",
     run: async () => {
-      if (!requireOpen()) return
-      await workspace.guard(async () => {
-        await workspace.loadHistory()
-        workspace.overlay = 'history'
-      })
+      await openInfo('history')
     },
   },
   {
@@ -927,11 +944,7 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: 'the documents that link to the open one — j/k, Enter opens one (gb)',
     run: async () => {
-      if (!requireOpen()) return
-      await workspace.guard(async () => {
-        await workspace.loadBacklinks()
-        workspace.overlay = 'backlinks'
-      })
+      await openInfo('backlinks')
     },
   },
   {
@@ -946,7 +959,7 @@ export const commands: CommandSpec[] = [
       await workspace.guard(async () => {
         await workspace.loadTrash()
         workspace.trashCursor = 0
-        workspace.overlay = 'trash'
+        workspace.openSheet('trash')
       })
     },
   },
@@ -997,10 +1010,7 @@ export const commands: CommandSpec[] = [
       const id = node?.id
       if (!id) return workspace.say('nothing selected', 'error')
       if (!node?.shared) return workspace.say('not shared — :share first', 'error')
-      await workspace.guard(async () => {
-        const { url, sealed } = await workspace.mintShareLink(id)
-        workspace.say(`new link → ${url} (copied) — the previous one is dead${sealedNote(sealed)}`)
-      })
+      await workspace.guard(() => workspace.renewShareLink(id))
     },
   },
   {
@@ -1098,7 +1108,7 @@ export const commands: CommandSpec[] = [
     run: () => workspace.guard(async () => {
       await workspace.loadMedia()
       workspace.mediaCursor = 0
-      workspace.overlay = 'media'
+      workspace.openSheet('media')
     }),
   },
   {
@@ -1106,13 +1116,18 @@ export const commands: CommandSpec[] = [
     aliases: ['toc'],
     group: 'documents',
     help: "the open document's headings to pick from — gO, in the editor too",
-    run: () => {
-      if (!requireOpen()) return
-      const { headings, current } = hooks.headings()
-      if (headings.length === 0) return workspace.say('no headings in this document')
-      workspace.outline = headings
-      workspace.outlineCursor = current
-      workspace.overlay = 'outline'
+    run: () => openInfo('outline'),
+  },
+  {
+    name: 'info',
+    args: '[outline|history|backlinks|share]',
+    group: 'documents',
+    help: 'what is known about the open document: its headings, earlier versions, backlinks and sharing — Tab between them (gi)',
+    complete: () => infoSections,
+    run: (arg) => {
+      const section = arg.trim()
+      if (section && !infoSections.includes(section as InfoSection)) return workspace.say('usage: :info [outline|history|backlinks|share]', 'error')
+      return openInfo((section || undefined) as InfoSection | undefined)
     },
   },
   {
@@ -1431,7 +1446,8 @@ export const commands: CommandSpec[] = [
     group: 'view',
     help: 'show the key and command reference',
     run: () => {
-      workspace.overlay = workspace.overlay === 'help' ? 'none' : 'help'
+      if (workspace.overlay === 'help') workspace.closeSheet()
+      else workspace.openSheet('help')
     },
   },
   {

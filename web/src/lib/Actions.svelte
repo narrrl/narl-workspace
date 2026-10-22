@@ -6,6 +6,7 @@
    * drift apart.
    */
   import { isContainer } from './api'
+  import Sheet from './Sheet.svelte'
   import { hooks, runCommand } from './commands'
   import { workspace } from './store.svelte'
 
@@ -52,42 +53,23 @@
   })
 
   function act(action: Action) {
-    workspace.overlay = 'none'
+    workspace.closeSheet()
     // The list is what the commands act on while it has the focus.
     workspace.pane = 'list'
     void action.run()
   }
 </script>
 
-<div class="sheet">
-  <header>
-    <span class="label rule"><span class="marker"></span><span class="title">{node ? node.name.trim() || node.slug : 'nothing'}</span></span>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
-  </header>
-  <ul>
+<Sheet title={node ? node.name.trim() || node.slug : 'nothing'} width={48}>
+  <ul class="items">
     {#each actions as action (action.label)}
       <li><button class:danger={action.danger} onclick={() => act(action)}>{action.label}</button></li>
     {/each}
   </ul>
-</div>
+</Sheet>
 
 <style>
-  .sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    width: min(100%, 48ch);
-    max-height: 100%;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
-    padding: 18px 20px;
-    animation: resolve var(--t-slow) var(--ease-snap) both;
-  }
-  header { display: flex; align-items: center; gap: 12px; }
-  header .label { flex: 1; min-width: 0; }
-  .title { color: var(--light); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+  .items { gap: 4px; }
   li button {
     width: 100%;
     padding: 12px 14px;

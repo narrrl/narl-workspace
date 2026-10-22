@@ -2,16 +2,14 @@
   /*
    * Enter on a card turns it over: a window floated over the board, as the
    * desktop floats one, with what the card holds on its back — labels, the
-   * description, the checklist. The keys live in App.svelte with the others;
+   * description, the checklist. The keys live in actions.ts with the others;
    * this draws and lets a pointer do the same.
    */
-  import Keys from './Keys.svelte'
+  import Sheet from './Sheet.svelte'
   import { followLink } from './commands'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
   import { formatDay, labelHue, urgency } from './util'
-
-  let steps = $state<HTMLUListElement>()
 
   const card = $derived(workspace.card)
   const list = $derived(workspace.list)
@@ -22,13 +20,9 @@
 
   // A card deleted or moved out of sight under the sheet takes the sheet with it.
   $effect(() => {
-    if (!card) workspace.overlay = 'none'
+    if (!card) workspace.closeSheet()
   })
 
-  $effect(() => {
-    const at = workspace.taskCursor
-    steps?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
-  })
 
   /** A link in the description leaves the card for what it leads to, as one in a document does. */
   function follow(event: MouseEvent) {
@@ -51,14 +45,7 @@
 </script>
 
 {#if card}
-  <div class="sheet">
-    <header>
-      <span class="label rule">
-        <span class="marker"></span><span class="title">card</span>
-        {workspace.boardSpace?.slug ?? ''} / {list?.name ?? ''}{#if role}<span class="role">{role}</span>{/if}
-      </span>
-      <button onclick={() => workspace.closeCardSheet()}>esc</button>
-    </header>
+  <Sheet title="card" detail="{workspace.boardSpace?.slug ?? ''} / {list?.name ?? ''}{role ? ` · ${role}` : ''}" width={76} cursor={workspace.taskCursor} keys={['card']}>
 
     <div class="scroll">
       <h2 class:done={card.done_at !== null}>{card.title}</h2>
@@ -113,7 +100,7 @@
         {#if card.checklist.length}
           <div class="progress"><span style="width: {(ticked / card.checklist.length) * 100}%"></span></div>
         {/if}
-        <ul bind:this={steps}>
+        <ul>
           {#each card.checklist as task, index (index)}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
             <li class:at={index === workspace.taskCursor && !workspace.describing} class:ticked={task.done} data-index={index} onclick={() => pick(index)}>
@@ -126,32 +113,10 @@
         </ul>
       </section>
     </div>
-
-    <Keys contexts={['card']} />
-  </div>
+  </Sheet>
 {/if}
 
 <style>
-  /* A float, as Hyprland draws one over the tiles: hull, one rim, the frame's radius. */
-  .sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    max-height: 100%;
-    width: min(100%, 76ch);
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
-    padding: 20px 24px;
-    animation: resolve var(--t-slow) var(--ease-snap) both;
-    overflow: hidden;
-  }
-
-  header { display: flex; align-items: center; gap: 12px; }
-  header .label { flex: 1; }
-  header .marker { background: var(--light); }
-  header .title { color: var(--light); }
-  .role { margin-left: 8px; color: var(--muted); font-size: 10px; letter-spacing: 0.18em; }
 
   .scroll { display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-y: auto; }
 

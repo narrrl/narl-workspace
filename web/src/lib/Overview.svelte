@@ -2,10 +2,10 @@
   /*
    * `w`: every space at once, the way the desktop's overview shows every
    * workspace with its windows — here, with what was last written in it. The
-   * keys live in App.svelte with the others; this only draws and tells them
+   * keys live in actions.ts with the others; this only draws and tells them
    * how many cards fit in a row.
    */
-  import Keys from './Keys.svelte'
+  import Sheet from './Sheet.svelte'
   import { api, type NodeSummary } from './api'
   import { hooks } from './commands'
   import { workspace } from './store.svelte'
@@ -19,19 +19,14 @@
     return () => (hooks.overviewColumns = () => 1)
   })
 
-  $effect(() => {
-    const index = workspace.overviewCursor
-    grid?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
-  })
-
   function enter(spaceId: number) {
-    workspace.overlay = 'none'
+    workspace.closeSheet()
     void workspace.guard(() => workspace.enterSpace(spaceId))
   }
 
   /** A recent document opens in place, in its own space. */
   function open(doc: NodeSummary) {
-    workspace.overlay = 'none'
+    workspace.closeSheet()
     void workspace.guard(async () => {
       const node = await api.getNode(doc.id)
       await workspace.openPath(node.path.map((crumb) => crumb.slug).join('/'))
@@ -39,12 +34,7 @@
   }
 </script>
 
-<div class="sheet">
-  <header>
-    <span class="label rule"><span class="marker"></span><span class="title">overview</span> {workspace.overview.length} spaces</span>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
-  </header>
-
+<Sheet title="overview" detail="{workspace.overview.length} spaces" width={140} cursor={workspace.overviewCursor} keys={['overview']}>
   <ol class="grid" bind:this={grid}>
     {#each workspace.overview as { space, recent }, index (space.id)}
       <li>
@@ -86,28 +76,9 @@
       </li>
     {/each}
   </ol>
-
-  <Keys contexts={['overview']} />
-</div>
+</Sheet>
 
 <style>
-  .sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    width: min(100%, 140ch);
-    max-height: 100%;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
-    padding: 20px 24px;
-  }
-
-  header { display: flex; align-items: center; gap: 12px; }
-  header .label { flex: 1; }
-  header .marker { background: var(--light); }
-  header .title { color: var(--light); }
-
   .grid {
     list-style: none;
     margin: 0;
@@ -200,10 +171,4 @@
   }
   .when { flex: none; font-size: 10px; color: var(--muted); }
   .empty { padding: 4px 8px; font-size: 12px; color: var(--muted); }
-
-
-  /* Keys mean nothing to a thumb. */
-  @media (max-width: 767px) {
-    .sheet { padding: 14px; gap: 14px; }
-  }
 </style>

@@ -66,12 +66,17 @@ linked to from anywhere behind the login.
 ![A document in the reader](../images/document.png)
 
 The line under the title says when it was written and last edited, how many
-words it has, and how many documents link to it. In the reader:
+words it has, how many documents link to it, and whether it is public. Click it,
+or press `gi`, for the info sheet: the document's headings, its earlier
+versions, the documents that link to it and its share link, one part at a time
+— `Tab` goes to the next. `gO`, `gh` and `gb` open it at their own part. In the
+reader:
 
 | key | what it does |
 | --- | --- |
 | `j` / `k`, `Ctrl-D` / `Ctrl-U` | scroll a line, or half a page |
 | `]]` / `[[` | the next / previous heading |
+| `gi` | the info sheet |
 | `gO` | the headings as a list to jump to |
 | `zl` / `zh` | scroll a wide table or code block sideways |
 | `F` | a letter over every link and button in view; type it to follow |

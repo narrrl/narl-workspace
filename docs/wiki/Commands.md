@@ -29,6 +29,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-D / Ctrl-U` | half a page down / up the open document |
 | `zl / zh · zL / zH` | the wide table or code block at the top of the view, sideways — a little, or half its width |
 | `]] / \[\[` | next / previous heading of the document — in the editor too |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks and sharing — Tab between them |
 | `gO` | the headings as a list: j/k, Enter jumps there |
 | `F` | hints over the links and buttons in view — type one to follow it |
 | `gf / gx` | in the editor: follow the link under the cursor / open it in a tab |
@@ -188,6 +189,7 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:backlinks, :bl` | the documents that link to the open one — j/k, Enter opens one (gb) |
 | `:source` | show an open markdown file as written, or rendered again |
 | `:outline, :toc` | the open document's headings to pick from — gO, in the editor too |
+| `:info [outline\|history\|backlinks\|share]` | what is known about the open document: its headings, earlier versions, backlinks and sharing — Tab between them (gi) |
 | `:search, :se [text]` | full-text search in this space (empty clears) |
 | `:search!` | full-text search across every space — Ctrl-P |
 | `:clear, :noh` | clear the search filter |

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Component } from 'svelte'
   import { openOverview } from './lib/actions'
   import { hooks } from './lib/commands'
   import { keysOf } from './lib/keymap'
@@ -11,18 +12,16 @@
   import CommandLine from './lib/CommandLine.svelte'
   import DocumentPane from './lib/DocumentPane.svelte'
   import FilePane from './lib/FilePane.svelte'
-  import Headings from './lib/Headings.svelte'
   import Help from './lib/Help.svelte'
+  import Info from './lib/Info.svelte'
   import Hints from './lib/Hints.svelte'
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
   import Trash from './lib/Trash.svelte'
-  import Backlinks from './lib/Backlinks.svelte'
   import CardSheet from './lib/CardSheet.svelte'
   import Scratch from './lib/Scratch.svelte'
-  import History from './lib/History.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
   import SecretPrompt from './lib/SecretPrompt.svelte'
@@ -30,7 +29,7 @@
   import Shared from './lib/Shared.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
-  import { workspace } from './lib/store.svelte'
+  import { workspace, type Sheet } from './lib/store.svelte'
   import { dwindle } from './lib/util'
 
   /*
@@ -54,6 +53,18 @@
   let importRoot = false
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
+
+  /** What each sheet is drawn with. */
+  const sheets: Record<Sheet, Component> = {
+    help: Help,
+    overview: Overview,
+    actions: Actions,
+    verify: Verify,
+    info: Info,
+    trash: Trash,
+    card: CardSheet,
+    media: MediaBrowser,
+  }
   let boardEl = $state<HTMLDivElement>()
   /** The first half of `gg`, `dd`, `]]` …, shown until the second comes. */
   let pending = $state('')
@@ -369,10 +380,10 @@
     {/if}
 
     {#if workspace.overlay !== 'none'}
+      {@const Shown = sheets[workspace.overlay]}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
-      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && (workspace.overlay === 'card' ? workspace.closeCardSheet() : (workspace.overlay = 'none'))}
-      >
-        {#if workspace.overlay === 'help'}<Help />{:else if workspace.overlay === 'overview'}<Overview />{:else if workspace.overlay === 'actions'}<Actions />{:else if workspace.overlay === 'verify'}<Verify />{:else if workspace.overlay === 'outline'}<Headings />{:else if workspace.overlay === 'trash'}<Trash />{:else if workspace.overlay === 'history'}<History />{:else if workspace.overlay === 'backlinks'}<Backlinks />{:else if workspace.overlay === 'card'}<CardSheet />{:else}<MediaBrowser />{/if}
+      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && workspace.closeSheet()}>
+        <Shown />
       </div>
     {/if}
   </div>

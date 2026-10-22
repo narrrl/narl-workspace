@@ -33,6 +33,10 @@ export type Pane = 'list' | 'document'
 export type View = 'tree' | 'special'
 /** The tile of the special workspace that has focus. */
 export type SpecialTile = 'board' | 'agenda' | 'calendar'
+/** What floats over the tiles; one at a time. */
+export type Sheet = 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'info' | 'trash' | 'card'
+/** The info sheet's parts: what the open document holds, and what is around it. */
+export type InfoSection = 'outline' | 'history' | 'backlinks' | 'share'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
 
 /**
@@ -321,7 +325,10 @@ class Workspace {
   pane = $state<Pane>('list')
   flash = $state<Flash>(null)
 
-  overlay = $state<'none' | 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'outline' | 'trash' | 'history' | 'backlinks' | 'card'>('none')
+  /** The sheet over everything, if any; `openSheet` and `closeSheet` move it. */
+  overlay = $state<'none' | Sheet>('none')
+  /** The part of the info sheet on show; it stays for the next time it opens. */
+  infoSection = $state<InfoSection>('outline')
   /** Which of the special workspace's tiles the keys go to. */
   specialFocus = $state<SpecialTile>('board')
   /**
@@ -469,7 +476,7 @@ class Workspace {
           resolve(token)
         },
       }
-      this.overlay = 'verify'
+      this.openSheet('verify')
     })
   }
 
@@ -1152,7 +1159,7 @@ class Workspace {
     tile.draft = { ...tile.draft, name: revision.name, body: revision.body }
     tile.dirty = true
     await this.save({ quiet: true, restore: true, tile })
-    this.overlay = 'none'
+    this.closeSheet()
     this.say(`restored the version from ${formatStamp(revision.saved_at)} — :history has the one it replaced`)
   }
 
@@ -1730,7 +1737,7 @@ class Workspace {
     if (!this.card) return this.say('no card selected', 'error')
     this.taskCursor = 0
     this.describing = false
-    this.overlay = 'card'
+    this.openSheet('card')
   }
 
   get scratchNote(): ScratchNote | undefined {
@@ -1866,6 +1873,16 @@ class Workspace {
   /** `q`: the sheet away, unless that would lose a description being written. */
   closeCardSheet() {
     if (this.describing && !this.stopDescribing()) return
+    this.overlay = 'none'
+  }
+
+  openSheet(sheet: Sheet) {
+    this.overlay = sheet
+  }
+
+  /** Esc, q, a click beside it: the sheet away — the card's asks first. */
+  closeSheet() {
+    if (this.overlay === 'card') return this.closeCardSheet()
     this.overlay = 'none'
   }
 
@@ -2115,6 +2132,13 @@ class Workspace {
     const url = `${location.origin}${path}`
     await this.copy(url)
     return { url, sealed }
+  }
+
+  /** `:link`: a new link for a shared document, copied; the old one stops working. */
+  async renewShareLink(id: number) {
+    const { url, sealed } = await this.mintShareLink(id)
+    this.say(`new link → ${url} (copied) — the previous one is dead${sealedNote(sealed)}`, sealed > 0 ? 'error' : undefined)
+    for (const tile of this.tilesWith(id)) tile.open = await api.getNode(id)
   }
 
   async copy(text: string) {

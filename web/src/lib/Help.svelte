@@ -14,10 +14,9 @@
   export function scrollHelp(by: 1 | -1 | 'pagedown' | 'pageup' | 'start' | 'end') {
     if (!pages) return
     // Columns that run off the right edge scroll sideways; on a phone they
-    // stack, and the sheet around them scrolls down instead.
+    // stack, and scroll down instead.
     const sideways = pages.scrollWidth > pages.clientWidth
-    const scroller = sideways ? pages : pages.parentElement
-    if (!scroller) return
+    const scroller = pages
     const axis = sideways ? 'left' : 'top'
     if (by === 'start' || by === 'end') {
       scroller.scrollTo({ [axis]: by === 'start' ? 0 : 1e9, behavior: 'smooth' })
@@ -40,9 +39,8 @@
 
 <script lang="ts">
   import { commands, groups, type CommandSpec, type Group } from './commands'
-  import Keys from './Keys.svelte'
+  import Sheet from './Sheet.svelte'
   import { rows, sections as keySections } from './keymap'
-  import { workspace } from './store.svelte'
 
   const titles: Record<Group, string> = {
     tree: 'spaces & folders',
@@ -107,22 +105,20 @@
   }
 </script>
 
-<div class="sheet">
-  <header>
-    <span class="label rule"><span class="marker"></span><span class="title">help</span> {count} keys and commands</span>
-    <label class="filter" class:on={helpFilter.text !== ''}>
-      <span class="slash">/</span>
-      <input
-        bind:this={field}
-        bind:value={helpFilter.text}
-        onkeydown={filterKey}
-        placeholder="filter"
-        spellcheck="false"
-        autocomplete="off"
-      />
-    </label>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
-  </header>
+<Sheet title="help" detail="{count} keys and commands" width={0} fill keys={['help', 'sheet']}>
+  {#snippet actions()}
+      <label class="filter" class:on={helpFilter.text !== ''}>
+        <span class="slash">/</span>
+        <input
+          bind:this={field}
+          bind:value={helpFilter.text}
+          onkeydown={filterKey}
+          placeholder="filter"
+          spellcheck="false"
+          autocomplete="off"
+        />
+      </label>
+  {/snippet}
 
   <div class="cols" bind:this={pages}>
     {#each shown as [title, rows] (title)}
@@ -142,31 +138,9 @@
       <p class="none">nothing matches "{helpFilter.text}"</p>
     {/each}
   </div>
-
-  <Keys contexts={['help', 'sheet']} />
-</div>
+</Sheet>
 
 <style>
-  /* A free-standing panel, as the desktop draws one: hull, one rim, the
-     frame's radius — as big as the porthole, so nothing hides below it. */
-  .sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
-    padding: 18px 22px 14px;
-  }
-
-  header { display: flex; align-items: center; gap: 12px; }
-  header .label { flex: 1; }
-  header .marker { background: var(--light); }
-  header .title { color: var(--light); }
-
   .filter {
     display: flex;
     align-items: center;
@@ -241,10 +215,9 @@
 
   .none { margin: 0; color: var(--subtle); font-size: 12px; }
 
-  /* A phone stacks the columns and scrolls the sheet down. */
+  /* A phone stacks the columns and scrolls them down. */
   @media (max-width: 767px) {
-    .sheet { overflow-y: auto; }
-    .cols { flex: none; columns: auto; overflow: visible; }
+    .cols { columns: auto; overflow-y: auto; }
     .filter { width: 14ch; }
   }
 </style>

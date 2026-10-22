@@ -18,11 +18,13 @@ export type Context =
   | 'sheet'
   | 'help'
   | 'overview'
+  | 'info'
   | 'outline'
   | 'media'
   | 'trash'
   | 'backlinks'
   | 'history'
+  | 'share'
   | 'card'
   | 'drawer'
   | 'workspace'
@@ -87,6 +89,7 @@ export const bindings = [
   { context: 'tree', keys: ['zh', 'zl', 'zH', 'zL'], action: 'sideways', label: 'zl / zh · zL / zH', help: 'the wide table or code block at the top of the view, sideways — a little, or half its width' },
   { context: 'tree', keys: [']]'], action: 'nextHeading', label: ']] / [[', help: 'next / previous heading of the document — in the editor too' },
   { context: 'tree', keys: ['[['], action: 'previousHeading' },
+  { context: 'tree', keys: ['gi'], action: 'info', help: "the info sheet: the open document's headings, earlier versions, backlinks and sharing — Tab between them" },
   { context: 'tree', keys: ['gO'], action: 'outline', help: 'the headings as a list: j/k, Enter jumps there' },
   { context: 'tree', keys: ['F'], action: 'hints', help: 'hints over the links and buttons in view — type one to follow it' },
   { context: 'tree', label: 'gf / gx', help: 'in the editor: follow the link under the cursor / open it in a tab' },
@@ -236,6 +239,9 @@ export const bindings = [
   { context: 'overview', keys: ['Enter'], action: 'enter' },
   { context: 'overview', keys: ['w', 'q'], action: 'close', caps: ['w', 'esc'], hint: 'close' },
 
+  { context: 'info', keys: ['Tab'], action: 'next', caps: ['tab'], hint: 'next part' },
+  { context: 'info', keys: ['Shift-Tab'], action: 'previous' },
+
   { context: 'outline', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
   { context: 'outline', keys: ['k', 'ArrowUp'], action: 'up' },
   { context: 'outline', keys: ['G'], action: 'bottom' },
@@ -263,6 +269,9 @@ export const bindings = [
   { context: 'history', keys: ['k', 'ArrowUp'], action: 'up' },
   { context: 'history', keys: ['G'], action: 'bottom' },
   { context: 'history', keys: ['Enter'], action: 'restore', hint: 'restore' },
+
+  { context: 'share', keys: ['s', 'Enter'], action: 'toggle', caps: ['s'], hint: 'share · stop' },
+  { context: 'share', keys: ['y'], action: 'link', hint: 'new link' },
 
   // --- the editor's own keymap, described only ---------------------------------------
   { context: 'editor', label: 'vim', help: 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros; :w writes' },

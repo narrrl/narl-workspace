@@ -8,6 +8,7 @@ reader needs no account.
 | `s`, `:share` | share the document and copy its link; on a shared one, `s` asks before taking it back |
 | `y`, `:link` | make a new link for the same document; the old one stops working |
 | `:unshare` | stop sharing |
+| `:info share` | the share part of the info sheet: whether the document is public, the shape of its link, and the same `s` and `y` |
 
 The link looks like `https://your-host/s/<token>#<key>`. The page renders the
 document read-only and serves only the pictures and videos it embeds right now:

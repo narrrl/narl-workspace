@@ -11,7 +11,7 @@
   export function insertMedia(file: MediaFile) {
     if (!workspace.editing) return workspace.say('insert works while writing — i on a document first', 'error')
     hooks.insertText(embedSnippet(file))
-    workspace.overlay = 'none'
+    workspace.closeSheet()
   }
 
   export async function copyMedia(file: MediaFile) {
@@ -33,15 +33,8 @@
 </script>
 
 <script lang="ts">
-  import Keys from './Keys.svelte'
+  import Sheet from './Sheet.svelte'
   import { formatBytes, formatStamp } from './util'
-
-  let sheet = $state<HTMLDivElement>()
-
-  $effect(() => {
-    const index = workspace.mediaCursor
-    sheet?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
-  })
 
   const usage = (nodeIds: number[], fileNode: number | null) => {
     const embeds = nodeIds.map((id) => `#${id}`).join(' ')
@@ -50,16 +43,11 @@
   }
 </script>
 
-<div class="sheet" bind:this={sheet}>
-  <header>
-    <span class="label rule"><span class="marker"></span><span class="title">media</span> {workspace.media.length} files</span>
-    <button onclick={() => (workspace.overlay = 'none')}>esc</button>
-  </header>
-
-  <ul>
+<Sheet title="media" detail="{workspace.media.length} files" cursor={workspace.mediaCursor} keys={['media', 'sheet']} hide={workspace.editing ? [] : ['insert']}>
+  <ul class="items">
     {#each workspace.media as file, index (file.id)}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <li class:at={index === workspace.mediaCursor} data-index={index} onpointerenter={() => (workspace.mediaCursor = index)}>
+      <li class="item" class:at={index === workspace.mediaCursor} data-index={index} onpointerenter={() => (workspace.mediaCursor = index)}>
         <div class="thumb">
           {#if file.encrypted}
             <span class="label">sealed</span>
@@ -92,43 +80,10 @@
       <li class="muted">nothing uploaded yet — attach a file from the editor.</li>
     {/each}
   </ul>
-
-  <Keys contexts={['media', 'sheet']} hide={workspace.editing ? [] : ['insert']} />
-</div>
+</Sheet>
 
 <style>
-  /* A free-standing panel, as the desktop draws one: hull, one rim, the frame's radius. */
-  .sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    max-height: 100%;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
-    padding: 20px 24px;
-    animation: resolve var(--t-slow) var(--ease-snap) both;
-  }
-
-  header { display: flex; align-items: center; gap: 12px; }
-  header .label { flex: 1; }
-  header .marker { background: var(--light); }
-  header .title { color: var(--light); }
-  .sheet { width: min(100%, 92ch); overflow: hidden; }
-
-  ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-
-  li {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 6px 8px;
-    border-radius: var(--radius-m);
-    transition: background-color var(--t-base) var(--ease-glide);
-  }
-  li:hover { background: var(--surface); }
-  li.at { background: var(--surface-alt); box-shadow: inset 2px 0 0 var(--light); }
-
+  .items > .item { flex-direction: row; align-items: center; gap: 14px; cursor: default; }
 
   .thumb {
     width: 52px;
@@ -145,9 +100,6 @@
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
 
   .info { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 12px; }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--font-sans); font-size: 14px; }
-  .muted { font-size: 11px; }
 
   .actions { display: flex; gap: 4px; flex: none; }
-  .danger:hover { background: var(--alarm); border-color: var(--alarm); color: var(--ink); }
 </style>

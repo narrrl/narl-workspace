@@ -128,10 +128,11 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `zl` / `zh`, `zL` / `zH` | scroll the table, code block or formula at the top of the view sideways, a little or by half its width |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
-| `gO` | the document's headings as a list — `j`/`k`, `Enter` jumps there (`:outline`) |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks and share link — `Tab` goes from one part to the next (`:info`); clicking the line under the title opens it too |
+| `gO` | the info sheet at the headings — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |
-| `gh` | the open document's earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |
-| `gb` | the documents that link to the open one — `j`/`k`, `Enter` opens one (`:backlinks`) |
+| `gh` | the info sheet at the earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |
+| `gb` | the info sheet at the documents that link to the open one — `j`/`k`, `Enter` opens one (`:backlinks`) |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |

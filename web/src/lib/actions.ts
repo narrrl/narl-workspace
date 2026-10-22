@@ -8,13 +8,12 @@
  * share an action and differ in direction. Returning `false` lets the key
  * on to the next context down, as if it had not been bound here.
  */
-import { cycleTile, focusTile, followLink, hooks, runCommand } from './commands'
+import { cycleTile, focusTile, followLink, hooks, openInfo, runCommand } from './commands'
 import { bindings, type Context } from './keymap'
 import { focusHelpFilter, scrollHelp } from './Help.svelte'
 import { copyMedia, insertMedia, removeMedia } from './MediaBrowser.svelte'
 import { purgeTrashed, restoreTrashed } from './Trash.svelte'
-import { openBacklink } from './Backlinks.svelte'
-import { moveHistory, restoreShown } from './History.svelte'
+import { goHeading, moveHistory, openBacklink, renewLink, restoreShown, toggleSharing, turnInfo } from './Info.svelte'
 import { workspace, type SpecialTile } from './store.svelte'
 import { dwindle, formatDay, neighbour, type Direction } from './util'
 
@@ -45,7 +44,7 @@ export async function openOverview() {
     workspace.overview.findIndex((entry) => entry.space.id === workspace.spaceId),
     0,
   )
-  workspace.overlay = 'overview'
+  workspace.openSheet('overview')
 }
 
 /*
@@ -136,7 +135,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     // stays up under it.
     close: () => {
       if (workspace.describing || workspace.scratchEditing) return
-      workspace.overlay = 'none'
+      workspace.closeSheet()
     },
   },
 
@@ -164,19 +163,21 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
     go: (key) => goToSpace(spaceIndex(key)),
     enter: () => goToSpace(workspace.overviewCursor),
-    close: () => void (workspace.overlay = 'none'),
+    close: () => workspace.closeSheet(),
   },
 
-  /** `gO`'s list: j/k down the headings, Enter to the one picked. */
+  /** The info sheet: Tab from one of its parts to the next. */
+  info: {
+    next: () => turnInfo(1),
+    previous: () => turnInfo(-1),
+  },
+
+  /** Its headings: j/k down them, Enter to the one picked. */
   outline: {
     down: () => step('outlineCursor', workspace.outline.length, 1),
     up: () => step('outlineCursor', workspace.outline.length, -1),
     bottom: () => step('outlineCursor', workspace.outline.length, Infinity),
-    go: () => {
-      const heading = workspace.outline[workspace.outlineCursor]
-      workspace.overlay = 'none'
-      heading?.go()
-    },
+    go: () => goHeading(),
   },
 
   /** The media list: j/k down the files, i inserts, y copies, x deletes. */
@@ -213,7 +214,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
   },
 
-  /** The backlinks: j/k through the documents that link here, Enter opens one. */
+  /** Its backlinks: j/k through the documents that link here, Enter opens one. */
   backlinks: {
     down: () => step('backlinksCursor', workspace.backlinks.length, 1),
     up: () => step('backlinksCursor', workspace.backlinks.length, -1),
@@ -224,12 +225,18 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
   },
 
-  /** The history: j/k through the versions, Enter brings the one shown back. */
+  /** Its history: j/k through the versions, Enter brings the one shown back. */
   history: {
     down: () => moveHistory(1),
     up: () => moveHistory(-1),
     bottom: () => moveHistory(workspace.history.length),
     restore: () => void restoreShown(),
+  },
+
+  /** Its sharing: the same s and y as on the document itself. */
+  share: {
+    toggle: () => void toggleSharing(workspace.open),
+    link: () => void renewLink(workspace.open),
   },
 
   /*
@@ -259,7 +266,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     sendLeft: () => guard(() => workspace.sendCard(-1)),
     sendRight: () => guard(() => workspace.sendCard(1)),
     notes: () => {
-      workspace.overlay = 'none'
+      workspace.closeSheet()
       guard(() => workspace.openCard())
     },
     line: () => line(':'),
@@ -353,6 +360,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     previousHeading: () => {
       if (reading() && !hooks.jumpHeading(-1)) hooks.scrollReader('top')
     },
+    info: () => void openInfo(),
     outline: () => void runCommand('outline'),
     history: () => void runCommand('history'),
     backlinks: () => void runCommand('backlinks'),
@@ -393,21 +401,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     delete: () => void runCommand('d'),
     // A delete goes to the trash, so it can be undone the way vim undoes.
     undo: () => guard(() => workspace.undoDelete()),
-    // Sharing is a key away; taking a link back from its readers asks first.
-    share: () =>
-      void (async () => {
-        const target = workspace.target
-        if (target?.shared && !(await workspace.ask(`stop sharing "${target.name.trim() || target.slug}"? the link stops working`))) return
-        void runCommand(target?.shared ? 'unshare' : 'share')
-      })(),
-    // A vim hand presses y to yank; here it retires the link readers have,
-    // so it asks first.
-    link: () =>
-      void (async () => {
-        const target = workspace.target
-        if (!target?.shared) return void runCommand('link')
-        if (await workspace.ask(`new share link for "${target.name.trim() || target.slug}"? the current one stops working`)) void runCommand('link')
-      })(),
+    share: () => void toggleSharing(workspace.target),
+    // A vim hand presses y to yank; here it retires the link readers have.
+    link: () => void renewLink(workspace.target),
     // Through the results, as vim's `n` goes through the matches; the
     // search itself stays until `:noh`.
     next: () => guard(() => workspace.nextResult(1)),
@@ -547,7 +543,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
 function goToSpace(index: number) {
   const entry = workspace.overview[index]
   if (!entry) return
-  workspace.overlay = 'none'
+  workspace.closeSheet()
   guard(() => workspace.enterSpace(entry.space.id))
 }
 

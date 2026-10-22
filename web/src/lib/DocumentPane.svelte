@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { followLink, hooks, runCommand, type ScrollAmount, type SidewaysAmount } from './commands'
+  import { followLink, hooks, openInfo, runCommand, type ScrollAmount, type SidewaysAmount } from './commands'
   import { renderMarkdown } from './markdown'
   import Outline from './Outline.svelte'
   import { workspace, type Tile } from './store.svelte'
@@ -26,13 +26,6 @@
   const words = $derived(
     (tile.editing ? tile.draft.body : doc.body).split(/\s+/).filter(Boolean).length,
   )
-  /*
-   * Only the token half of a share link is recoverable — the key lives in the
-   * fragment, and the server kept nothing but its hash — so the bar shows the
-   * link's shape and offers a fresh one rather than a copy of the old.
-   */
-  const sharePath = $derived(doc.share_token ? `${location.origin}/s/${doc.share_token}#…` : null)
-
   let reader = $state<HTMLElement>()
   let article = $state<HTMLElement>()
   let title = $state<HTMLInputElement>()
@@ -154,45 +147,22 @@
       {#if tile.dirty}<span class="dirty">modified</span>{/if}
     </div>
 
-    <div class="row">
-      <dl class="meta">
-        <dt>written</dt>
-        <dd>{formatStamp(tile.draft.created_at)} {formatWeekday(tile.draft.created_at)}</dd>
-        <dt>edited</dt>
-        <dd>{relative(doc.updated_at)}</dd>
-        <dt>words</dt>
-        <dd>{words}<span class="unit">words</span></dd>
-        {#if doc.backlinks > 0}
-          <dt>linked</dt>
-          <dd><button class="linked" title="what links here (gb)" onclick={() => runCommand('backlinks')}>from {doc.backlinks}</button></dd>
-        {/if}
-      </dl>
-
-      <div class="actions">
-        {#if tile.editing}
-          <button onclick={() => runCommand('w')}>:w</button>
-          <button onclick={() => runCommand('upload')}>attach</button>
-          <button onclick={() => runCommand('wq')}>done</button>
-        {:else}
-          <button onclick={() => runCommand('e')}>edit</button>
-        {/if}
-        <button class:on={doc.shared} onclick={() => runCommand(doc.shared ? 'unshare' : 'share')}>
-          {doc.shared ? 'unshare' : 'share'}
-        </button>
-        <button class="danger" onclick={() => runCommand('d')}>delete</button>
-        <button class="close" onclick={() => runCommand('q')}>close</button>
-      </div>
-    </div>
+    <!--
+      The readout is the way to everything else about the document: its
+      headings, its history, what links to it and who can read it — gi.
+    -->
+    <button class="meta" title="info (gi)" onclick={() => openInfo()}>
+      <span class="field"><span class="caption">written</span>{formatStamp(tile.draft.created_at)} {formatWeekday(tile.draft.created_at)}</span>
+      <span class="field"><span class="caption">edited</span>{relative(doc.updated_at)}</span>
+      <span class="field"><span class="caption">words</span>{words}<span class="unit">words</span></span>
+      {#if doc.backlinks > 0}
+        <span class="field"><span class="caption">linked</span>from {doc.backlinks}</span>
+      {/if}
+      {#if doc.shared}
+        <span class="field public"><span class="ring"></span>public</span>
+      {/if}
+    </button>
   </header>
-
-  {#if sharePath}
-    <div class="sharebar">
-      <span class="ring"></span>
-      <span class="label public">public</span>
-      <span class="link">{sharePath}</span>
-      <button onclick={() => runCommand('link')}>new link</button>
-    </div>
-  {/if}
 
   {#if tile.editing}
     <input
@@ -241,6 +211,13 @@
         <Outline root={article} scroller={reader} source={html} />
       </aside>
     </div>
+    <!-- A thumb has no i and no gi. -->
+    {#if isTouchDevice}
+      <div class="mobilebar">
+        <button onclick={() => runCommand('e')}>edit</button>
+        <button onclick={() => openInfo()}>info</button>
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -285,55 +262,22 @@
   }
   .dirty { flex: none; color: var(--light); }
 
-  .row {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-    min-width: 0;
-  }
-
+  /* Read as a line of the header, and a way into the info sheet. */
   .meta {
+    all: unset;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 8px;
-    margin: 0;
-    font-size: 11px;
+    align-items: baseline;
+    gap: 4px 18px;
     min-width: 0;
+    font-size: 11px;
+    color: var(--fg);
+    cursor: pointer;
   }
-  .meta dt { color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
-  .meta dd { margin: 0 10px 0 0; color: var(--fg); }
-  /* Read as the rest of the line, and still a way to the backlinks. */
-  .meta .linked { all: unset; cursor: pointer; text-decoration: underline; text-decoration-color: var(--overlay); text-underline-offset: 4px; }
-  .meta .linked:hover, .meta .linked:focus-visible { color: var(--light); }
-
-  .actions { display: flex; gap: 4px; flex-wrap: wrap; flex: none; }
-  .actions .on { color: var(--light); border-color: var(--light-dim); }
-  .actions .danger:hover { background: var(--alarm); border-color: var(--alarm); color: var(--ink); }
-
-  .sharebar {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    margin: 0 24px 8px 28px;
-    padding: 6px 6px 6px 12px;
-    border: 1px solid var(--rim);
-    border-radius: var(--radius-m);
-    background: var(--surface);
-    font-size: 12px;
-    overflow-x: auto;
-    white-space: nowrap;
-    flex: none;
-  }
-  .ring {
-    width: 8px;
-    height: 8px;
-    flex: none;
-    border: 1.5px solid var(--light);
-    border-radius: 999px;
-  }
-  .public { color: var(--light); }
-  .sharebar .link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  .meta:hover .caption, .meta:focus-visible .caption { color: var(--light); }
+  .caption { margin-right: 8px; color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
+  .public { display: flex; align-items: center; gap: 6px; color: var(--light); }
+  .ring { width: 7px; height: 7px; flex: none; border: 1.5px solid var(--light); border-radius: 999px; }
 
   .title {
     flex: none;
@@ -400,9 +344,8 @@
   .unit { display: none; }
 
   /*
-   * A phone: a back button where the bar's crumbs would be, the readout on one
-   * line without its captions, and the actions as one row of equal buttons
-   * big enough for a thumb. Closing is the back button's job.
+   * A phone: a back button where the bar's crumbs would be, and the readout
+   * on one line without its captions. Closing is the back button's job.
    */
   @media (max-width: 767px) {
     header { padding: 10px 14px 10px 8px; gap: 8px; }
@@ -417,16 +360,10 @@
       border: 0;
       color: var(--light);
     }
-    .row { flex-direction: column; align-items: stretch; gap: 10px; padding-left: 6px; }
-    .meta { flex-wrap: nowrap; gap: 0; overflow: hidden; white-space: nowrap; }
-    .meta dt { display: none; }
-    .meta dd { margin: 0; }
-    .meta dd + dt + dd::before { content: '·'; margin: 0 8px; color: var(--muted); }
+    .meta { flex-wrap: nowrap; gap: 0; padding-left: 6px; overflow: hidden; white-space: nowrap; }
+    .caption { display: none; }
+    .field + .field::before { content: '·'; margin: 0 8px; color: var(--muted); }
     .unit { display: inline; margin-left: 0.5ch; }
-    .actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
-    .actions button { height: 36px; }
-    .actions .close { display: none; }
-    .sharebar { margin: 0 16px 8px; }
     .title { margin: 8px 16px 4px; }
     .reading { padding: 14px 16px 30vh; grid-template-columns: minmax(0, 1fr); }
     .reading > article { grid-column: 1; }

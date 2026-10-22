@@ -53,7 +53,7 @@
   /* A tap opens a row, so on a phone the other verbs need a door of their own. */
   function actions(index: number) {
     workspace.cursor = index
-    workspace.overlay = 'actions'
+    workspace.openSheet('actions')
   }
 
   /* Inside a folder, a phone has no h key and no crumbs on the bar: this is the way up. */
