@@ -458,6 +458,8 @@ export const api = {
 
   /** `work/einarbeiten/01-was-ist-eebus` — the node behind a `/n/...` address. */
   resolvePath: (path: string) => request<WorkspaceNode>(`/resolve?path=${encodeURIComponent(path)}`),
+  /** Ctrl-P: the nodes called what was typed, in every space, with where each is. */
+  jump: (q: string) => request<NodeSummary[]>(`/jump?q=${encodeURIComponent(q)}`),
 
   /**
    * Upload a folder into a node. The relative path is passed as each part's

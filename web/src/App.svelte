@@ -42,7 +42,7 @@
   const shareKey = shareToken ? decodeURIComponent(location.hash.slice(1)) : ''
 
   let cmdline = $state<string | null>(null)
-  let cmdGlobal = $state(false)
+  let cmdJump = $state(false)
   let fileInput = $state<HTMLInputElement>()
   let treeInput = $state<HTMLInputElement>()
   /** Whether the files being picked go into the vault — `:upload seal`. */
@@ -98,13 +98,13 @@
     }
     hooks.focusList = () => shell?.focus()
     hooks.openCommandLine = (initial) => {
-      cmdGlobal = false
+      cmdJump = false
       cmdline = initial
     }
     hooks.openOverview = () => void openOverview()
-    hooks.openGlobalSearch = () => {
-      cmdGlobal = true
-      cmdline = '/'
+    hooks.openJump = () => {
+      cmdJump = true
+      cmdline = ''
     }
     hooks.closeCommandLine = () => {
       if (cmdline === null) return false
@@ -249,8 +249,8 @@
     [keysOf('global', 'plan'), 'the plan: board, agenda, calendar'],
     [[...keysOf('global', 'board'), ...keysOf('global', 'agenda'), ...keysOf('global', 'calendar')], 'one of them, on the plan'],
     [keysOf('tree', 'capture'), 'capture a card to the inbox'],
-    [keysOf('global', 'find'), 'find in every space'],
-    [keysOf('tree', 'search'), 'search this space'],
+    [keysOf('global', 'find'), 'go to anything by its name'],
+    [keysOf('tree', 'search'), 'search this space, Tab every space'],
     [keysOf('global', 'help'), 'help'],
   ]
 
@@ -355,7 +355,7 @@
     <StatusBar {pending} />
 
     {#if cmdline !== null}
-      <CommandLine initial={cmdline} global={cmdGlobal} close={() => ((cmdline = null), (cmdGlobal = false))} />
+      <CommandLine initial={cmdline} jump={cmdJump} close={() => ((cmdline = null), (cmdJump = false))} />
     {/if}
 
     {#if workspace.scratch.open}

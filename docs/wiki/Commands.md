@@ -35,7 +35,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `gx` | open the file under the cursor in a tab of its own |
 | `Enter · l` | open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password |
 | `h` | from the document to the list, from the list up a level |
-| `o` | new document here, straight into insert mode |
+| `o` | new document here, straight into insert mode — when the space has templates, the line offers them first |
 | `O` | new folder here |
 | `i · a` | edit the open document |
 | `R` | rename what is under the cursor — document, folder or card — starting from its name |
@@ -48,11 +48,11 @@ arguments and `↑` / `↓` recall earlier lines.
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
 | `C` | the diary by month, on the plan screen: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents |
 | `[d / ]d` | the diary entry before / after the one open, by date |
-| `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
+| `Ctrl-P` | go to anything by its name, in every space — words before the last narrow the path, as in proj/ingest; Tab or Ctrl-N/P walk, Enter goes |
 | `b` | the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
 | `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up |
-| `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
+| `/` | full-text search, inside the current space and its text files — Tab takes it to every space, Ctrl-N/P walk the results, Enter opens one |
 | `n / N` | next / previous search result, opened beside the results — :noh clears the search |
 | `x · dd` | delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N) |
 | `u` | undo the last delete: it comes back out of the trash — :trash has the rest |
@@ -188,7 +188,7 @@ whole workspace. A command that does a second thing takes a word for it:
 | `:outline, :toc` | the open document's headings to pick from — gO, in the editor too |
 | `:info [outline\|history\|backlinks\|cards\|files\|share]` | what is known about the open document: its headings, earlier versions, backlinks, cards, files and sharing — Tab between them (gi) |
 | `:search, :se [text]` | full-text search in this space (empty clears) |
-| `:search!` | full-text search across every space — Ctrl-P |
+| `:search!` | full-text search across every space — `/` then Tab |
 | `:noh, :nohlsearch` | clear the search filter |
 | `:reload, :r` | re-read the current folder from the server |
 

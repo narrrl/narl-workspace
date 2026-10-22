@@ -31,17 +31,21 @@ short actionable summary of work, a **note** a thought not sorted yet, and a
 its document. The documents and the plan each have a screen, and the
 scratchpad comes down over either.
 
-### Left over from the plan, not started
+### The navigation fixes
 
-These were in the plan's navigation fixes, outside the numbered slices:
+The plan's navigation fixes sat outside the numbered slices, and landed after
+them, in one commit:
 
-- The list groups documents by day in every space; the plan had that only in
-  the diary, and folders first then by name elsewhere.
-- `Ctrl-P` is full-text search across every space; the plan had it become a
-  jump to a node by its name and path, with `Tab` in `/` reaching every space.
-- A card's notes are made in the space's root, not in the folder being
-  browsed.
-- `o` does not offer the space's templates; `:new <template>` does.
+- The list is by name, folders first, everywhere but the diary, which stays a
+  journal by day; a document's row there shows when it was last edited.
+- `Ctrl-P` goes to anything by its name, in every space (`GET /api/jump`): the
+  last word is looked for in the name, the ones before along the path. `/` is
+  the one full-text search, and `Tab` on its line takes it to every space.
+- A card's notes are made in the folder being browsed when that is in the
+  card's space, and a `[[missing]]` link's document beside the one linking to
+  it.
+- `o` in a space with templates offers them on the line, `:new `; `Enter` on
+  nothing is still a blank document.
 
 ## Fixed before, on 2026-10-21
 

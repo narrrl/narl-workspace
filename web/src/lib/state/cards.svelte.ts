@@ -1,4 +1,4 @@
-import { api, ApiError, type Agenda, type AgendaCard, type Board, type BoardList, type Card, type Moved, type NodeSummary, type Task } from '../api'
+import { api, ApiError, type Agenda, type AgendaCard, type Board, type BoardList, type Card, type Moved, type NodeSummary, type Task, type WorkspaceNode } from '../api'
 import { formatDay, formatWeekday } from '../util'
 import type { Workspace } from '../store.svelte'
 
@@ -543,19 +543,20 @@ export class Cards {
 
   /**
    * Open the document a card points at. A card without one gets one, named
-   * after it, in the space's root — so Enter always leads to a place to write
-   * the notes down. `q` on that document comes back here.
+   * after it, in the folder being browsed when that is in the card's space,
+   * and in the space's root when it is not — so Enter always leads to a
+   * place to write the notes down. `q` on that document comes back here.
    */
   async openCard() {
     const card = this.card
     const space = this.boardSpaceId
     if (!card || space === null) return
-    let nodeId = card.node_id
-    if (nodeId !== null) {
+    let notes: WorkspaceNode | null = null
+    if (card.node_id !== null) {
       // Deleted notes read as gone, but the card still points at them, so
       // the way back to them is named rather than a bare "not found".
       try {
-        await api.getNode(nodeId)
+        notes = await api.getNode(card.node_id)
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           return this.ws.say(`the notes of "${card.title}" are gone — :trash may still have them`, 'error')
@@ -563,16 +564,17 @@ export class Cards {
         throw error
       }
     }
-    if (nodeId === null) {
-      const node = await api.createNode({ parent_id: space, name: card.title, body: '' })
-      await api.updateCard(card.id, { node_id: node.id })
-      nodeId = node.id
+    if (!notes) {
+      const parent = this.ws.tree.spaceId === space ? (this.ws.tree.parentId ?? space) : space
+      notes = await api.createNode({ parent_id: parent, name: card.title, body: '' })
+      await api.updateCard(card.id, { node_id: notes.id })
     }
-    if (this.ws.tree.parentId !== space) await this.ws.tree.goTo(space)
+    const folder = notes.parent_id ?? space
+    if (this.ws.tree.parentId !== folder) await this.ws.tree.goTo(folder)
     else await this.ws.tree.refresh()
     // The notes open beside the board, and `q` takes their tile away again
     // on the way back to it.
-    await this.ws.tree.openNode(nodeId, card.node_id === null)
+    await this.ws.tree.openNode(notes.id, card.node_id === null)
     if (card.node_id === null) this.ws.enterInsert = true
   }
 

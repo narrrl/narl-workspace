@@ -59,7 +59,7 @@ export class Tree {
    */
   marked = $state.raw<NodeSummary[]>([])
 
-  /** A search across every space rather than the one being browsed — Ctrl-P. */
+  /** A search across every space rather than the one being browsed — `/` then Tab, or `:search!`. */
   globalSearch = $state(false)
 
   /** The last thing deleted here, which `u` puts back. */
@@ -508,14 +508,20 @@ export class Tree {
 
   /**
    * Follow a `[[title]]`: to the document it names, or — when there is none
-   * — to a new one called that, here, after asking. Which document a title
-   * names the server says when the text is written, so it is written first.
+   * — to a new one called that, beside the document linking to it, after
+   * asking. Which document a title names the server says when the text is
+   * written, so it is written first.
    */
   async followTitle(title: string) {
     await this.ws.drafts.flushTile()
-    const path = this.ws.open?.wikilinks[title]
+    const open = this.ws.open
+    const path = open?.wikilinks[title]
     if (path) return this.openPath(path)
-    if (!(await this.ws.prompts.ask(`no document called "${title}" yet — write it in ${this.here}?`))) return
+    const crumbs = open?.path.slice(0, -1) ?? []
+    const folder = crumbs.at(-1)
+    const where = folder ? crumbs.map((crumb) => crumb.slug).join('/') : this.here
+    if (!(await this.ws.prompts.ask(`no document called "${title}" yet — write it in ${where}?`))) return
+    if (folder && folder.id !== this.parentId) await this.goTo(folder.id)
     await this.createDocument(title)
   }
 

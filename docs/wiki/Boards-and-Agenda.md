@@ -115,8 +115,10 @@ outside the browser, see [Capture](Capture.md).
 
 ### Notes
 
-`gf` on a card, or on its back, opens its notes: a document named after the card, made in the
-root of the space the first time, among the documents. `S` goes back to the
+`gf` on a card, or on its back, opens its notes: a document named after the card,
+among the documents. The first time, it is made in the folder you are browsing
+when that is in the card's space, so the notes land beside what they are about,
+and in the root of the space when it is not. `S` goes back to the
 board, on the same card.
 
 The link is loose on purpose: deleting the document leaves the card, because the

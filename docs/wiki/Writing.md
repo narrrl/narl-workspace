@@ -153,7 +153,7 @@ A title is looked for in the space the link is written in first, then in every
 other. It matches a name in any case, or the slug of that name. Typing `[[` in
 the editor offers the titles of documents as the search finds them. A title
 that no document has yet is drawn dimmed, and following it offers to write that
-document.
+document, in the folder of the one linking to it.
 
 Links keep working when what they point at moves. Renaming a document, or a
 folder above it, or moving either, rewrites the links to it in every document
@@ -175,6 +175,9 @@ it is a template.
 
 - `:new meeting` starts a document from `templates/meeting`. `Tab` completes the
   template names.
+- `o` in a space with templates opens the line as `:new ` with them listed:
+  `Tab` picks one, and `Enter` on nothing makes a blank document. In the diary
+  `o` starts from `templates/day` without asking.
 - `:new meeting 2026-10-20 Budget` dates it and names it as well.
 
 In a template these placeholders are filled in, on the clock of

@@ -44,8 +44,8 @@ export const hooks = {
   overviewColumns: (): number => 1,
   openOverview: () => {},
   openCommandLine: (_initial: string) => {},
-  /** Ctrl-P: a search across every space. */
-  openGlobalSearch: () => {},
+  /** Ctrl-P: a jump to a node by its name, in every space. */
+  openJump: () => {},
   /** Esc with the line open but the keyboard elsewhere: the line away; false when it is not open. */
   closeCommandLine: (): boolean => false,
   /** `F`: letters over the links and buttons inside `root`. */
@@ -269,6 +269,20 @@ function templateNames(): string[] {
     )
   }
   return templateCache.names
+}
+
+/**
+ * `o`: a new document here. When the space has templates the line comes up
+ * as `:new ` with them listed — Tab picks one, Enter on nothing is a blank
+ * document. The diary starts from `templates/day` by itself, so it is not
+ * asked.
+ */
+export async function newDocument() {
+  const space = workspace.tree.space
+  const templates = space && space.role !== 'diary' ? await api.templates(space.id) : []
+  if (!space || templates.length === 0) return runCommand('new')
+  templateCache = { space: space.id, names: templates.map((t) => t.slug) }
+  hooks.openCommandLine(':new ')
 }
 
 /** `:encrypt` and `:decrypt`: a file, or everything under a folder. */
@@ -1184,7 +1198,7 @@ export const commands: CommandSpec[] = [
     help: 'full-text search in this space (empty clears)',
     run: (arg) => workspace.guard(() => workspace.tree.search(arg, false)),
     bang: {
-      help: 'full-text search across every space — Ctrl-P',
+      help: 'full-text search across every space — `/` then Tab',
       run: (arg) => workspace.guard(() => workspace.tree.search(arg, true)),
     },
   },

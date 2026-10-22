@@ -24,15 +24,17 @@ deleted. See [The diary](Diary.md).
 ## The tree
 
 Inside a space, folders nest to any depth. The list shows the folder you are
-in: folders first, then documents and files, grouped by the day they were
-written.
+in: folders first, then documents and files by name. The diary is the
+exception: a journal, its entries are newest first and grouped by the day they
+are about, and each shows the time it was written where elsewhere a document
+shows when it was last edited.
 
 | key | what it does |
 | --- | --- |
 | `j` / `k`, `gg` / `G` | move, first, last |
 | `l`, `Enter` | open the document or file, or go into the folder |
 | `h` | up one level |
-| `o` | a new document here, straight into insert mode |
+| `o` | a new document here, straight into insert mode; when the space has [templates](Writing.md#templates), the line offers them first |
 | `O` | a new folder here |
 | `R` | rename what is under the cursor |
 | `x`, `dd` | delete it, into the trash |

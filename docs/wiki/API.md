@@ -41,6 +41,7 @@ sealed or not.
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |
 | `POST` | `/api/import` | import an export at the root: directories become spaces |
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |
+| `GET` | `/api/jump?q=` | `Ctrl-P`: the nodes in every space whose name holds the last word and whose path holds the ones before, best first, each with its `location` |
 | `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
 | `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
 | `GET` | `/api/nodes/{id}/backlinks` | the documents that link to this one, with the line each does it on |

@@ -146,7 +146,7 @@ it; in the document pane it is that document. In the browse pane:
 | `gc` | the info sheet at the cards about the open document — `j`/`k` picks one for `Space`, `H`/`L`, `:due` and `:label`, `Enter` turns it over on its board (`:cards`) |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
-| `o` | a new document here, straight into insert mode |
+| `o` | a new document here, straight into insert mode; when the space has templates, the line offers them first |
 | `O` | a new folder here |
 | `i`, `a` | edit the open entry |
 | `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:space name` renames the space) |
@@ -164,8 +164,8 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-Q` | from anywhere, the editor too: the scratchpad down with the last note being written, and again back to where you were, still writing (Firefox quits on it instead) |
 | `Esc`, `q` | close the document, and its tile when there are several; `Esc` first puts down what `m` picked up |
 | `h` | up one level in the tree |
-| `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
-| `Ctrl-P` | full-text search across every space; `Enter` opens the match beside the results |
+| `/` | full-text search in this space (`:noh` clears it); `Tab` on the line takes it to every space and back, `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
+| `Ctrl-P` | go to anything by its name, in every space: the last word is looked for in the name, the ones before along the path (`proj ingest`); `Tab` or `Ctrl-N`/`Ctrl-P` walk, `Enter` goes |
 | `n` / `N` | the next / previous search result, opened beside the results; past the last it starts again at the first |
 | `x`, `dd` | delete the entry under the cursor into the trash (asks `y`/`N`) |
 | `u` | undo the last delete: it comes back out of the trash to where it was |
@@ -319,7 +319,7 @@ coloured as nvim colours it. See the
 
 A card can point at a document: `c` or `:card` while reading one makes a card for it,
 and `gf` on its back opens it again. `gf` on a card without one makes a
-document named after the card in the space's root and opens it to write in, and
+document named after the card — in the folder being browsed when that is in the card's space, else in its root — and opens it to write in, and
 closing that document returns to the board on the same card. The link is deliberately loose —
 deleting the document leaves the card standing, because the work is still open
 once its notes are gone. Only a document can be a card's notes; a folder or a
@@ -552,7 +552,7 @@ limit at least that large too.
 
 ### Searching inside files
 
-`/` and `Ctrl-P` find a file by what it says as well as by its name: the text
+`/` finds a file by what it says as well as by its name: the text
 of every file that is text — by its type, or by its first 8 KiB reading as
 UTF-8 without a NUL — is indexed, up to its first 256 KiB, the same part the
 viewer shows. A file found that way lists the words around the match under its
@@ -924,6 +924,7 @@ sealed or not.
 | `POST` | `/api/nodes/{id}/import` | import a folder or zip (multipart) under this node |
 | `POST` | `/api/import` | import an export at the root: directories become spaces |
 | `GET` | `/api/resolve?path=` | the node behind a slug path, `work/notes/monday` |
+| `GET` | `/api/jump?q=` | `Ctrl-P`: the nodes in every space whose name holds the last word and whose path holds the ones before, best first, each with its `location` |
 | `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
 | `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
 | `GET` | `/api/nodes/{id}/backlinks` | the documents that link to this one, with the line each does it on |

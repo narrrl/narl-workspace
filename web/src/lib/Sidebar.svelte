@@ -20,15 +20,19 @@
     return node.name.trim() || node.excerpt.trim() || node.slug
   }
 
+  /* The diary is a journal, listed by day; anywhere else the list is by name. */
+  const journal = $derived(workspace.tree.space?.role === 'diary')
+
   /*
-   * A folder is listed by what is in it, a document by when it was written —
-   * and how many files it has, folded or not — a file by its size.
+   * A folder is listed by what is in it, a document by when it was written in
+   * the diary and when it was last edited elsewhere — and how many files it
+   * has, folded or not — a file by its size.
    */
   const aside = (node: NodeSummary) =>
     node.file
       ? formatBytes(node.file.size)
       : node.kind === 'document'
-        ? `${node.child_count > 0 ? `+${node.child_count} · ` : ''}${formatTime(node.created_at)}`
+        ? `${node.child_count > 0 ? `+${node.child_count} · ` : ''}${journal ? formatTime(node.created_at) : relative(node.updated_at)}`
         : `${node.child_count}`
 
   /* The row a day heading compares with: the one above, past a document's files. */
@@ -114,9 +118,9 @@
     {#each workspace.tree.nodes as node, index (node.id)}
       {@const previous = above(index)}
       {@const nested = workspace.tree.isNested(node)}
-      <!-- Day headings only make sense in a list that is a journal: documents,
-           in date order, not a search and not a folder listing. -->
-      {#if !workspace.tree.query && !nested && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
+      <!-- Day headings only make sense in a list that is a journal: the
+           diary's documents, in date order, not a search. -->
+      {#if journal && !workspace.tree.query && !nested && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
         <li class="daybreak label rule">
           <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>

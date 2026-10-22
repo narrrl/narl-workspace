@@ -68,7 +68,7 @@ each.
 
 The list on the left shows the folder you are in. `j` and `k` move, `l` or
 `Enter` opens what is under the cursor, `h` goes up a level. Folders come first,
-then documents grouped by the day they were written.
+then documents by name; only the diary lists them by day.
 
 Open the project notes with `Enter`. To read a second document beside it, move
 to it and press `L` instead: it opens in a **tile** of its own.
@@ -159,15 +159,18 @@ going to the board.
 
 ### Finding things
 
-`/` searches the space you are in, as you type, and `Ctrl-P` every space.
-The search reads the documents and the text files in the tree, then the cards
+`/` searches the space you are in, as you type, and `Tab` on the line takes
+it to every space. The search reads the documents and the text files in the tree, then the cards
 and the notes: a log file is found by a line inside it, and the result shows
 the words around the match.
 
 ![A search that found a log line](../images/search.png)
 
-`Tab` walks the results without leaving the line, `Enter` opens one, and
-`n`/`N` step through them afterwards. More in [Files and search](Files-and-Search.md).
+`Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens
+one, and `n`/`N` step through them afterwards. When you know what it is called,
+`Ctrl-P` goes straight there from anywhere: type part of the name, with a word
+of the folder before it to narrow it, `proj ingest`. More in
+[Files and search](Files-and-Search.md).
 
 ## Afternoon: a lecture
 

@@ -85,6 +85,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/cards/{id}/move", post(boards::move_card))
         .route("/nodes", get(nodes::list).post(nodes::create))
         .route("/resolve", get(nodes::resolve))
+        .route("/jump", get(nodes::jump))
         .route("/nodes/{id}", get(nodes::get))
         .route("/nodes/{id}", put(nodes::update))
         .route("/nodes/{id}", delete(nodes::remove))

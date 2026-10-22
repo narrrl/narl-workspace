@@ -8,7 +8,7 @@
  * share an action and differ in direction. Returning `false` lets the key
  * on to the next context down, as if it had not been bound here.
  */
-import { cycleTile, focusTile, followLink, hooks, openInfo, runCommand } from './commands'
+import { cycleTile, focusTile, followLink, hooks, newDocument, openInfo, runCommand } from './commands'
 import { bindings, type Context } from './keymap'
 import { deeperHelp, focusHelpFilter, scrollHelp } from './Help.svelte'
 import { actSetting, moveSettings, removeSetting, turnSettings, openSettings } from './Settings.svelte'
@@ -413,7 +413,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     markAll: () => workspace.tree.markAll(),
     files: () => guard(() => workspace.tree.toggleFiles()),
     drop: () => guard(() => workspace.tree.drop()),
-    new: () => void runCommand('new'),
+    new: () => guard(newDocument),
     // Capture: a thought goes on this space's inbox without leaving here.
     // Reading a document, `:card` makes it about that document.
     capture: () => line(':card '),
@@ -534,9 +534,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   },
 
   global: {
-    // Ctrl-P: find anything, in any space — the one search that is not
-    // confined to where you are.
-    find: () => hooks.openGlobalSearch(),
+    // Ctrl-P: go to anything by its name, in any space.
+    find: () => hooks.openJump(),
     // Ctrl-D / Ctrl-U page the open document, as they do in a pager.
     halfDown: () => (workspace.open && !workspace.editing ? void hooks.scrollReader('halfdown') : false),
     halfUp: () => (workspace.open && !workspace.editing ? void hooks.scrollReader('halfup') : false),

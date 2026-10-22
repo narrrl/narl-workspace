@@ -111,7 +111,7 @@
           desk: true,
         },
         { icon: 'search', label: 'Search this space', keys: keysOf('tree', 'search'), run: () => hooks.openCommandLine('/') },
-        { icon: 'search-all', label: 'Search every space', keys: keysOf('global', 'find'), run: () => hooks.openGlobalSearch() },
+        { icon: 'search-all', label: 'Go to anything by its name', keys: keysOf('global', 'find'), run: () => hooks.openJump() },
       ],
       [cmd, settings, help],
     ]

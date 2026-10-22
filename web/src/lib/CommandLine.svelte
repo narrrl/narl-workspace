@@ -28,13 +28,14 @@
 
 <script lang="ts">
   import { tick, untrack } from 'svelte'
+  import { api, type NodeSummary } from './api'
   import { argCompletions, completions, readingDocument, runCommand, hooks } from './commands'
   import { workspace } from './store.svelte'
 
   interface Props {
     initial: string
-    /** A `/` search across every space rather than this one — Ctrl-P. */
-    global?: boolean
+    /** Ctrl-P: a jump to a node by its name, in every space, rather than a command. */
+    jump?: boolean
     close: () => void
   }
 
@@ -46,12 +47,18 @@
     help?: string
   }
 
-  const { initial, global = false, close }: Props = $props()
+  const { initial, jump = false, close }: Props = $props()
 
   let value = $state(untrack(() => initial))
   let input = $state<HTMLInputElement>()
   let list = $state<HTMLUListElement>()
-  const isSearch = $derived(value.startsWith('/'))
+  const isSearch = $derived(!jump && value.startsWith('/'))
+  /** A search across every space rather than this one; Tab switches. */
+  let global = $state(false)
+
+  /* What a jump offers for what is typed, and the one lit. */
+  let places = $state<NodeSummary[]>([])
+  let lit = $state(0)
 
   /*
    * A capture line — `c` opens one — writes a thought down somewhere without
@@ -70,7 +77,7 @@
     value = value.replace(/^:\S+/, `:${next}`)
     return true
   }
-  const historyKey = $derived(isSearch ? 'diary:history:search' : 'diary:history:cmd')
+  const historyKey = $derived(jump ? 'diary:history:jump' : isSearch ? 'diary:history:search' : 'diary:history:cmd')
 
   /*
    * Where the keys were before the line took them: the line goes away under
@@ -98,6 +105,7 @@
   }
 
   const shown = $derived.by((): Item[] => {
+    if (jump) return places.map((node) => ({ value: String(node.id), label: node.name || node.slug, args: node.location }))
     if (cycle) return cycle.items
     if (isSearch || value.replace(/^:/, '').length === 0) return []
     return candidates(value).slice(0, 8)
@@ -109,7 +117,7 @@
 
   // The match Tab is on stays in sight in a list longer than the box.
   $effect(() => {
-    if (cycle?.at === undefined) return
+    if ((jump ? lit : cycle?.at) === undefined) return
     void tick().then(() => list?.querySelector('.current')?.scrollIntoView({ block: 'nearest' }))
   })
 
@@ -117,9 +125,34 @@
   $effect(() => {
     if (!isSearch) return
     const query = value.slice(1)
-    const timer = setTimeout(() => void workspace.guard(() => workspace.tree.search(query, global)), 120)
+    const everywhere = global
+    const timer = setTimeout(() => void workspace.guard(() => workspace.tree.search(query, everywhere)), 120)
     return () => clearTimeout(timer)
   })
+
+  // So is a jump, with the places it offers under the line.
+  $effect(() => {
+    if (!jump) return
+    const query = value
+    const timer = setTimeout(
+      () =>
+        void workspace.guard(async () => {
+          const found = await api.jump(query)
+          if (value !== query) return
+          places = found
+          lit = 0
+        }),
+      120,
+    )
+    return () => clearTimeout(timer)
+  })
+
+  /** Enter or a click on a jump: the place opened, a folder by going in. */
+  async function go(node: NodeSummary | undefined) {
+    if (!node) return
+    await workspace.guard(() => workspace.tree.openPath(node.location ? `${node.location}/${node.slug}` : node.slug))
+    await giveBackFocus()
+  }
 
   /**
    * Hand the keys back once the line is gone, unless what ran took them
@@ -139,9 +172,12 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault()
     const line = value
+    // Closing takes the line's props with it, so what it was is read first.
+    const [jumping, searching, place] = [jump, isSearch, places[lit]]
     remember(historyKey, line)
     close()
-    if (isSearch) {
+    if (jumping) return go(place)
+    if (searching) {
       // Enter goes to the highlighted result, once the results are for what
       // was typed rather than for the line a keystroke ago.
       const query = line.slice(1)
@@ -199,10 +235,15 @@
       event.stopPropagation()
       close()
       void giveBackFocus()
-    } else if (event.key === 'Tab' && isSearch) {
-      // Nothing to complete in a search: Tab walks the results instead.
+    } else if (jump && (event.key === 'Tab' || (ctrl && (event.key === 'n' || event.key === 'p')))) {
+      // The places, walked without leaving the line; Enter goes to the one lit.
       event.preventDefault()
-      workspace.tree.move(event.shiftKey ? -1 : 1)
+      const count = places.length
+      if (count) lit = (lit + (event.shiftKey || event.key === 'p' ? -1 : 1) + count) % count
+    } else if (event.key === 'Tab' && isSearch) {
+      // Nothing to complete in a search: Tab takes it to every space, or back.
+      event.preventDefault()
+      global = !global
     } else if (event.key === 'Tab') {
       event.preventDefault()
       if (!retarget(event.shiftKey ? -1 : 1)) complete(event.shiftKey ? -1 : 1)
@@ -231,8 +272,8 @@
       {#each shown as item, index (item.value)}
         <li>
           <button
-            class:current={cycle?.at === index}
-            onclick={() => ((value = item.value), (cycle = null), input?.focus())}
+            class:current={jump ? lit === index : cycle?.at === index}
+            onclick={() => (jump ? (close(), void go(places[index])) : ((value = item.value), (cycle = null), input?.focus()))}
           >
             <span class="name">{item.label}</span>
             {#if item.args}<span class="muted">{item.args}</span>{/if}
@@ -244,7 +285,8 @@
   {/if}
 
   <form onsubmit={submit}>
-    {#if isSearch}<span class="scope label">{global ? 'all spaces' : (workspace.tree.space?.slug ?? '')}</span>{/if}
+    {#if isSearch}<span class="scope label" title="Tab: this space · every space">{global ? 'all spaces' : (workspace.tree.space?.slug ?? '')} <span class="kbd">tab</span></span>{/if}
+    {#if jump}<span class="scope label">go to</span>{/if}
     {#if capture}<span class="scope label" title="Tab: card · note · today">→ {targetNames[capture]} <span class="kbd">tab</span></span>{/if}
     <input bind:this={input} bind:value {onkeydown} {oninput} spellcheck="false" autocomplete="off" />
   </form>

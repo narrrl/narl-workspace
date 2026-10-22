@@ -626,15 +626,24 @@ pub async fn list(
             .fetch_all(&state.db)
             .await?
         }
-        // Browsing: the children of one node, folders before documents.
+        // Browsing: the children of one node, folders before documents. The
+        // diary is a journal, newest first; anywhere else it is by name.
         None => {
             let parent = params.parent;
             sqlx::query(&format!(
-                "SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
-                 FROM nodes n
+                "WITH RECURSIVE up (id, parent_id, role) AS (
+                     SELECT id, parent_id, role FROM nodes WHERE id IS ?1
+                     UNION ALL
+                     SELECT n.id, n.parent_id, n.role FROM nodes n JOIN up ON n.id = up.parent_id
+                 ),
+                 journal (yes) AS (SELECT EXISTS (SELECT 1 FROM up WHERE role = '{DIARY}'))
+                 SELECT {SUMMARY_COLUMNS}, substr(n.body, 1, {HEAD_CHARS}) AS head
+                 FROM nodes n, journal
                  WHERE n.parent_id IS ?1 AND n.role IS NOT 'trash'
                  ORDER BY CASE n.kind WHEN 'folder' THEN 0 ELSE 1 END,
-                          n.position, n.created_at DESC, n.id DESC
+                          n.position,
+                          CASE WHEN journal.yes THEN n.created_at END DESC,
+                          n.name = '', n.name COLLATE NOCASE, n.id DESC
                  LIMIT ?2 OFFSET ?3"
             ))
             .bind(parent)
@@ -688,6 +697,97 @@ pub async fn get(
 pub struct ResolveQuery {
     /// Slugs from a space downwards, `work/einarbeiten/01-was-ist-eebus`.
     pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct JumpQuery {
+    #[serde(default)]
+    pub q: String,
+}
+
+/// How many places `Ctrl-P` offers at once.
+const JUMP_LIMIT: usize = 30;
+
+/// `Ctrl-P`: the nodes, in every space, called what was typed. The last word
+/// is looked for in a node's own name or slug, and the words before it
+/// anywhere along its path, so `proj ingest` and `work/ingest` both find
+/// `work/projects/ingest-pipeline`. A name that starts with the last word
+/// comes first, then one with a word that does, then one that merely holds
+/// it; after that the shorter path, then the one edited last.
+pub async fn jump(
+    _: Session,
+    State(state): State<AppState>,
+    Query(params): Query<JumpQuery>,
+) -> AppResult<Json<Vec<NodeSummary>>> {
+    let words: Vec<String> = params
+        .q
+        .split(|c: char| c.is_whitespace() || c == '/')
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    if words.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let rows = sqlx::query(&format!(
+        "WITH RECURSIVE walk (id, trail, names) AS (
+             SELECT id, slug, name FROM nodes WHERE parent_id IS NULL AND kind = 'space'
+             UNION ALL
+             SELECT n.id, walk.trail || '/' || n.slug, walk.names || '/' || n.name
+             FROM nodes n JOIN walk ON n.parent_id = walk.id
+         )
+         SELECT {SUMMARY_COLUMNS}, walk.trail, walk.names
+         FROM walk JOIN nodes n ON n.id = walk.id
+         WHERE n.kind <> 'space'"
+    ))
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut found: Vec<(u8, usize, i64, NodeSummary)> = rows
+        .iter()
+        .filter_map(|row| {
+            let name: String = row.get("name");
+            let slug: String = row.get("slug");
+            let trail: String = row.get("trail");
+            let names: String = row.get("names");
+            let own = format!("{} {slug}", name.to_lowercase());
+            let along = format!("{} {trail}", names.to_lowercase());
+            let rank = jump_rank(&words, &own, &along)?;
+            let mut node = row_to_summary(row, "");
+            node.location = trail
+                .rsplit_once('/')
+                .map(|(parents, _)| parents.to_string());
+            Some((rank, trail.matches('/').count(), -node.updated_at, node))
+        })
+        .collect();
+    found.sort_by_key(|(rank, depth, edited, _)| (*rank, *depth, *edited));
+    Ok(Json(
+        found
+            .into_iter()
+            .take(JUMP_LIMIT)
+            .map(|(.., node)| node)
+            .collect(),
+    ))
+}
+
+/// Where a node stands for the words typed, lower first, or `None` when it
+/// is not what they name: `own` is its name and slug, `along` its path.
+fn jump_rank(words: &[String], own: &str, along: &str) -> Option<u8> {
+    let (last, before) = words.split_last()?;
+    if !before.iter().all(|word| along.contains(word.as_str())) {
+        return None;
+    }
+    if own.starts_with(last.as_str()) {
+        Some(0)
+    } else if own
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|part| part.starts_with(last.as_str()))
+    {
+        Some(1)
+    } else if own.contains(last.as_str()) {
+        Some(2)
+    } else {
+        None
+    }
 }
 
 /// Resolve a slug path to the node it names. This is the other half of the
@@ -1229,7 +1329,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        excerpt, fts_query, load, move_nodes, next_slug, place_for, purge_subtree,
+        excerpt, fts_query, jump_rank, load, move_nodes, next_slug, place_for, purge_subtree,
         recent_documents, slugify, DOCUMENT, EXCERPT_CHARS, FILE, FOLDER, HEAD_CHARS,
     };
     use crate::error::AppError;
@@ -1746,5 +1846,22 @@ mod tests {
             super::create(session(), State(state.clone()), axum::Json(long)).await,
             Err(AppError::BadRequest(_))
         ));
+    }
+
+    /// `Ctrl-P` reads the last word as the name and the ones before as the
+    /// path, and ranks a name that starts with it above one that holds it.
+    #[test]
+    fn a_jump_names_the_node_and_walks_its_path() {
+        let words = |q: &str| q.split([' ', '/']).map(str::to_string).collect::<Vec<_>>();
+        let own = "ingest pipeline ingest-pipeline";
+        let along = "work/projects/ingest pipeline work/projects/ingest-pipeline";
+        assert_eq!(jump_rank(&words("ingest"), own, along), Some(0));
+        assert_eq!(jump_rank(&words("pipe"), own, along), Some(1));
+        assert_eq!(jump_rank(&words("line"), own, along), Some(2));
+        assert_eq!(jump_rank(&words("proj ingest"), own, along), Some(0));
+        assert_eq!(jump_rank(&words("work/pipe"), own, along), Some(1));
+        assert_eq!(jump_rank(&words("uni ingest"), own, along), None);
+        // A folder's name names the folder, not everything in it.
+        assert_eq!(jump_rank(&words("projects"), own, along), None);
     }
 }

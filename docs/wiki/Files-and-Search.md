@@ -53,13 +53,11 @@ file or an SVG, for example, downloads instead of opening.
 
 ## Search
 
-| key | searches |
-| --- | --- |
-| `/` | the space you are in |
-| `Ctrl-P` | every space |
+`/` searches the space you are in; `Tab` on the line takes the search to every
+space, and back (`:search!` does the same from the command line).
 
 Results appear as you type, ranked by relevance, each with the space and
-folder it is in. `Tab` or `Ctrl-N` / `Ctrl-P` walk them without leaving the
+folder it is in. `Ctrl-N` / `Ctrl-P` walk them without leaving the
 line, and `Enter` opens the one lit. Afterwards `n` and `N` open the next and
 previous result beside the list, and `:noh` clears the search.
 
