@@ -121,6 +121,26 @@
     void tick().then(() => list?.querySelector('.current')?.scrollIntoView({ block: 'nearest' }))
   })
 
+  /*
+   * What the list showed before the search line opened. Esc, or anything else
+   * that closes the line without Enter, puts it back, as vim puts the cursor
+   * back when a `/` is abandoned: typing a search only tries it.
+   */
+  const before = untrack(() => ({
+    query: workspace.tree.query,
+    global: workspace.tree.globalSearch,
+    selected: workspace.tree.selected?.id,
+  }))
+  let entered = false
+
+  $effect(() => () => {
+    if (entered) return
+    const { tree } = workspace
+    if (tree.query !== before.query || tree.globalSearch !== before.global) {
+      void workspace.guard(() => tree.search(before.query, before.global, before.selected))
+    }
+  })
+
   // A search is live: the list filters as you type, like `incsearch`.
   $effect(() => {
     if (!isSearch) return
@@ -174,6 +194,7 @@
     const line = value
     // Closing takes the line's props with it, so what it was is read first.
     const [jumping, searching, place] = [jump, isSearch, places[lit]]
+    entered = true
     remember(historyKey, line)
     close()
     if (jumping) return go(place)

@@ -155,7 +155,7 @@ export function claim(event: KeyboardEvent): boolean {
 /*
  * The phone's back gesture, or its back button: one thing let go of, the way
  * Esc and q let go of it on a keyboard — a question, the line, a sheet, the
- * drawer, the editor, a tile — and then up a folder. False when there is
+ * drawer, the editor, a tile, a search — and then up a folder. False when there is
  * nothing left to leave, and the app itself may go.
  */
 export function back(): boolean {
@@ -177,6 +177,7 @@ function leaving(): (() => unknown) | null {
   if (workspace.fullscreen) return () => (workspace.fullscreen = false)
   if (workspace.focus !== 'list' && workspace.focus !== 'node') return () => runCommand('close')
   if (workspace.open && workspace.pane === 'document') return () => runCommand('q')
+  if (tree.query) return () => workspace.guard(() => tree.clearSearch())
   if (tree.path.length > 1) return () => workspace.guard(() => tree.up())
   return null
 }

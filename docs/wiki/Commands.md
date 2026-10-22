@@ -51,9 +51,9 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-P` | go to anything by its name, in every space — words before the last narrow the path, as in proj/ingest; Tab or Ctrl-N/P walk, Enter goes |
 | `b` | the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
-| `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up |
-| `/` | full-text search, inside the current space and its text files — Tab takes it to every space, Ctrl-N/P walk the results, Enter opens one |
-| `n / N` | next / previous search result, opened beside the results — :noh clears the search |
+| `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up, and in the list lets go of a search |
+| `/` | full-text search, inside the current space and its text files — Tab takes it to every space, Ctrl-N/P walk the results, Enter opens one, Esc gives up |
+| `n / N` | next / previous search result, opened beside the results — Esc or :noh clears the search |
 | `x · dd` | delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N) |
 | `u` | undo the last delete: it comes back out of the trash — :trash has the rest |
 | `gh` | the open document's earlier versions, as diffs — Enter brings one back |

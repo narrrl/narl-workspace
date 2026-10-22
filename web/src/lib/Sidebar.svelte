@@ -101,7 +101,7 @@
     <div class="filter">
       <span class="muted">/</span><span class="query">{workspace.tree.query}</span>
       {#if workspace.tree.globalSearch}<span class="muted scope">all spaces</span>{/if}
-      <button title="clear search (n)" onclick={() => workspace.guard(() => workspace.tree.search(''))}>esc</button>
+      <button title="clear the search (Esc)" onclick={() => workspace.guard(() => workspace.tree.clearSearch())}>esc</button>
     </div>
   {/if}
 

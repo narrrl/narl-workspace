@@ -58,8 +58,10 @@ space, and back (`:search!` does the same from the command line).
 
 Results appear as you type, ranked by relevance, each with the space and
 folder it is in. `Ctrl-N` / `Ctrl-P` walk them without leaving the
-line, and `Enter` opens the one lit. Afterwards `n` and `N` open the next and
-previous result beside the list, and `:noh` clears the search.
+line, and `Enter` opens the one lit and keeps the results in the list. `Esc`
+on the line gives the search up, and the list is as it was before `/`.
+Afterwards `n` and `N` open the next and previous result beside the list, and
+`Esc` in the list (or `:noh`, or back on a phone) clears the search.
 
 Cards are searched too, by their title, description and checklist steps. They
 are listed after the documents, under `cards`, with the board and list each is

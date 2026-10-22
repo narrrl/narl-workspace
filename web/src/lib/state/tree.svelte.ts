@@ -239,6 +239,7 @@ export class Tree {
     const folder = await api.getNode(id)
     // Walking into another space by a link leaves this one where it was.
     if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
+    this.#reading++
     this.parentId = id
     this.parentSealed = folder.sealed
     this.query = ''
@@ -259,19 +260,27 @@ export class Tree {
     await this.goTo(parent.id, from.id)
   }
 
+  /** Which `refresh` is the latest: an older one answering late is dropped. */
+  #reading = 0
+
   /** `keep` follows a node that just arrived, instead of holding the cursor. */
   async refresh(keep?: number) {
     const keepId = keep ?? this.selected?.id
+    const reading = ++this.#reading
     if (this.query) {
       const space = this.searchSpace
       // A note is in no space, so every search looks through them all.
-      ;[this.nodes, this.foundCards, this.foundNotes] = await Promise.all([
+      const found = await Promise.all([
         api.listNodes({ q: this.query, space }),
         api.searchCards(this.query, space),
         api.scratch(this.query),
       ])
+      if (reading !== this.#reading) return
+      ;[this.nodes, this.foundCards, this.foundNotes] = found
     } else {
-      this.nodes = await this.#withFiles(await api.listNodes({ parent: this.parentId ?? undefined }))
+      const nodes = await this.#withFiles(await api.listNodes({ parent: this.parentId ?? undefined }))
+      if (reading !== this.#reading) return
+      this.nodes = nodes
       this.foundCards = []
       this.foundNotes = []
     }
@@ -312,11 +321,17 @@ export class Tree {
     return this.globalSearch ? undefined : (this.spaceId ?? undefined)
   }
 
-  async search(query: string, global = this.globalSearch) {
+  /** `keep`: the node the cursor stays on, when the list it lands in has it. */
+  async search(query: string, global = this.globalSearch, keep?: number) {
     this.query = query
     this.globalSearch = global && query !== ''
     this.cursor = 0
-    await this.refresh()
+    await this.refresh(keep)
+  }
+
+  /** Esc, or back: the search let go of, the folder shown again with the cursor where it was in the results. */
+  async clearSearch() {
+    await this.search('', false, this.selected?.id)
   }
 
   /**

@@ -180,6 +180,8 @@ export class Tiles {
     this.current.clear()
     this.prune()
     if (!this.current.empty) this.focusOn(this.focused)
+    // Nothing open: the address is the folder's again.
+    else this.ws.tree.syncUrl(this.ws.tree.path)
   }
 
   /**

@@ -431,16 +431,19 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       if (workspace.open) void runCommand('q')
       else workspace.tree.unmarkAll()
     },
-    // Esc lets go of one thing at a time: what is carried, then the document.
+    // Esc lets go of one thing at a time: what is carried, then what has the
+    // keys — the document read, or the search the list shows — then the rest.
     escape: () => {
       if (workspace.tree.marked.length) return workspace.tree.unmarkAll()
+      if (workspace.open && workspace.pane === 'document') return void runCommand('q')
+      if (workspace.tree.query) return guard(() => workspace.tree.clearSearch())
       if (workspace.open) void runCommand('q')
     },
     delete: () => void runCommand('d'),
     // A delete goes to the trash, so it can be undone the way vim undoes.
     undo: () => guard(() => workspace.tree.undoDelete()),
     // Through the results, as vim's `n` goes through the matches; the
-    // search itself stays until `:noh`.
+    // search itself stays until Esc or `:noh`.
     next: () => guard(() => workspace.tree.nextResult(1)),
     previous: () => guard(() => workspace.tree.nextResult(-1)),
     search: () => line('/'),
