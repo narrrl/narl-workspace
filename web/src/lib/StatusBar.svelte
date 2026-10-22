@@ -68,7 +68,7 @@
    * doors.
    */
   @media (max-width: 767px) {
-    .status { padding: 0 6px; gap: 6px; overflow: visible; }
+    .status { padding: 0 6px var(--inset-bottom); gap: 6px; overflow: visible; }
     .hint, .file, .readout, .flag, .pending { display: none; }
     .mode:not(.editing) { display: none; }
     .tools { display: flex; flex: 1; height: 100%; }

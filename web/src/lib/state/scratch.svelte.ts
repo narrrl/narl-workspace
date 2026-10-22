@@ -163,6 +163,28 @@ export class Scratchpad {
     this.ws.say('scratched — Q shows the scratchpad')
   }
 
+  /*
+   * What the phone's share sheet sent while the app was shut, kept by the
+   * service worker in the cache `share` (see sw.ts): each made a note, and
+   * the drawer down on the newest. One is let go of only once it is a note,
+   * so a share made with no network or no login waits for the next start.
+   */
+  async takeShared() {
+    if (typeof caches === 'undefined') return
+    const cache = await caches.open('share')
+    const kept = [...(await cache.keys())].sort((a, b) => a.url.localeCompare(b.url, undefined, { numeric: true }))
+    if (!kept.length) return
+    for (const request of kept) {
+      const text = await (await cache.match(request))?.text()
+      if (text?.trim()) await api.createScratch(text)
+      await cache.delete(request)
+    }
+    if (this.open) this.notes = await api.scratch()
+    else await this.toggle()
+    this.cursor = 0
+    this.ws.say(kept.length === 1 ? 'shared — on the scratchpad' : `${kept.length} shared — on the scratchpad`)
+  }
+
   /**
    * `:keep [title]`: the note under the cursor made a document in the folder
    * being browsed, and taken off the scratchpad. Without a title, the first

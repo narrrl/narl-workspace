@@ -205,7 +205,9 @@ curl -H "Authorization: Bearer nwc_…" -H 'content-type: application/json' \
   -d '{"text":"call the bank"}' https://your-host/api/capture
 ```
 
-The token can do this and nothing else. See [Capture](Capture.md).
+The token can do this and nothing else. On Android the installed app needs no
+token: share to it, and the text is a note on the scratchpad. See
+[Capture](Capture.md) and [On a phone](#on-a-phone).
 
 ## Evening: the diary
 
@@ -251,3 +253,15 @@ has a done button on each card.
 | ![The tree on a phone](../images/mobile-tree.png) | ![A document on a phone](../images/mobile-document.png) |
 
 `:set vim` turns the vim keys on for a phone with a keyboard.
+
+Over HTTPS the browser offers to install the workspace as an app (Chrome's
+menu: *Install app*, or *Add to Home screen*). Installed, it opens from its own
+icon, and with no network it still opens, to say the server cannot be reached.
+Back lets go of one thing at a time, as `Esc` does — a sheet, the scratchpad,
+the editor, the document, then a folder up — and only at the root of a space
+leaves the app.
+
+On Android the installed app is in the share sheet. A link or some text shared
+to it becomes a note on the scratchpad, the title on its first line; the drawer
+comes down with it on top, ready to be kept, made a card or put at the end of a
+document. A share made while logged out waits for the login.

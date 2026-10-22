@@ -105,7 +105,7 @@ function tileKey(direction: Direction, shift: boolean) {
 }
 
 /** The drawer up, and the keys back where they were: in the editor, when a document was being written. */
-async function raise() {
+export async function raise() {
   await workspace.scratch.close()
   if (!workspace.scratch.open && workspace.editing && workspace.pane === 'document') hooks.focusEditor()
 }

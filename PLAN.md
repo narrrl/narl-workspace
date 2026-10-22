@@ -47,6 +47,30 @@ them, in one commit:
 - `o` in a space with templates offers them on the line, `:new `; `Enter` on
   nothing is still a blank document.
 
+## The phone app, done
+
+Written on 2026-10-22. The workspace installs on a phone as an app:
+
+- A manifest (`web/public/manifest.webmanifest`) with a 192 and a 512 icon and
+  a maskable one, drawn from the favicon.
+- A service worker (`web/src/sw.ts`, built by a small plugin in
+  `vite.config.ts`) keeps index.html, the logo, the entry with what it imports,
+  and the latin fonts, and every hashed asset once it has been fetched. Pages
+  are asked of the server first and answered from the cache when it is down.
+  It never touches `/api`. The CSP names `worker-src` and `manifest-src`.
+- A share target, `POST /share`, caught by the worker and never sent to the
+  server: the text waits in the cache `share` and becomes a scratchpad note
+  once someone is logged in.
+- Back, on a touch screen, lets go of one thing at a time through one guard
+  entry in the history (`back()` in `modes.ts`), and leaves the app at the
+  root of a space.
+- The bar and the band grow by the safe-area insets, so an installed app keeps
+  them clear of the status bar and the gesture bar.
+
+Not done, on purpose: reading documents offline, and sharing a photo or a file
+— a file needs a document or a folder to belong to, and a note has neither.
+iOS has no share target, so the iPhone keeps the Shortcut.
+
 ## Fixed before, on 2026-10-21
 
 After the seven slices of the feature plan (trash `8ffad63`, revisions
@@ -83,9 +107,10 @@ tab. `.github/workflows/wiki.yml` replaces it on its first run.
 
 The backlog, fitted to the model rather than given new surfaces:
 
-- Install the app on a phone (a PWA: manifest plus a service worker for the
-  app shell, CSP `worker-src 'self'`), with a share target that posts into
-  capture as a note. The touch and desktop menus are already the same.
+- Read on a phone with no network: the documents opened last, kept by the
+  service worker or in IndexedDB, and cleared on logout.
+- Share a photo or a file into the app: it asks which document or folder it
+  belongs to.
 - Task lists: toggle `- [ ]` in the reader, and the open ones of a space as a
   section of the agenda rather than a `:tasks` command.
 - A daily review, also as a section of the agenda: yesterday's entry, what was
@@ -95,4 +120,4 @@ The backlog, fitted to the model rather than given new surfaces:
 Dropped: marks (`ma` … `mz`). The info sheet's headings and the tiles cover
 what they were for, and `m` stays picking nodes up.
 
-Suggested next: the PWA.
+Suggested next: task lists and the daily review, as sections of the agenda.

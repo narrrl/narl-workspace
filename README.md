@@ -56,6 +56,9 @@ document per day. A file sits in a folder or belongs to its document.
   card, or more of a document.
 - **Capture.** A token per phone or script that puts a card in an inbox, a
   note on the scratchpad or a line in today's entry, and nothing else.
+- **Install.** On a phone the workspace installs as an app: it opens with no
+  network, sits in the share sheet, where whatever is shared to it lands on
+  the scratchpad, and back closes one thing at a time.
 - **Share.** Any document behind an unguessable, revocable read-only link.
 - **Mount.** The whole workspace over SFTP, for an editor on another machine.
 - **Back up.** A mirror to Proton Drive, end-to-end encrypted, as a registered
@@ -222,6 +225,18 @@ is open. Inside a folder the list starts with `..`, the way up. The dock also
 has today's entry, an upload into the folder, the trash, a search across every space,
 and on the board the card moves, renames and deletes; the agenda has a done
 button per card.
+
+Over HTTPS the browser offers to install the workspace (Chrome's menu: *Install
+app*, or *Add to Home screen*). Installed, it opens in a window of its own, from
+its own icon, and with no network it still opens, to say the server cannot be
+reached and try again. Back — the gesture or the button — lets go of one thing
+at a time, the way `Esc` does: a sheet, the scratchpad, the editor, the
+document, then a folder up; at the root of a space it leaves the app. On
+Android the installed app is in the share sheet: a link or some text shared to
+it becomes a note on the scratchpad, the title on its first line, and waits
+there through a login if the session has run out. A service worker keeps the
+app's own files and nothing else; it never stores a document, a card or a
+note.
 
 ## Tiles
 
@@ -416,7 +431,8 @@ On an iPhone, a Shortcut with *Ask for Input* followed by *Get Contents of
 URL* does it: method `POST`, a header `Authorization` of `Bearer nwc_…`, and a
 JSON body with `text` set to the input. On Android, *HTTP Shortcuts* does the
 same with a text-input variable in the body. Either one goes on the home
-screen, or behind the share sheet.
+screen, or behind the share sheet. On Android the installed app is in the share
+sheet itself, with no token, and puts what is shared on the scratchpad.
 
 ## Not losing things
 
@@ -951,7 +967,9 @@ sealed or not.
 ## Deploying
 
 Put a TLS-terminating reverse proxy in front of it, point it at `WORKSPACE_BIND`,
-and set `WORKSPACE_SECURE_COOKIE=1`. Nothing else is needed: no database server, no
+and set `WORKSPACE_SECURE_COOKIE=1`. HTTPS is also what lets a phone install the
+app: a browser runs a service worker only over HTTPS, or on `localhost`.
+Nothing else is needed: no database server, no
 runtime dependencies, no build tools on the host. The server will not start
 while `WORKSPACE_SECRET` or `WORKSPACE_PASSWORD` is still the example from
 `.env.example`: with the example secret anyone could sign themselves a session.
@@ -972,7 +990,8 @@ everyone out once.
 The app sends its own `Content-Security-Policy`, `Referrer-Policy: no-referrer`,
 `X-Content-Type-Options`, `X-Frame-Options`, `Cross-Origin-Opener-Policy`,
 `Cross-Origin-Resource-Policy` and a `Permissions-Policy` that turns off camera,
-microphone and location; API answers are `Cache-Control: no-store` unless they
+microphone and location. The policy lets in one worker and one manifest, the
+app's own (`/sw.js`, `/manifest.webmanifest`); API answers are `Cache-Control: no-store` unless they
 say otherwise. A proxy that adds its own should not weaken them. `no-referrer` matters in particular, because a share token
 lives in the URL and would otherwise leak to any site a shared entry links to.
 Share links minted before the key existed are revoked by migration `0005`;

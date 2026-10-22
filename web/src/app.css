@@ -41,10 +41,15 @@
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
   /* The frame: a bar on top, a rail on the right, a band at the bottom, and a
-     rounded opening between them that the panes are seen through. */
-  --bar-h: 40px;
+     rounded opening between them that the panes are seen through. Installed
+     on a phone the app reaches under the status bar and the gesture bar
+     (`viewport-fit=cover`), so the bar and the band grow by what those cover
+     and keep their contents clear of them; in a browser both insets are 0. */
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  --bar-h: calc(40px + var(--inset-top));
   --rail-w: 48px;
-  --status-h: 28px;
+  --status-h: calc(28px + var(--inset-bottom));
   --frame: 8px;
   --frame-radius: 18px;
 
@@ -69,7 +74,7 @@
 @media (max-width: 767px) {
   :root {
     --rail-w: var(--frame);
-    --status-h: 40px;
+    --status-h: calc(40px + var(--inset-bottom));
     --frame: 6px;
     --frame-radius: 14px;
   }
@@ -333,7 +338,7 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 calc(var(--rail-w) + 4px) 0 calc(var(--frame) + 10px);
+  padding: var(--inset-top) calc(var(--rail-w) + 4px) 0 calc(var(--frame) + 10px);
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -402,7 +407,7 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0 calc(var(--rail-w) + 4px) 0 calc(var(--frame) + 4px);
+  padding: 0 calc(var(--rail-w) + 4px) var(--inset-bottom) calc(var(--frame) + 4px);
   font-size: 11px;
   color: var(--subtle);
   white-space: nowrap;

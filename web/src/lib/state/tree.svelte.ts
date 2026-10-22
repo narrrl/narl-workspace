@@ -109,10 +109,10 @@ export class Tree {
    * outside that and shows matches from anywhere in the current space.
    */
 
-  /** Keep the address bar on the node being looked at, so it can be linked to. */
+  /** Keep the address bar on the node being looked at, so it can be linked to — the history entry, back's guard among them, kept as it is. */
   syncUrl(path: Crumb[]) {
     const slugs = path.map((crumb) => crumb.slug).join('/')
-    if (slugs) history.replaceState(null, '', `/n/${slugs}`)
+    if (slugs) history.replaceState(history.state, '', `/n/${slugs}`)
   }
 
   /** Open whatever `work/einarbeiten/01-was-ist-eebus` names. */

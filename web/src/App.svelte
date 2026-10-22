@@ -3,7 +3,7 @@
   import { openOverview } from './lib/actions'
   import { hooks } from './lib/commands'
   import { keysOf } from './lib/keymap'
-  import { dispatch } from './lib/modes'
+  import { back, dispatch } from './lib/modes'
   import { embedSnippet } from './lib/markdown'
   import Agenda from './lib/Agenda.svelte'
   import Calendar from './lib/Calendar.svelte'
@@ -30,7 +30,7 @@
   import Sidebar from './lib/Sidebar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import { workspace, type Sheet } from './lib/store.svelte'
-  import { dwindle } from './lib/util'
+  import { dwindle, isTouchDevice } from './lib/util'
 
   /*
    * A share link is /s/<token>#<key>. The fragment never leaves the browser, so
@@ -179,6 +179,35 @@
     if (!pending) return
     const timer = setTimeout(() => (pending = ''), 1000)
     return () => clearTimeout(timer)
+  })
+
+  /*
+   * On a phone, back lets go of one thing at a time rather than leaving the
+   * app. One entry is kept in the history over the page: back takes it off,
+   * `back()` lets go of something, and it goes on again. With nothing left to
+   * let go of it stays off, so the next back leaves. It is put on at a touch,
+   * since a browser skips an entry made without one.
+   */
+  $effect(() => {
+    if (!isTouchDevice || shareToken) return
+    let guarded = false
+    const guard = () => {
+      if (guarded) return
+      history.pushState({ guard: true }, '')
+      guarded = true
+    }
+    const popstate = () => {
+      guarded = false
+      if (back()) guard()
+      // The entry under the guard still has the address the page opened on.
+      else workspace.tree.syncUrl(workspace.tree.path)
+    }
+    window.addEventListener('pointerdown', guard, true)
+    window.addEventListener('popstate', popstate)
+    return () => {
+      window.removeEventListener('pointerdown', guard, true)
+      window.removeEventListener('popstate', popstate)
+    }
   })
 
   // Guard against losing a half-written entry to a stray refresh.

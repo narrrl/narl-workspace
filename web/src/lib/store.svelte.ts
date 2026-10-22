@@ -140,12 +140,16 @@ export class Workspace {
       await this.cards.loadAgenda()
       await this.vault.load()
       await this.cards.openAgendaIfDue()
+      void this.guard(() => this.scratch.takeShared())
     } catch (error) {
       this.user = null
       // Down is not the same as logged out: say so, and keep asking.
       if (unreachable(error)) {
         this.notice = 'the server cannot be reached — trying again'
         setTimeout(() => void this.boot(), 5000)
+      } else if (this.notice.startsWith('the server cannot')) {
+        // Back, but the session did not last the wait.
+        this.notice = ''
       }
     } finally {
       this.booting = false
@@ -170,6 +174,8 @@ export class Workspace {
     await this.cards.loadAgenda()
     await this.vault.load()
     await this.cards.openAgendaIfDue()
+    // A share that came in while nobody was logged in has waited for this.
+    void this.guard(() => this.scratch.takeShared())
   }
 
   async logout(everywhere = false) {

@@ -80,6 +80,9 @@ The rail of buttons on the right does the same as the keys, for a mouse.
 On a phone the same things are buttons: the dock at the bottom has a new
 document, a new folder, the board, today's entry, an upload and a search, and
 the `⋯` on a row (or a long press on it) has what can be done to that row.
+Over HTTPS the browser offers to install it as an app, which then sits in the
+share sheet and puts what is shared on the scratchpad; see
+[On a phone](Guide.md#on-a-phone).
 
 ![The workspace on a phone](../images/mobile-tree.png)
 

@@ -356,7 +356,7 @@
   .mobilebar {
     display: flex;
     gap: 6px;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px 12px;
     border-top: 1px solid var(--rim);
     flex: none;
   }

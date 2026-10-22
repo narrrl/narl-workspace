@@ -60,3 +60,8 @@ with a text-input variable, method `POST`, the same header, and a JSON body
 `{"text": "{{input}}"}`.
 
 Either one can sit on the home screen, or behind the share sheet.
+
+**Android, without a token**: install the workspace from Chrome (*Install app*,
+over HTTPS) and it is in the share sheet itself. What is shared to it — a link,
+some text, a title — becomes a note on the scratchpad, from the session the app
+is logged in with. See [On a phone](Guide.md#on-a-phone).

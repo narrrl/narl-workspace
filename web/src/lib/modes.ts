@@ -16,7 +16,8 @@
  * The `[y/N]` prompt sits over all of it, in App.svelte, and the command
  * line keeps its own keys while it has them.
  */
-import { actions, type Run } from './actions'
+import { actions, raise, type Run } from './actions'
+import { hooks, runCommand } from './commands'
 import { bindings, type Binding, type Context } from './keymap'
 import { workspace } from './store.svelte'
 
@@ -149,4 +150,33 @@ export function claim(event: KeyboardEvent): boolean {
   event.preventDefault()
   event.stopPropagation()
   return true
+}
+
+/*
+ * The phone's back gesture, or its back button: one thing let go of, the way
+ * Esc and q let go of it on a keyboard — a question, the line, a sheet, the
+ * drawer, the editor, a tile — and then up a folder. False when there is
+ * nothing left to leave, and the app itself may go.
+ */
+export function back(): boolean {
+  if (hooks.closeCommandLine()) return true
+  const step = leaving()
+  if (!step) return false
+  void step()
+  return true
+}
+
+function leaving(): (() => unknown) | null {
+  const { prompts, sheets, scratch, drafts, tree } = workspace
+  if (prompts.prompt) return () => prompts.prompt?.resolve(false)
+  if (prompts.secret) return () => prompts.secret?.resolve(null)
+  if (prompts.verify) return () => prompts.verify?.resolve(null)
+  if (sheets.shown !== 'none') return () => sheets.close()
+  if (scratch.open) return scratch.editing ? () => drafts.leaveWriting() : () => workspace.guard(raise)
+  if (drafts.writing || workspace.editing) return () => runCommand('q')
+  if (workspace.fullscreen) return () => (workspace.fullscreen = false)
+  if (workspace.focus !== 'list' && workspace.focus !== 'node') return () => runCommand('close')
+  if (workspace.open && workspace.pane === 'document') return () => runCommand('q')
+  if (tree.path.length > 1) return () => workspace.guard(() => tree.up())
+  return null
 }

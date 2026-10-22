@@ -406,9 +406,12 @@ fn compressible(
 
 /// Content-Security-Policy for the app shell. `unsafe-inline` is granted to
 /// styles only, because CodeMirror injects its theme as a <style> element at
-/// runtime; scripts stay confined to the bundled files.
+/// runtime; scripts stay confined to the bundled files. The service worker and
+/// the manifest that make it an app on a phone are the shell's own, at `/sw.js`
+/// and `/manifest.webmanifest`.
 const CSP: &str = "default-src 'self'; img-src 'self' data:; media-src 'self'; \
     style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; \
+    worker-src 'self'; manifest-src 'self'; \
     frame-src 'self' https://verify.proton.me; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 type HeaderLayer = SetResponseHeaderLayer<HeaderValue>;
