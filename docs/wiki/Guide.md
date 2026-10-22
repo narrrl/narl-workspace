@@ -1,19 +1,38 @@
 # The guide: a day with the workspace
 
-This page follows one ordinary day: the agenda in the morning, notes and cards
-at work, a lecture in the afternoon, a thought on the way home, and the diary in
-the evening. Each part of the workspace is explained where it first comes up,
-with a link to the page that has the rest of it.
+This page follows one ordinary day: the agenda in the morning, documents, notes
+and cards at work, a lecture in the afternoon, a thought on the way home, and
+the diary in the evening. Each part of the workspace is explained where it first
+comes up, with a link to the page that has the rest of it.
 
 The keys are the desktop's. On a phone, every one of these has a button; see
 [On a phone](#on-a-phone) at the end.
+
+## Four things, two screens
+
+Everything you keep is one of four things:
+
+| | what it is for | where it lives |
+| --- | --- | --- |
+| **document** | the thorough record: a project, a runbook, lecture notes | the tree of a space, in folders |
+| **card** | the short, actionable summary of work, with a due date and a checklist; it usually points at a document | the board of a space |
+| **note** | a thought jotted down in passing, not sorted yet | the scratchpad, one for the whole workspace |
+| **diary entry** | a document about one day | the diary space, by date |
+
+A **file** — a PDF, an image, a log — is never on its own: it sits in a folder
+beside the documents, or belongs to the one document it was put into.
+
+They are shown on two screens. The **documents** screen has the list on the
+left and the documents open in tiles beside it. The **plan** screen has the
+board, the agenda and the calendar, and a card turned over. `S` goes from one to
+the other, and each keeps what was on it. The scratchpad comes down over either.
 
 ## Morning: what needs you
 
 The first time you open the workspace each day, the **agenda** opens by itself
 when anything is late or due. Any other time, press `t`. It is on the plan
-screen, with the board and the calendar, in place of the documents; `S` goes
-there and back again, and `Ctrl-h`/`j`/`k`/`l` walk the tiles.
+screen, with the board and the calendar; `Ctrl-h`/`j`/`k`/`l` walk between
+them.
 
 ![The agenda](../images/agenda.png)
 
@@ -33,12 +52,12 @@ Walk it with `j` and `k`. On a card:
 - `Space` finishes it, where it stands;
 - `D` gives it a due date: `fri`, `tm`, `+3d`, `10-31`;
 - `H` and `L` move it to the list left or right on its board;
-- `Enter` goes to the card on its own board, in the tile beside.
+- `Enter` goes to the card on its own board, turned over in the tile beside.
 
-`Esc` closes the agenda's tile. The bar keeps showing the `late` and `today`
+`q` goes back to the documents. The bar keeps showing the `late` and `today`
 counts while either is above zero. More in [Boards and the agenda](Boards-and-Agenda.md).
 
-## At work: spaces, documents and tiles
+## At work: documents
 
 Press `2` for the `work` space. A **space** is one area of your life, with its
 own folders, its own board and its own search. Make more with
@@ -56,17 +75,17 @@ to it and press `L` instead: it opens in a **tile** of its own.
 
 ![Two documents in tiles](../images/tiles.png)
 
-`h` and `l` move between the tiles and back to the list, `Ctrl-h` and
-`Ctrl-l` from the editor too, `q` closes one, and `f` makes the focused one
-fill the screen. Each space remembers
-its tiles, so switching away and back finds them as they were. More in
+`h` and `l` move between the tiles and back to the list, and `Ctrl-h` and
+`Ctrl-l` do the same from the editor. `q` closes a tile, and `f` makes the
+focused one fill the screen. Each space remembers its tiles, so switching away
+and back finds them as they were. More in
 [Spaces and documents](Spaces-and-Documents.md).
 
 ### Writing
 
 `i` edits the open document. The editor is CodeMirror with real vim keys:
-`ciw`, `dd`, visual mode, macros, `.` and the rest. What you write saves itself.
-`Esc` leaves insert mode, and `Esc` again or `:q` leaves the editor.
+`ciw`, `dd`, visual mode, macros, `.` and the rest. `Esc` leaves insert mode,
+and `Esc` again or `:q` leaves the editor.
 
 ![The editor](../images/editor.png)
 
@@ -79,16 +98,45 @@ to follow it.
 You do not need to save. Every keystroke goes to the browser's storage at
 once, and to the server a couple of seconds after you stop typing. If the
 network is gone, the draft waits in the browser and is sent when it comes back.
-More in [Writing](Writing.md).
+The same is true of a card's description and of a note: there is one editor,
+and it works the same way everywhere. More in [Writing](Writing.md).
 
-### Cards
+### Everything about a document
+
+`gi` opens the document's **info sheet**: its headings, its earlier versions,
+the documents that link to it, the cards about it, its files, and whether it is
+shared. `Tab` goes from one part to the next.
+
+![The cards about a document, in its info sheet](../images/info.png)
+
+## At work: notes
+
+Halfway through a paragraph a thought comes that belongs somewhere else.
+`Ctrl-Q`, even in insert mode, brings the **scratchpad** down with the last
+note open at its end. Write the thought, and `Ctrl-Q` again puts you back in
+the document where you were, still writing. `:scratch <text>` takes a note from
+the command line without the drawer.
+
+`Q` brings the scratchpad down to sort it. Each note leaves in one of three
+ways:
+
+- `K` keeps it as a document, in the folder you are browsing;
+- `C` makes it a card: the first line is the title, the rest the description;
+- `A` puts it at the end of a document, picked by title.
+
+![The scratchpad](../images/scratch.png)
+
+The notes are found by `/` like everything else. More in
+[Writing](Writing.md#the-scratchpad).
+
+## At work: cards
 
 In a meeting someone asks you to renew a certificate. Press `c`, type
 `Renew the gateway certificate`, and `Enter`. The card is in this space's
-inbox, and you have not left the document you were reading. Not a task? `Tab`
-on the same line makes it a note on the scratchpad, and `Tab` again a timed line
-in today's diary entry. A note waits there until `K`, `C` or `A` turns it into a
-document, a card, or more of a document.
+inbox, and you have not left what you were reading. When that was a document,
+the card is about it: it shows in the document's info sheet, and the
+document's meta line says what is due. `Tab` on the same line makes a note
+instead, and `Tab` again a timed line in today's diary entry.
 
 Press `b` to see the **board**, on the plan screen. A digit there shows the
 board of another space.
@@ -97,18 +145,24 @@ board of another space.
 
 The first list is the inbox and the last is done; the ones between are work in
 hand. `h`/`l` move between lists and `j`/`k` between cards. `H`/`L` move a
-card across, `Space` finishes it, and `D` sets its due date. `Enter` turns a
-card over to its labels, description and checklist, in a tile beside, and
-`gf` opens its notes: a document made for the card the first time you ask,
-opened among the documents, and `S` comes back to the board. `:repeat weekly` makes a
-card come back in the inbox each time it is finished. `q` on the board goes
-back to the documents.
+card across, `Space` finishes it, and `D` sets its due date. `:repeat weekly`
+makes a card come back in the inbox each time it is finished.
+
+`Enter` turns a card over to its labels, description and checklist, in a tile
+beside, and `q` turns it back. Keep the description short: the long version
+belongs in a document. `gf` opens the card's document, made the first time you
+ask, among the documents; `S` comes back to the board.
+
+The other way round works too. Reading a document, `gc` lists the cards about
+it, and `:due`, `:label`, `Space`, `H` and `L` act on the one picked, without
+going to the board.
 
 ### Finding things
 
-`/` searches the space you are in, as you type. `Ctrl-P` searches every space.
-The search reads the documents and the text files in the tree: a log file is
-found by a line inside it, and the result shows the words around the match.
+`/` searches the space you are in, as you type, and `Ctrl-P` every space.
+The search reads the documents and the text files in the tree, then the cards
+and the notes: a log file is found by a line inside it, and the result shows
+the words around the match.
 
 ![A search that found a log line](../images/search.png)
 
@@ -123,9 +177,13 @@ LaTeX between dollar signs and drawn by KaTeX:
 ![Math in a document](../images/math.png)
 
 The slides came as a PDF. Drop it onto the list, or `:upload`, and it is a
-file in the folder, beside the notes about it. `Enter` opens a PDF, an image, a
-video, a CSV table, a text or source file, or a certificate in place. Anything
-else downloads with `:export`.
+file in the folder, beside the notes about it. An image pasted into a document
+while writing belongs to that document instead: it is in the document's info
+sheet, `za` folds it open under the document in the list, and it moves and goes
+to the trash with it.
+
+`Enter` opens a PDF, an image, a video, a CSV table, a text or source file, or
+a certificate in place. Anything else downloads with `:export`.
 
 ![A CSV file as a table](../images/file-table.png)
 
@@ -137,7 +195,7 @@ never stored. See [The vault](Vault.md).
 
 A thought arrives when no tab is open. `:token add phone` makes a token. With
 it, an iPhone Shortcut, an Android HTTP Shortcut or a single `curl` puts a card
-in an inbox, or a line in today's diary entry:
+in an inbox, a note on the scratchpad, or a line in today's diary entry:
 
 ```sh
 curl -H "Authorization: Bearer nwc_…" -H 'content-type: application/json' \
@@ -151,10 +209,10 @@ The token can do this and nothing else. See [Capture](Capture.md).
 Press `T` for today's entry. If there is none yet it is started, from the
 diary's `templates/day` document when there is one, and opens ready to write.
 
-`C` shows the diary by month. A dot marks a day with an entry; `h`/`l`,
-`j`/`k` and `H`/`L` move by day, week and month, and `Enter` opens the day,
-or starts an entry for it. In an entry, `[d` and `]d` step to the one before
-and after.
+`C` shows the diary by month, on the plan screen. A dot marks a day with an
+entry; `h`/`l`, `j`/`k` and `H`/`L` move by day, week and month, and `Enter`
+opens the day among the documents, or starts an entry for it. In an entry, `[d`
+and `]d` step to the one before and after.
 
 ![The diary by month](../images/calendar.png)
 

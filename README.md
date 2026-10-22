@@ -24,13 +24,19 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
 
 ## What it does
 
+Four things, each in one place: **documents**, the thorough record, in the tree
+of a space; **cards**, the short actionable summary of work, on the board of a
+space, usually about a document; **notes**, jotted in passing, on the
+scratchpad until they become one of the others; and **diary entries**, one
+document per day. A file sits in a folder or belongs to its document.
+
 - **Write.** Markdown documents in spaces (`diary`, `work`, `uni`, …) with
   folders to any depth. Real vim keys on the desktop (CodeMirror 6), plain taps
   on a phone. Math by KaTeX, `$x^2$` and `$$…$$`, and ` ```typst ` blocks
   typeset by Typst on the server. `[[Title]]` links that are
   rewritten when what they point at is renamed or moved, and backlinks.
 - **Plan.** A kanban board per space, cards with a checklist, labels and a
-  markdown description, due dates said the way you say them
+  markdown description, linked to their document both ways, due dates said the way you say them
   (`fri`, `+3d`), cards that come back once done, and an agenda of what is late,
   due or in hand on every board.
 - **Remember.** A diary with a calendar, templates, the entries from this day
@@ -38,16 +44,18 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
 - **Keep files.** PDFs, archives and recordings live in the tree beside the
   notes about them, streamed to disk however large. PDFs, text, code, tables
   and certificates open in place, and search reads the text files too.
-- **Find.** Full-text search across a space or all of them (SQLite FTS5).
+- **Find.** Full-text search across a space or all of them, documents, files,
+  cards and notes alike (SQLite FTS5).
 - **Lose nothing.** Autosave that survives a dropped network, every earlier
   version of a document as a diff, a trash with undo, an export that reads
   without this app, and an import that takes it back.
 - **Seal.** A vault: files sealed with AES-256-GCM under a password that is
   never stored.
-- **Jot.** A scratchpad that drops down over whatever is on screen, for notes
-  taken in passing; one worth keeping becomes a document with one key.
-- **Capture.** A token per phone or script that puts a card in an inbox or a
-  line in today's entry, and nothing else.
+- **Jot.** A scratchpad that drops down over whatever is on screen, even
+  mid-sentence, for notes taken in passing; one key makes a note a document, a
+  card, or more of a document.
+- **Capture.** A token per phone or script that puts a card in an inbox, a
+  note on the scratchpad or a line in today's entry, and nothing else.
 - **Share.** Any document behind an unguessable, revocable read-only link.
 - **Mount.** The whole workspace over SFTP, for an editor on another machine.
 - **Back up.** A mirror to Proton Drive, end-to-end encrypted, as a registered
@@ -61,6 +69,7 @@ Everything is also in the [wiki](https://github.com/narrrl/narl-workspace/wiki).
 | ![Two documents side by side in tiles](docs/images/tiles.png) | ![The board of a space](docs/images/board.png) |
 | ![The agenda across every board](docs/images/agenda.png) | ![The diary by month](docs/images/calendar.png) |
 | ![Search finding a line inside a log file](docs/images/search.png) | ![A document's earlier versions as diffs](docs/images/history.png) |
+| ![The scratchpad over the documents](docs/images/scratch.png) | ![The cards about a document, in its info sheet](docs/images/info.png) |
 
 ## Quick start
 
@@ -129,7 +138,7 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `zl` / `zh`, `zL` / `zH` | scroll the table, code block or formula at the top of the view sideways, a little or by half its width |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
-| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards and the share link — `Tab` goes from one part to the next (`:info`); clicking the line under the title opens it too |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards, files and the share link — `Tab` goes from one part to the next (`:info`); clicking the line under the title opens it too |
 | `gO` | the info sheet at the headings — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |
 | `gh` | the info sheet at the earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |

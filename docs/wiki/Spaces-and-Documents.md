@@ -68,9 +68,13 @@ linked to from anywhere behind the login.
 The line under the title says when it was written and last edited, how many
 words it has, how many documents link to it, and whether it is public. Click it,
 or press `gi`, for the info sheet: the document's headings, its earlier
-versions, the documents that link to it and its share link, one part at a time
-— `Tab` goes to the next. `gO`, `gh` and `gb` open it at their own part. In the
-reader:
+versions, the documents that link to it, the cards about it, its files and its
+share link, one part at a time — `Tab` goes to the next. `gO`, `gh`, `gb` and
+`gc` open it at their own part.
+
+![The cards about a document, in its info sheet](../images/info.png)
+
+In the reader:
 
 | key | what it does |
 | --- | --- |

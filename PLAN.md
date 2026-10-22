@@ -1,15 +1,54 @@
 # Findings, possible bugs, and what comes next
 
-Written on 2026-10-21, after the seven slices of the feature plan had landed
-(trash `8ffad63`, revisions `fc2be66`, links `a42f907`, capture tokens
-`f629f5a`, diary `824f2bb`, recurring cards `6673298`, search in files
-`909abf5`). That plan has fully landed, and git keeps it.
+## The simplification, done
 
-These came out of writing the wiki, taking the screenshots against a fresh
-workspace, and probing the API on a throwaway server. All of them are fixed
-now, except two limits of search noted at the end of the list.
+Written on 2026-10-22. The app had grown slice by slice to about 85 commands,
+60 browse keys and 11 overlays, with the same idea modelled two or three times:
+text in three editors, files in two places, cards that pointed at a document
+the document could not see, four inboxes, two layout systems, and keys
+documented by hand in seven places. A plan in eleven slices made the same
+features out of fewer things, one place for each, and one key grammar. Every
+one has landed:
 
-## Fixed
+| | slice | commit |
+| --- | --- | --- |
+| 0 | the audit's fixes: `Ctrl-P` keeps its query, `:today` by the server's day, card descriptions resolve links | `7f8a381` |
+| 1 | one keymap table drives the dispatch, help, the footers, the rail and the wiki; a mode stack replaces the flags | `0eabcb2` |
+| 2 | one `Sheet` component; the info sheet holds headings, versions, backlinks and sharing | `26b3c68` |
+| 3 | the board, agenda, calendar and a card's back are tiles; the special workspace is gone | `5684614` |
+| 4 | documents and cards linked both ways: `gc`, card verbs on the card in focus, cards in search | `b8b3641` |
+| 5 | one editor for documents, descriptions and notes, all saving themselves | `ccc9102` |
+| 6 | the scratchpad is the inbox, with three ways out and a search | `2233fa4` |
+| 7 | a file belongs to a node; the media browser is gone | `d8e72c6` |
+| 8 | `!` means force or everything only; merged commands; a settings sheet; two-level help | `7f8d625` |
+| 9 | the store split into parts under one `Workspace` | `b110701` |
+| 9b | fixes from daily use: `Ctrl-h/j/k/l` between tiles, `Ctrl-Q` from anywhere, the plan screen | `650fc40` |
+| 10 | the docs: the guide around the four things, the README, new screenshots | this commit |
+
+The model it leaves: a **document** is the thorough record, a **card** the
+short actionable summary of work, a **note** a thought not sorted yet, and a
+**diary entry** a document about a day. A file sits in a folder or belongs to
+its document. The documents and the plan each have a screen, and the
+scratchpad comes down over either.
+
+### Left over from the plan, not started
+
+These were in the plan's navigation fixes, outside the numbered slices:
+
+- The list groups documents by day in every space; the plan had that only in
+  the diary, and folders first then by name elsewhere.
+- `Ctrl-P` is full-text search across every space; the plan had it become a
+  jump to a node by its name and path, with `Tab` in `/` reaching every space.
+- A card's notes are made in the space's root, not in the folder being
+  browsed.
+- `o` does not offer the space's templates; `:new <template>` does.
+
+## Fixed before, on 2026-10-21
+
+After the seven slices of the feature plan (trash `8ffad63`, revisions
+`fc2be66`, links `a42f907`, capture tokens `f629f5a`, diary `824f2bb`,
+recurring cards `6673298`, search in files `909abf5`), writing the wiki, taking
+the screenshots and probing the API turned these up:
 
 | | finding | fix |
 | --- | --- | --- |
@@ -32,38 +71,24 @@ now, except two limits of search noted at the end of the list.
 - PDFs and office documents are not read for search. That needs a parser
   crate, and waits until it is missed.
 
-## Docs and tooling, done in this pass
-
-- An icon, `~/` and a block cursor, as the favicon, the touch icon, and the
-  mark in the bar, the login and the share page.
-- A README that opens with the banner, the badges, screenshots and the
-  features grouped by what they are for.
-- A wiki in `docs/wiki`: a getting-started page, a guide that walks through a
-  day, a page per part of the app, and three reference pages generated from the
-  code (`scripts/wiki.ts`).
-- Screenshots in `docs/images`, taken by `scripts/screenshots.ts` against a
-  throwaway workspace, so they can be taken again when the UI changes.
-- CI: `.github/workflows/ci.yml` runs the Rust checks, svelte-check and the
-  wiki check on every push. `.github/workflows/wiki.yml` publishes the wiki on
-  every push to `main`.
-
 **Before the first wiki publish:** GitHub creates a wiki's repository only
 when its first page is saved, so save any page once in the repository's Wiki
-tab. The workflow replaces it on its first run.
+tab. `.github/workflows/wiki.yml` replaces it on its first run.
 
 ## Next, unplanned
 
-Carried over from the last plan, still not started:
+The backlog, fitted to the model rather than given new surfaces:
 
 - Install the app on a phone (a PWA: manifest plus a service worker for the
   app shell, CSP `worker-src 'self'`), with a share target that posts into
-  capture. The new icon is ready for the manifest.
-- Task lists: toggle `- [ ]` in the reader, and `:tasks` gathers the open ones
-  in a space.
-- A daily review in the agenda: yesterday's entry, what was finished this week,
-  and cards in `doing` for more than 14 days.
-- Marks: `ma` … `mz` per document, `'a` to jump. This clashes with `m` for
-  picking nodes up, so choose the keys first.
-- Mail-in capture: IMAP polling of a plus-address into the inbox.
+  capture as a note. The touch and desktop menus are already the same.
+- Task lists: toggle `- [ ]` in the reader, and the open ones of a space as a
+  section of the agenda rather than a `:tasks` command.
+- A daily review, also as a section of the agenda: yesterday's entry, what was
+  finished this week, and cards in `doing` for more than 14 days.
+- Mail-in capture: IMAP polling of a plus-address onto the scratchpad.
 
-Suggested next: the PWA, which the new icon makes cheap.
+Dropped: marks (`ma` … `mz`). The info sheet's headings and the tiles cover
+what they were for, and `m` stays picking nodes up.
+
+Suggested next: the PWA.

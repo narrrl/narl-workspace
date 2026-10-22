@@ -278,6 +278,13 @@ await doc(thesis.id, 'Outline', `## Chapters\n\n1. Introduction\n2. Related work
 const uniLists = (await api('GET', `/spaces/${uni}/board`)).lists as { id: number }[]
 await api('POST', `/lists/${uniLists[0].id}/cards`, { title: 'Hand in exercise sheet 4', due_at: at(2, 10) })
 
+// The scratchpad: what was jotted down in passing, waiting to be sorted.
+for (const note of [
+  'tariffs-api added valid_from — ask whether it is a date or a timestamp',
+  'idea: show the run progress per source in the status page',
+  '# Dead-letter queue\nkeep failed jobs for 7 days, replay by hand',
+]) await api('POST', '/scratch', { body: note })
+
 // home
 await doc(home, 'Groceries', `- oat milk\n- coffee\n- lemons\n`)
 await api('PUT', `/nodes/${home}`, { name: 'home', has_board: false })
@@ -339,15 +346,10 @@ const named: Record<string, { code: string; keyCode: number }> = {
   Tab: { code: 'Tab', keyCode: 9 },
 }
 
-/** Keys as typed: `gh`, `?`, `<Escape>` for a named one, `<A-h>` with Alt. */
+/** Keys as typed: `gh`, `?`, `<Escape>` for a named one. */
 async function keys(sequence: string, pause = 250) {
-  for (const token of sequence.match(/<A-\w>|<\w+>|./g) ?? []) {
-    if (token.startsWith('<A-')) {
-      const key = token[3]
-      const params = { key, code: `Key${key.toUpperCase()}`, modifiers: 1 }
-      await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...params })
-      await send('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
-    } else if (token.startsWith('<')) {
+  for (const token of sequence.match(/<\w+>|./g) ?? []) {
+    if (token.startsWith('<')) {
       const key = token.slice(1, -1)
       const { code, keyCode } = named[key]
       const text = key === 'Enter' ? '\r' : undefined
@@ -393,7 +395,7 @@ await shot('document')
 await open('/n/work/projects')
 await keys('jl')
 await sleep(800)
-await keys('<A-h>kL')
+await keys('hkL')
 await sleep(800)
 await shot('tiles')
 
@@ -401,6 +403,11 @@ await open('/n/work/runbook')
 await keys('gh', 400)
 await sleep(800)
 await shot('history')
+
+await open('/n/work/projects/ingest-pipeline')
+await keys('gc', 400)
+await sleep(800)
+await shot('info')
 
 await open('/n/work/runbook')
 await keys('i')
@@ -428,6 +435,12 @@ await open('/n/diary')
 await keys('C')
 await sleep(800)
 await shot('calendar')
+await keys('<Escape>')
+
+await open('/n/work/runbook')
+await keys('Q')
+await sleep(800)
+await shot('scratch')
 await keys('<Escape>')
 
 await open('/n/work')

@@ -63,8 +63,11 @@ desktop lowers its own; `Q`, `q` or `Esc` raises it again, and what was on
 screen is as it was. `Ctrl-Q` works from anywhere, the editor included: the
 scratchpad comes down with the last note being written, at its end, and
 `Ctrl-Q` again puts it away and goes back to the document, still writing where
-it was left. Firefox quits on `Ctrl-Q`, so there it is `Q` only. Its notes have no name, no space and no folder: a note is
-a body and the time it was last touched, newest on top.
+it was left. Firefox quits on `Ctrl-Q`, so there it is `Q` only. Its notes have no name,
+no space and no folder: a note is a body and the time it was last touched,
+newest on top.
+
+![The scratchpad, lowered over the documents](../images/scratch.png)
 
 | key | what it does |
 | --- | --- |

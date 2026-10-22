@@ -7,6 +7,11 @@ notes for work and for uni, a board per space, and the files that go with them.
 One user, one SQLite file, one binary. Everything is a key or a `:` command on
 the desktop, and a button on the phone.
 
+It keeps four things: **documents**, the thorough record; **cards**, the short
+summary of work, usually about a document; **notes**, jotted in passing on the
+scratchpad until they become one of the others; and **diary entries**. The
+[guide](Guide.md#four-things-two-screens) says how they fit together.
+
 ![A document open in the reader](../images/document.png)
 
 ## Where to start
@@ -22,8 +27,8 @@ the desktop, and a button on the phone.
 | page | what it covers |
 | --- | --- |
 | [Spaces and documents](Spaces-and-Documents.md) | spaces, folders, the list, tiles, moving things |
-| [Writing](Writing.md) | the editor, vim, markdown, math, links between documents, templates |
-| [Boards and the agenda](Boards-and-Agenda.md) | cards, due dates, cards that come back, the agenda |
+| [Writing](Writing.md) | the editor, vim, the scratchpad, markdown, math, links between documents, templates |
+| [Boards and the agenda](Boards-and-Agenda.md) | cards, due dates, cards that come back, the plan screen, the agenda |
 | [The diary](Diary.md) | entries, today, the calendar, on this day |
 | [Files and search](Files-and-Search.md) | uploads, what opens in place, full-text search |
 | [Not losing things](Not-Losing-Things.md) | autosave, history, the trash, export and import |
@@ -47,3 +52,5 @@ the desktop, and a button on the phone.
 | The agenda: what is late, due, or in hand, on every board. | The diary by month. |
 | ![Search reaching into a log file](../images/search.png) | ![A certificate read in place](../images/file-certificate.png) |
 | A search finds the text inside files too. | Certificates and keys are read on the server. |
+| ![The scratchpad](../images/scratch.png) | ![A document's info sheet](../images/info.png) |
+| The scratchpad, lowered over the documents. | The cards about a document, in its info sheet. |
