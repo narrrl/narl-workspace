@@ -10,8 +10,8 @@ uni do not get mixed up.
   `Shift-Tab` step through them.
 - `w` shows every space at once, with what was last written in each. `hjkl`
   move, `Enter` goes there.
-- `:space! <name>` makes a space, `:name! <name>` renames the one you are in,
-  and `:rmspace` puts it in the trash with everything in it. Two spaces cannot
+- `:space new <name>` makes a space, `:space name <name>` renames the one you are in,
+  and `:space rm` puts it in the trash with everything in it. Two spaces cannot
   share a name, whatever the case.
 - `:set noboard` turns the board off for a space, `:set board` back on.
 

@@ -28,7 +28,7 @@
 
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import { argCompletions, completions, runCommand, hooks } from './commands'
+  import { argCompletions, completions, readingDocument, runCommand, hooks } from './commands'
   import { workspace } from './store.svelte'
 
   interface Props {
@@ -56,17 +56,16 @@
   /*
    * A capture line — `c` opens one — writes a thought down somewhere without
    * going there: a card, a note, a line in today's entry. Tab walks the three
-   * with the text kept. A card stays linked to the document being read when
-   * the line began as one that was.
+   * with the text kept. Reading a document, `:card` makes one about it.
    */
-  const card = untrack(() => (initial.startsWith(':card! ') ? 'card!' : 'card'))
-  const targets = [card, 'scratch', 'today']
-  const targetNames: Record<string, string> = { card: 'card', 'card!': 'card about this', scratch: 'note', today: 'today' }
-  const capture = $derived(/^:(card!?|scratch|today)\s/.exec(value)?.[1])
+  const about = untrack(readingDocument)
+  const targets = ['card', 'scratch', 'today']
+  const targetNames: Record<string, string> = { card: about ? 'card about this' : 'card', scratch: 'note', today: 'today' }
+  const capture = $derived(/^:(card|scratch|today)\s/.exec(value)?.[1])
 
   function retarget(delta: 1 | -1): boolean {
     if (!capture) return false
-    const at = targets.indexOf(capture === 'card!' || capture === 'card' ? card : capture)
+    const at = targets.indexOf(capture)
     const next = targets[(at + delta + targets.length) % targets.length]
     value = value.replace(/^:\S+/, `:${next}`)
     return true

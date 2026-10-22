@@ -36,7 +36,7 @@ restore can be undone the same way.
 
 ## The trash
 
-A delete is not final. `x`, `dd`, `:delete`, `:rmspace` and an `rm` over the
+A delete is not final. `x`, `dd`, `:delete`, `:space rm` and an `rm` over the
 mount put what they delete in the trash, with everything inside it.
 
 - `u` puts the last delete back where it was: the same folder, the same name,
@@ -75,8 +75,8 @@ sealed files opened.
 - `:import` picks a folder and uploads it into the one you are in. Directories
   become folders, `.md` and `.markdown` files become documents (named by their
   first heading), and anything else becomes a file.
-- `:import!` does the same with a zip.
-- `:import! /` pours an `:export!` back in at the root. Each directory becomes a
+- `:import zip` does the same with a zip.
+- `:import zip /` pours an `:export!` back in at the root. Each directory becomes a
   space again, or goes into the space already there by that name, and with
   `.workspace.json` the dates, names, boards and cards come back as they were.
 

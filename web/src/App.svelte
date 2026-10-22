@@ -18,6 +18,7 @@
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
+  import Settings from './lib/Settings.svelte'
   import Trash from './lib/Trash.svelte'
   import CardTile from './lib/CardTile.svelte'
   import Scratch from './lib/Scratch.svelte'
@@ -44,11 +45,11 @@
   let cmdGlobal = $state(false)
   let fileInput = $state<HTMLInputElement>()
   let treeInput = $state<HTMLInputElement>()
-  /** Whether the files being picked go into the vault — `:upload!`. */
+  /** Whether the files being picked go into the vault — `:upload seal`. */
   let sealUpload = false
   let folderInput = $state<HTMLInputElement>()
   let importInput = $state<HTMLInputElement>()
-  // Whether the next archive picked is poured in at the root, `:import! /`.
+  // Whether the next archive picked is poured in at the root, `:import zip /`.
   let importRoot = false
   let shell = $state<HTMLDivElement>()
   let overlayEl = $state<HTMLDivElement>()
@@ -61,6 +62,7 @@
     verify: Verify,
     info: Info,
     trash: Trash,
+    settings: Settings,
   }
   let boardEl = $state<HTMLDivElement>()
   /** The first half of `gg`, `dd`, `]]` …, shown until the second comes. */

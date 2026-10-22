@@ -51,8 +51,8 @@ something by where they stand, not by their names:
   list: moving it there stamps it, moving it out reopens it;
 - the lists between are **work in hand**, which the agenda shows.
 
-`:list <name>` adds a list in front of the last one, `:name!` renames the list
-under the cursor, and `:list!` deletes it with its cards. Done cards older than
+`:list <name>` adds a list in front of the last one, `:list name` renames the list
+under the cursor, and `:list rm` deletes it with its cards. Done cards older than
 a week fold away until `z` shows them.
 
 | key | what it does |
@@ -84,7 +84,7 @@ as they do on the board.
 | `j` / `k`, `gg` / `G` | down / up the checklist, its first / last step |
 | `Space`, `x` | tick the step, or untick it |
 | `o` | a new step below the cursor (`:task <text>`) |
-| `r` | reword the step (`:task! <text>`) |
+| `r` | reword the step (`:task edit <text>`) |
 | `J` / `K` | move the step down / up |
 | `dd` | drop the step |
 | `e`, `i`, `Enter` | write the description |
@@ -112,8 +112,8 @@ step open again.
 
 `c` in the tree opens `:card ` on the command line. The card goes
 into the inbox of the space you are in, or of the first space with a board, and
-you stay where you were. Reading a document, `c` opens `:card! ` instead: the
-card is about that document, and an empty title takes the document's. From
+you stay where you were. Reading a document, `:card` makes the card about that
+document, and an empty title takes the document's. From
 outside the browser, see [Capture](Capture.md).
 
 ### Notes

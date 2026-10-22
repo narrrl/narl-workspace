@@ -30,6 +30,7 @@
   const groups = $derived.by((): Door[][] => {
     const cmd: Door = { icon: 'prompt', label: 'Command line', keys: keysOf('global', 'line'), run: () => hooks.openCommandLine(':') }
     const help: Door = { icon: 'help', label: 'Help', keys: keysOf('global', 'help'), run: () => runCommand('help') }
+    const settings: Door = { icon: 'settings', label: 'Settings', keys: keysOf('global', 'settings'), run: () => runCommand('settings') }
 
     const focus = workspace.focus
     const board: Door = workspace.space?.has_board || focus === 'board'
@@ -66,16 +67,16 @@
             icon: 'rename',
             label: card ? 'Rename the card' : 'Rename the list',
             keys: keysOf('board', 'rename'),
-            run: () => hooks.openCommandLine(card ? ':name ' : ':name! '),
+            run: () => hooks.openCommandLine(card ? ':name ' : ':list name '),
           },
           {
             icon: 'trash',
             label: card ? 'Delete the card' : 'Delete the list',
-            keys: card ? keysOf('board', 'delete') : [':list!'],
-            run: () => runCommand(card ? 'delete' : 'list!'),
+            keys: card ? keysOf('board', 'delete') : [':list rm'],
+            run: () => runCommand(card ? 'delete' : 'list rm'),
           },
         ],
-        [cmd, help],
+        [cmd, settings, help],
       ]
     }
 
@@ -112,7 +113,7 @@
         { icon: 'search', label: 'Search this space', keys: keysOf('tree', 'search'), run: () => hooks.openCommandLine('/') },
         { icon: 'search-all', label: 'Search every space', keys: keysOf('global', 'find'), run: () => hooks.openGlobalSearch() },
       ],
-      [cmd, help],
+      [cmd, settings, help],
     ]
   })
 

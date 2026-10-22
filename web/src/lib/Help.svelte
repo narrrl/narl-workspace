@@ -2,13 +2,30 @@
   /*
    * The help is a sheet the size of the porthole, laid out in newspaper
    * columns that run on to the right, so all of it is in view at once on a
-   * wide screen and a key away on a narrow one. Its keys live in keymap.ts
-   * with the others; these are what they move.
+   * wide screen and a key away on a narrow one. It comes in two depths: the
+   * keys and commands to start with, then, on a second `?`, every one of
+   * them. Its keys live in keymap.ts with the others; these are what they
+   * move.
    */
+  import { workspace } from './store.svelte'
+
   let pages: HTMLElement | undefined = $state()
   let field: HTMLInputElement | undefined = $state()
   /** `/` in the help: only the rows whose key or words hold this. */
   export const helpFilter = $state({ text: '' })
+  /** Every key and command, rather than the ones to start with. */
+  export const helpDepth = $state({ all: false })
+
+  export function openHelp(all = false) {
+    helpDepth.all = all
+    workspace.openSheet('help')
+  }
+
+  /** `?` in the help: everything, and the help away once it is all on show. */
+  export function deeperHelp() {
+    if (helpDepth.all) workspace.closeSheet()
+    else helpDepth.all = true
+  }
 
   /** A column on or back, a screen on or back, or to either end. */
   export function scrollHelp(by: 1 | -1 | 'pagedown' | 'pageup' | 'start' | 'end') {
@@ -40,7 +57,7 @@
 <script lang="ts">
   import { commands, groups, type CommandSpec, type Group } from './commands'
   import Sheet from './Sheet.svelte'
-  import { rows, sections as keySections } from './keymap'
+  import { essentials, rows, sections as keySections } from './keymap'
 
   const titles: Record<Group, string> = {
     tree: 'spaces & folders',
@@ -50,7 +67,7 @@
     editing: 'writing',
     sharing: 'sharing & export',
     vault: 'vault',
-    view: 'session',
+    view: 'settings & session',
   }
 
   type Row = { key: string; args?: string; description: string }
@@ -59,10 +76,10 @@
   const signature = (spec: CommandSpec) =>
     `:${spec.name}${spec.aliases?.length ? `(${spec.aliases.join(' ')})` : ''}`
 
-  const fromSpecs = (specs: CommandSpec[]): Row[] =>
+  const fromSpecs = (specs: CommandSpec[], bangs = true): Row[] =>
     specs.flatMap((spec) => [
       { key: signature(spec), args: spec.args, description: spec.help },
-      ...(spec.bang ? [{ key: `:${spec.name}!`, description: spec.bang.help }] : []),
+      ...(spec.bang && bangs ? [{ key: `:${spec.name}!`, description: spec.bang.help }] : []),
     ])
 
   /* The keys come out of the keymap that dispatches them, so the help
@@ -72,9 +89,16 @@
     ...groups.map((group: Group) => [titles[group], fromSpecs(commands.filter((spec) => spec.group === group))] as [string, Row[]]),
   ]
 
+  /* The first page: what a day in the workspace needs, and where the rest is. */
+  const first: [string, Row[]][] = [
+    ['to start with', essentials()],
+    ['commands to start with', fromSpecs(commands.filter((spec) => spec.essential), false)],
+  ]
+
   const shown = $derived.by(() => {
     const words = helpFilter.text.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    if (words.length === 0) return sections
+    // A filter looks through all of it: what is looked for is rarely on the first page.
+    if (words.length === 0) return helpDepth.all ? sections : first
     const hit = (row: Row) => {
       const text = `${row.key} ${row.args ?? ''} ${row.description}`.toLowerCase()
       return words.every((word) => text.includes(word))
@@ -105,7 +129,13 @@
   }
 </script>
 
-<Sheet title="help" detail="{count} keys and commands" width={0} fill keys={['help', 'sheet']}>
+<Sheet
+  title="help"
+  detail={helpDepth.all || filtering ? `${count} keys and commands` : `the ${count} to start with — ? again for all of them`}
+  width={0}
+  fill
+  keys={['help', 'sheet']}
+>
   {#snippet actions()}
       <label class="filter" class:on={helpFilter.text !== ''}>
         <span class="slash">/</span>
@@ -125,7 +155,7 @@
       <section style="--key: {keyWidth(rows)}ch">
         <h2>{title}</h2>
         <dl>
-          {#each rows as row (row.key)}
+          {#each rows as row (row.key + row.description)}
             {@const short = filtering ? row.description : brief(row.description)}
             <div class="row">
               <dt>{row.key}{#if row.args}<span class="args">{row.args}</span>{/if}</dt>

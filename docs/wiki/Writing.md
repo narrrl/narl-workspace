@@ -95,7 +95,7 @@ in its history. Either way the note leaves the scratchpad, as it does with `K`.
 `Enter` on one lowers the scratchpad with it under the cursor.
 
 The notes are in the backup, and an export of the whole workspace carries
-them in `.workspace.json`, so `:import! /` puts them back.
+them in `.workspace.json`, so `:import zip /` puts them back.
 
 ## Markdown
 

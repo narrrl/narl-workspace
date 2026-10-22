@@ -11,7 +11,7 @@ in, and only the ones registered from inside the workspace:
 
 ```text
 :sshkey add laptop ssh-ed25519 AAAA… you@laptop
-:sshkey                     lists them, with their fingerprints
+:sshkey                     the settings sheet's ssh keys, with their fingerprints
 :sshkey rm laptop           and this one is out, mounted or not
 :sshkey vault laptop on     this key may read sealed files while the vault is open
 ```

@@ -80,7 +80,7 @@ keeps running untouched.
 `openssl rand -base64 32`. Changing it logs every device out, and so does
 changing `WORKSPACE_PASSWORD` or `:logout!`, which ends every session but
 needs no restart. Every signed-in browser is a row on the server: `:sessions`
-lists them and `:sessions rm <n>` signs one out — a lost phone, say — without
+(or `,`, the settings sheet) lists them and `:sessions rm <n>` signs one out — a lost phone, say — without
 touching the rest, and locks the vault as well. A setting that is set but cannot be read — a number out of
 range, a switch that is neither on nor off — stops the start with the reason,
 rather than being taken for its default. The database and
@@ -139,7 +139,7 @@ it; in the document pane it is that document. In the browse pane:
 | `o` | a new document here, straight into insert mode |
 | `O` | a new folder here |
 | `i`, `a` | edit the open entry |
-| `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:name!` renames the space) |
+| `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:space name` renames the space) |
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
 | `za` | fold a document's own files open under it in the list, or away again |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
@@ -151,21 +151,21 @@ it; in the document pane it is that document. In the browse pane:
 | `[d` / `]d` | the diary entry before / after the one open, by date |
 | `c` | capture a card into this space's inbox without leaving where you are — reading a document, a card about it; `Tab` on the line makes it a note, or a line in today's entry |
 | `Q` | the scratchpad, lowered over whatever is on screen — see [The scratchpad](docs/wiki/Writing.md#the-scratchpad) |
-| `Esc`, `q` | close the document, and its tile when there are several |
+| `Esc`, `q` | close the document, and its tile when there are several; `Esc` first puts down what `m` picked up |
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
 | `Ctrl-P` | full-text search across every space; `Enter` opens the match beside the results |
 | `n` / `N` | the next / previous search result, opened beside the results; past the last it starts again at the first |
-| `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
 | `x`, `dd` | delete the entry under the cursor into the trash (asks `y`/`N`) |
 | `u` | undo the last delete: it comes back out of the trash to where it was |
 | `:` | command line — `Tab` / `Shift-Tab` cycle the matching commands, then the argument (folders for `:cd` and `:mv`, spaces for `:space`, options for `:set` …); `↑` / `↓` recall the lines run before that start as this one does |
 | `Ctrl-S` | save from anywhere |
-| `?` | help |
+| `?` | help: the keys to start with, and every key and command on a second `?` |
+| `,` | settings: vim and the clipboard, the vault, the backup, signed-in browsers, ssh keys and capture tokens |
 
 Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
-`:w`, `:wq`, `:q!`, `:new [template] [yyyy-mm-dd] [name]`, `:date`, `:name`, `:share`, `:link`,
+`:w`, `:wq`, `:q!`, `:new [template] [yyyy-mm-dd] [name]`, `:date`, `:name`, `:share [off|new]`,
 `:upload`, `:search`, `:backup` and
 `:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
 there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
@@ -174,21 +174,28 @@ first, and `gx` opens it in a new tab. `[[` in insert mode offers the titles of
 documents to link to. The rest: `:today` opens today's entry, `:edit [id]` (or `:12`)
 opens a node by id, `:next`, `:prev`, `:first`, `:last` and `:random` walk the
 list (`:bn` and `:bp` walk the tiles), `:delete [id]` deletes, `:copy` puts the whole document on the clipboard,
-`:clear` drops the search, `:trash` lists what was deleted, `:reload` re-reads the folder, `:stats` counts words
+`:noh` drops the search, `:trash` lists what was deleted, `:reload` re-reads the folder, `:stats` counts words
 and lines, `:search!` searches every space, `:set clipboard` / `:set
 noclipboard` mirrors vim yanks to the system clipboard, `:logout` ends the
 session, `:logout!` every session and `:sessions rm <n>` one other, and
-`:token` manages the tokens that capture from outside (see below). The tree has its own: `:space [name]` switches (`:space! <name>`
-makes one, `:rmspace [name]` puts one in the trash with everything in it), `:mkdir <name>`
+`:token` manages the tokens that capture from outside (see below). The tree has its own: `:space [name]` switches (`:space new <name>`
+makes one, `:space rm [name]` puts one in the trash with everything in it), `:mkdir <name>`
 makes a folder, `:cd <name|..|/>` walks it and `:mv <folder|..|/>` moves what is
 selected, and `:import` uploads a folder into the one being browsed
-(`:import!` takes a `.zip` instead). `:upload` outside the editor puts files
+(`:import zip` takes a `.zip` instead). `:upload` outside the editor puts files
 into the folder being browsed, and so does dropping them on the list. `:name <text>` renames whatever is under
-the cursor — a document, a folder, or a card on a board — and `:name!` renames
-the space itself. Two spaces cannot share a name, in any case, and no name is
+the cursor — a document, a folder, or a card on a board — and `:space name <text>`
+renames the space itself. Two spaces cannot share a name, in any case, and no name is
 longer than 200 characters. The board has
-`:board`, `:card <title>` (`:card!` links the open document to it),
-`:due <when|->`, `:repeat <rule|->`, `:done` and `:list <name>` (`:list!` deletes one).
+`:board`, `:card <title>` (reading a document, the card is about it),
+`:due <when|->`, `:repeat <rule|->`, `:done` and `:list <name>` (`:list name` renames one, `:list rm` deletes one).
+
+A `!` means force, or everything, and nothing else: `:w!`, `:q!`, `:search!`,
+`:export!`, `:logout!`. A command that does a second thing takes a word for it
+instead — `:space new`, `:share off`, `:upload seal`, `:import zip`, `:vault
+unlock`. The old spellings (`:space!`, `:unshare`, `:unlock` …) still work for
+one release; the [command reference](docs/wiki/Commands.md#old-spellings) lists
+them.
 
 A single line break in a document is a line break, the way it was typed. A
 paragraph an editor wrapped at a fixed width — an import, a save over the mount
@@ -233,7 +240,7 @@ keys get in, and only the ones registered from inside the workspace:
 
 ```text
 :sshkey add laptop ssh-ed25519 AAAA… you@laptop
-:sshkey              lists them, with their fingerprints
+:sshkey              the settings sheet's ssh keys, with their fingerprints
 :sshkey rm laptop    and this one is out, mounted or not
 :sshkey vault laptop on    this key may read sealed files while the vault is open
 ```
@@ -260,7 +267,7 @@ inbox new cards land in, the last is done. A card is finished exactly when it
 sits in the last column — moving it there stamps it, moving it out reopens it —
 so a tick and a column can never disagree; marking a card done through the API
 moves it there too, and deleting the last column makes the one before it done.
-`:list <name>` adds a column in front of the last one, `:name!` on the board renames the column under the cursor, and
+`:list <name>` adds a column in front of the last one, `:list name` renames the column under the cursor, and
 done cards older than a week fold away until `z` shows them.
 
 `c` captures from anywhere: `:card <title>` outside the board puts the card in
@@ -291,7 +298,7 @@ saving it to the card; `a` puts a label on. Code in the description is
 coloured as nvim colours it. See the
 [wiki](docs/wiki/Boards-and-Agenda.md#the-back-of-a-card) for every key.
 
-A card can point at a document: `:card!` while reading one makes a card for it,
+A card can point at a document: `c` or `:card` while reading one makes a card for it,
 and `gf` on its back opens it again. `gf` on a card without one makes a
 document named after the card in the space's root and opens it to write in, and
 closing that document returns to the board on the same card. The link is deliberately loose —
@@ -363,7 +370,7 @@ token in place of a session:
 
 ```text
 :token add phone     makes one, shows it once and copies it
-:token               lists them, with when each was last used
+:token               the settings sheet's tokens, each with when it was last used — x there retires one
 :token rm phone      and that one captures nothing from the next request on
 ```
 
@@ -424,7 +431,7 @@ the old version — sealing deletes the plaintext on purpose. Versions are not
 in the export, the mount or the readable view on Proton Drive; they are in
 `diary.db`, and so in its mirror.
 
-A delete is not the end of anything. `x`, `dd`, `:delete` and `:rmspace`
+A delete is not the end of anything. `x`, `dd`, `:delete` and `:space rm`
 put what they delete in the trash, with everything inside it, and `u` puts
 the last of them back where it was — the same folder, the same name, unless
 a new one took the name meanwhile. `:trash` lists everything in it, the last
@@ -515,7 +522,7 @@ place:
   it for that one look and is never stored. Nothing of a private key is ever
   sent back but its algorithm and size.
 
-Anything else is a download: `:download` (`:dl`) fetches the file under the
+Anything else is a download: `:export` fetches the file under the
 cursor, and `gx` opens one in a tab of its own as the browser shows it. `:name`
 renames it, and the download is called whatever it is called now; `:mv`, `m`
 and `p` move it; `x` deletes it. `:upload` picks files for the folder being
@@ -577,24 +584,24 @@ account the mirror writes to, and to a logged-in browser while the vault is
 shut — to anyone, in short, who does not know the vault password.
 
 `:vault` sets the password the first time (ten characters at least) and says
-whether the vault is open afterwards. `:upload!` puts files into the folder
+whether the vault is open afterwards. `:upload seal` puts files into the folder
 being browsed sealed — encrypted as they stream in, so the plaintext never
 touches the disk. `:encrypt` seals the file under the cursor; `:decrypt` takes
-it back out. `:unlock` and `:lock` open and close it, `:passwd` changes the
+it back out. `:vault unlock` and `:vault lock` open and close it, `:vault passwd` changes the
 password. A sealed file carries a lock in the list, and the bar says `vault
 open` while it is.
 
-`:passwd` makes a new master key as well as a new password. The old password
+`:vault passwd` makes a new master key as well as a new password. The old password
 stops opening anything at once; every sealed file is then re-sealed under the
 new key in the background, under a new name, while the vault is open — `:vault`
 shows how far it has come, and locking halfway only pauses it until the next
-`:unlock`. The old copies are deleted from `uploads/` and, on the next mirror
+`:vault unlock`. The old copies are deleted from `uploads/` and, on the next mirror
 run, from Proton Drive for good. After that, a copy of `diary.db` from before
 the change (a `diary.db.pre-*` snapshot, an old revision in Proton Drive) and
 the old password open nothing that is still kept anywhere. What they cannot
 take back is a copy someone already made of the files themselves. Re-sealing
 rewrites only each file's header, but every sealed file is uploaded to Proton
-Drive once more. A second `:passwd` waits until the first has finished.
+Drive once more. A second `:vault passwd` waits until the first has finished.
 
 `:encrypt` on a folder or space seals it for good, not just once: every file
 in it now, and every file that lands in it later. An upload, an import, an SFTP
@@ -654,8 +661,8 @@ Proton cannot read either; only the vault password can read the sealed one.
 `:import` picks a folder and uploads it whole — every file carries the path it
 had inside, and the tree is rebuilt on the other side: directories become
 folders, `.md` and `.markdown` files become documents (titled by their first
-heading), anything else becomes a file in the tree. `:import!` does the same with
-a zip, which is the shape `:export!` writes. `:import! /` pours an `:export!`
+heading), anything else becomes a file in the tree. `:import zip` does the same with
+a zip, which is the shape `:export!` writes. `:import zip /` pours an `:export!`
 back in at the root: each directory becomes a space again — or goes into the
 space already there by that name — and with `.workspace.json` beside it the
 dates, names, boards and cards come back as they were, a document's files go
@@ -766,7 +773,7 @@ back into an empty data directory — no tool in between, which is the point.
 | `narl-workspace backup-now` | mirror once and exit — for cron, or for nerves |
 | `narl-workspace proton-logout` | forget the session; the mirror stays where it is |
 
-From inside the workspace, `:backup` says when the last one finished and `:backup!`
+From inside the workspace, `:backup` (the settings sheet, `,`) says when the last one finished and `:backup!`
 runs one now. A failed backup is loud: it is reported by `:backup`, and the next
 tick retries it.
 
@@ -848,13 +855,13 @@ The page sends the key on to the server once, in the body of the request that
 reads the entry, never in a URL. That answer gives the browser a cookie scoped
 to this one link's path, good for 12 hours, and the entry's pictures and
 videos are fetched with it — so not even this server's reverse proxy logs the
-key. A fresh key from `:link`, or `:unshare`, voids the cookies handed out
+key. A fresh key from `:share new`, or `:share off`, voids the cookies handed out
 under the old one.
 
 Because only the hash is kept, a link exists in full exactly once: in the moment
-`:share` copies it. It cannot be re-read from the entry afterwards. `:link`
+`:share` copies it. It cannot be re-read from the entry afterwards. `:share new`
 mints a fresh key for the same token — which retires the previous link, making
-it the way to cut off a reader without unpublishing — and `:unshare` destroys
+it the way to cut off a reader without unpublishing — and `:share off` destroys
 both halves.
 
 ## API

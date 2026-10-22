@@ -42,7 +42,7 @@ counts while either is above zero. More in [Boards and the agenda](Boards-and-Ag
 
 Press `2` for the `work` space. A **space** is one area of your life, with its
 own folders, its own board and its own search. Make more with
-`:space! <name>`; `w` shows all of them at once, with what was last written in
+`:space new <name>`; `w` shows all of them at once, with what was last written in
 each.
 
 ![Every space at a glance](../images/overview.png)
@@ -124,12 +124,12 @@ LaTeX between dollar signs and drawn by KaTeX:
 The slides came as a PDF. Drop it onto the list, or `:upload`, and it is a
 file in the folder, beside the notes about it. `Enter` opens a PDF, an image, a
 video, a CSV table, a text or source file, or a certificate in place. Anything
-else downloads with `:dl`.
+else downloads with `:export`.
 
 ![A CSV file as a table](../images/file-table.png)
 
 A scan of something private, like an ID or a contract, goes in with
-`:upload!` instead. That seals it in the **vault**, under a password that is
+`:upload seal` instead. That seals it in the **vault**, under a password that is
 never stored. See [The vault](Vault.md).
 
 ## On the way home: capture

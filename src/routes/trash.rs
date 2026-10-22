@@ -310,7 +310,7 @@ async fn fallback(db: &mut SqliteConnection, space: Option<i64>) -> AppResult<i6
     .fetch_optional(&mut *db)
     .await?
     .ok_or_else(|| {
-        AppError::BadRequest("there is no space to restore it into — :space! makes one".into())
+        AppError::BadRequest("there is no space to restore it into — :space new makes one".into())
     })
 }
 

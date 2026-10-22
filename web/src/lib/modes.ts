@@ -11,7 +11,7 @@
  *   tile       what has the focus: the tree, or a view — board, agenda,
  *              calendar, a card's back
  *   views      what the views share: q, gt, b
- *   global     spaces, t, T, C, S, :, ?
+ *   global     spaces, t, T, C, S, :, ?, ,
  *
  * The `[y/N]` prompt sits over all of it, in App.svelte, and the command
  * line keeps its own keys while it has them.
@@ -21,7 +21,7 @@ import { bindings, type Binding, type Context } from './keymap'
 import { workspace } from './store.svelte'
 
 /** The sheets with keys of their own, under the same name as the sheet. */
-const sheets = new Set<string>(['help', 'overview', 'trash'])
+const sheets = new Set<string>(['help', 'overview', 'trash', 'settings'])
 
 /** The stack, the topmost first. */
 export function stack(): Context[] {

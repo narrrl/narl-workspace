@@ -10,7 +10,8 @@
  */
 import { cycleTile, focusTile, followLink, hooks, openInfo, runCommand } from './commands'
 import { bindings, type Context } from './keymap'
-import { focusHelpFilter, scrollHelp } from './Help.svelte'
+import { deeperHelp, focusHelpFilter, scrollHelp } from './Help.svelte'
+import { actSetting, moveSettings, removeSetting, turnSettings, openSettings } from './Settings.svelte'
 import { purgeTrashed, restoreTrashed } from './Trash.svelte'
 import { copyEmbed, embedFile, goHeading, moveHistory, openBacklink, openFile, renewLink, restoreShown, toggleSharing, turnInfo } from './Info.svelte'
 import { workspace } from './store.svelte'
@@ -68,7 +69,7 @@ function openInTab() {
   if (!file) return workspace.say('gx opens a file — put the cursor on one', 'error')
   // A tab opened after the vault's question would be stopped as a popup, so
   // a sealed file asks for the vault to be opened first instead.
-  if (file.encrypted && !workspace.vault?.unlocked) return workspace.say('sealed — :unlock first, then gx', 'error')
+  if (file.encrypted && !workspace.vault?.unlocked) return workspace.say('sealed — :vault unlock first, then gx', 'error')
   followLink(file.url, true)
 }
 
@@ -134,6 +135,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     start: () => scrollHelp('start'),
     end: () => scrollHelp('end'),
     filter: () => focusHelpFilter(),
+    deeper: () => deeperHelp(),
   },
 
   /** The overview: hjkl across the grid, a digit or Enter to go. */
@@ -227,7 +229,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     due: () => {
       if (workspace.focusedCard) line(':due ')
     },
-    new: () => line(':card! '),
+    new: () => line(':card '),
     label: () => {
       if (workspace.focusedCard) line(':label ')
     },
@@ -248,6 +250,17 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     link: () => void renewLink(workspace.open),
   },
 
+  /** The settings sheet: Tab from part to part, j/k down it, Enter changes, x removes. */
+  settings: {
+    next: () => turnSettings(1),
+    previous: () => turnSettings(-1),
+    down: () => moveSettings(1),
+    up: () => moveSettings(-1),
+    bottom: () => moveSettings(Infinity),
+    act: () => actSetting(),
+    remove: () => removeSetting(),
+  },
+
   /*
    * A card's back reads the list keys over its checklist, and the board's
    * card keys for the card itself — `D`, `H`/`L`, `R` act on it as they do
@@ -260,10 +273,11 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     top: () => void workspace.moveTask(-Infinity),
     bottom: () => void workspace.moveTask(Infinity),
     tick: () => guard(() => workspace.toggleTask()),
-    add: () => line(':task '),
+    // `add` spelled out, so a step that starts with "edit" is added too.
+    add: () => line(':task add '),
     reword: () => {
       const task = workspace.card?.checklist[workspace.taskCursor]
-      if (task) line(`:task! ${task.text}`)
+      if (task) line(`:task edit ${task.text}`)
     },
     nudgeDown: () => guard(() => workspace.nudgeTask(1)),
     nudgeUp: () => guard(() => workspace.nudgeTask(-1)),
@@ -389,8 +403,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     drop: () => guard(() => workspace.drop()),
     new: () => void runCommand('new'),
     // Capture: a thought goes on this space's inbox without leaving here.
-    // Reading a document, the card is about it.
-    capture: () => line(workspace.focus === 'node' && workspace.open?.kind === 'document' ? ':card! ' : ':card '),
+    // Reading a document, `:card` makes it about that document.
+    capture: () => line(':card '),
     // The name has to come from somewhere, and the command line is where
     // names are typed — this only saves typing `:mkdir `.
     mkdir: () => line(':mkdir '),
@@ -405,12 +419,14 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       if (workspace.open) void runCommand('q')
       else workspace.unmarkAll()
     },
+    // Esc lets go of one thing at a time: what is carried, then the document.
+    escape: () => {
+      if (workspace.marked.length) return workspace.unmarkAll()
+      if (workspace.open) void runCommand('q')
+    },
     delete: () => void runCommand('d'),
     // A delete goes to the trash, so it can be undone the way vim undoes.
     undo: () => guard(() => workspace.undoDelete()),
-    share: () => void toggleSharing(workspace.target),
-    // A vim hand presses y to yank; here it retires the link readers have.
-    link: () => void renewLink(workspace.target),
     // Through the results, as vim's `n` goes through the matches; the
     // search itself stays until `:noh`.
     next: () => guard(() => workspace.nextResult(1)),
@@ -447,7 +463,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     due: () => line(':due '),
     // On an empty list there is no card to rename, so it is the list. The
     // name is there to be edited, not typed again from nothing.
-    rename: () => line(workspace.card ? `:name ${workspace.card.title}` : `:name! ${workspace.list?.name ?? ''}`),
+    rename: () => line(workspace.card ? `:name ${workspace.card.title}` : `:list name ${workspace.list?.name ?? ''}`),
     old: () => void (workspace.showOldDone = !workspace.showOldDone),
     // A letter over every card in view: typing it puts the cursor there.
     hints: () => {
@@ -539,6 +555,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     plan: () => void runCommand('plan'),
     line: () => line(':'),
     help: () => void runCommand('help'),
+    settings: () => void openSettings(),
   },
 
   editor: {},

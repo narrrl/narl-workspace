@@ -35,10 +35,10 @@
     if (node.kind === 'document') {
       list.push(
         node.shared
-          ? { label: 'stop sharing', run: () => runCommand('unshare') }
+          ? { label: 'stop sharing', run: () => runCommand('share off') }
           : { label: 'share — copies the link', run: () => runCommand('share') },
       )
-      if (node.shared) list.push({ label: 'new share link — the old one stops working', run: () => runCommand('link') })
+      if (node.shared) list.push({ label: 'new share link — the old one stops working', run: () => runCommand('share new') })
     }
     // Inside a sealed folder only that folder opens, as a whole.
     if (holdsFiles && node.kind !== 'space' && !(sealed && workspace.parentSealed)) {

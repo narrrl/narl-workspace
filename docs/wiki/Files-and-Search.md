@@ -17,7 +17,7 @@ Put files in:
 - drop them onto the list;
 - `:upload` picks files for the folder you are in, or for the document you
   are reading;
-- `:import` uploads a whole folder, and `:import!` a zip
+- `:import` uploads a whole folder, and `:import zip` a zip
   (see [Not losing things](Not-Losing-Things.md#import));
 - copy them in over the [SFTP mount](SFTP.md).
 
@@ -44,7 +44,7 @@ not stored. Nothing of a private key is sent back but its algorithm and size.
 
 ![A certificate read on the server](../images/file-certificate.png)
 
-Anything else is a download: `:download` (`:dl`) fetches the file under the
+Anything else is a download: `:export` fetches the file under the
 cursor, and `gx` opens it in a browser tab of its own. Files are renamed with
 `:name`, moved like documents, and deleted into the trash with `x`.
 

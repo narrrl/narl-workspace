@@ -44,7 +44,7 @@ pub async fn setup(
     strong_enough(&input.password)?;
     if !state.vault.setup(input.password).await? {
         return Err(AppError::BadRequest(
-            "there is a vault already — :passwd changes its password".into(),
+            "there is a vault already — :vault passwd changes its password".into(),
         ));
     }
     tracing::info!("vault set up");

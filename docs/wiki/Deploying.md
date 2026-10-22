@@ -45,7 +45,7 @@ It joins the external `narl` network, drops the published port, and sets
 
 ## Sessions and security
 
-- Every signed-in browser is a row on the server. `:sessions` lists them,
+- Every signed-in browser is a row on the server. `:sessions` lists them in the settings sheet (`,`),
   `:sessions rm <n>` signs one out and locks the vault, and `:logout!` signs
   out every one.
 - Changing `WORKSPACE_SECRET` or `WORKSPACE_PASSWORD` also signs everyone out.

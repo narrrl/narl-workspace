@@ -29,7 +29,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-D / Ctrl-U` | half a page down / up the open document |
 | `zl / zh · zL / zH` | the wide table or code block at the top of the view, sideways — a little, or half its width |
 | `]] / \[\[` | next / previous heading of the document — in the editor too |
-| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards and sharing — Tab between them |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards, files and sharing — :share there, Tab between them |
 | `gO` | the headings as a list: j/k, Enter jumps there |
 | `F` | hints over the links and buttons in view — type one to follow it |
 | `gf / gx` | in the editor: follow the link under the cursor / open it in a tab |
@@ -52,11 +52,9 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
 | `b` | the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
-| `Esc · q` | close the document, and its tile when there are several |
+| `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
 | `n / N` | next / previous search result, opened beside the results — :noh clears the search |
-| `s` | toggle sharing for the document — asks before taking it back |
-| `y` | mint a new share link and copy it — asks, the old one stops working |
 | `x · dd` | delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N) |
 | `u` | undo the last delete: it comes back out of the trash — :trash has the rest |
 | `gh` | the open document's earlier versions, as diffs — Enter brings one back |
@@ -64,7 +62,8 @@ arguments and `↑` / `↓` recall earlier lines.
 | `gc` | the cards about the open document — j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board |
 | `:` | command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before |
 | `Ctrl-S` | save, from anywhere |
-| `?` | this screen, from the editor too — h/l a column, / filters it down |
+| `?` | this screen — the keys to start with, then on a second ? every key and command; h/l a column, / filters it down |
+| `,` | the settings sheet: vim and the clipboard, the vault, the backup, signed-in browsers, ssh keys, capture tokens |
 | `q · Esc` | in a view — the board, the agenda, the calendar, a card's back — close its tile; the focus goes back to the tile before |
 
 ### On a board
@@ -135,22 +134,20 @@ The first list is the inbox, the last list is done.
 
 ## Commands
 
-A command takes a `!` for its forcing variant where one exists, the way vim's
-do: `:w!`, `:space! <name>`, `:import!`.
+A `!` means force, or everything, and nothing else: `:w!` writes over a
+newer version, `:search!` looks in every space, `:export!` downloads the
+whole workspace. A command that does a second thing takes a word for it:
+`:space new <name>`, `:share off`, `:vault unlock`.
 
 ### Spaces & folders
 
 | command | what it does |
 | --- | --- |
-| `:space, :sp [name]` | switch to a space, or list them |
-| `:space!` | create a space with that name and switch to it |
+| `:space, :sp [name] \| new <name> \| name <text> \| rm [name]` | switch to a space, or list them — new makes one, name renames the one you are in, rm puts one in the trash with everything in it (asks first) |
 | `:mkdir <name>` | make a folder here |
 | `:cd <name\|..\|/>` | enter a folder, .. goes up, / back to the space |
-| `:import, :imp` | upload a folder into this one — markdown becomes documents, links follow |
-| `:import!` | import loose files, or a .zip of a folder; :import! / pours an :export! back in, spaces and boards and all |
+| `:import, :imp [zip [/]]` | upload a folder into this one — markdown becomes documents, links follow; zip takes loose files or a .zip instead, and zip / pours an :export! back in, spaces and boards and all |
 | `:move, :mv <folder\|..\|/>` | move the marked nodes, or else the selected one, into a folder here, up one level, or to the root of the space |
-| `:unmark` | put down everything picked up with m |
-| `:rmspace, :rms [name]` | delete a space and everything in it, into the trash (asks first) |
 | `:trash [purge]` | what was deleted — j/k, Enter brings it back, x deletes it for good; :trash purge empties it |
 
 ### Boards
@@ -159,16 +156,13 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | --- | --- |
 | `:board` | this space's board, in a tile — the last one shown when this space has none |
 | `:plan, :special` | the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board |
-| `:card, :c <title>` | add a card — on the board to the list under the cursor, elsewhere to this space's inbox |
-| `:card!` | add a card linked to the open document — gf on it opens the document |
+| `:card, :c [title]` | add a card — reading a document, one about it, titled after it unless named, and gf on it comes back; on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:due <when\|->` | due date of the card in focus — on the board, its back, in the agenda, or the open document's: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
 | `:done` | move the card in focus into the done list, or back out to the inbox |
-| `:task, :step <text>` | add a step to the open card's checklist, below the cursor |
-| `:task!` | reword the step under the cursor |
+| `:task, :step [add] <text> \| edit <text>` | add a step to the open card's checklist, below the cursor — edit rewords the step under it; add is only needed for a step that starts with edit |
 | `:label <name>` | put a label on the card, or take it off when it has it — each name keeps its colour everywhere |
-| `:list <name>` | add a column to the board |
-| `:list!` | delete the column under the cursor and every card on it |
+| `:list <name> \| name <text> \| rm` | add a column to the board — name renames the one under the cursor, rm deletes it and every card on it (asks first) |
 | `:agenda, :ag` | what is late, due this week, or in hand — across every board |
 
 ### Documents
@@ -195,7 +189,7 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:info [outline\|history\|backlinks\|cards\|files\|share]` | what is known about the open document: its headings, earlier versions, backlinks, cards, files and sharing — Tab between them (gi) |
 | `:search, :se [text]` | full-text search in this space (empty clears) |
 | `:search!` | full-text search across every space — Ctrl-P |
-| `:clear, :noh` | clear the search filter |
+| `:noh, :nohlsearch` | clear the search filter |
 | `:reload, :r` | re-read the current folder from the server |
 
 ### Tiles
@@ -221,46 +215,65 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:quit!` | leave the editor, letting go of what is not saved yet |
 | `:edit, :e [id]` | edit the open document, or open a node by id |
 | `:edit!` | throw away the draft and re-read the document from the server |
-| `:name, :title, :rename <text>` | rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title |
-| `:name!` | rename the space you are in — on the board, the list under the cursor |
+| `:name, :title, :rename <text>` | rename what has focus — document, folder, file, or card on a board; bare, while writing, into the title — :space name and :list name rename those |
 | `:date <yyyy-mm-dd>` | re-date the open document |
-| `:upload, :up` | files for the open document — while writing, embedded at the cursor — or, from the list, into this folder |
-| `:upload!` | put files into this folder sealed in the vault — encrypted before they touch the disk |
+| `:upload, :up [seal]` | files for the open document — while writing, embedded at the cursor — or, from the list, into this folder; seal puts them into this folder sealed in the vault, encrypted before they touch the disk |
 
 ### Sharing & export
 
 | command | what it does |
 | --- | --- |
-| `:share` | publish the document behind an unguessable link and copy it |
-| `:unshare` | revoke the share link |
-| `:link` | mint a new share link for the document and copy it |
+| `:share [off\|new]` | publish the document behind an unguessable link and copy it — off takes it back, new mints a fresh link and the old one stops working; both ask first, and :info share shows where it stands |
 | `:copy, :yank` | copy the whole document to the clipboard as markdown |
-| `:export, :exp` | download the open document as a .md file |
+| `:export, :exp` | download what has focus — the file under the cursor as it is, a document as a .md file with what is typed so far |
 | `:export!` | download the whole workspace — every space, document and file — as a zip |
-| `:download, :dl` | download the file under the cursor, or the open one — the open document goes as :export writes it |
 
 ### Vault
 
 | command | what it does |
 | --- | --- |
-| `:vault` | whether the vault is open — or, the first time, set its password |
-| `:unlock` | open the vault with its password, so sealed files can be read |
-| `:lock` | close the vault now — it also closes itself when left alone, and on logout |
-| `:passwd` | change the vault's password — every sealed file is then re-sealed under a new key, while the vault is open |
+| `:vault [unlock\|lock\|passwd]` | the vault in the settings sheet, or, the first time, set its password — unlock opens it, lock closes it now, passwd changes the password and re-seals every file under a new key |
 | `:encrypt, :seal` | seal the file under the cursor in the vault — a folder stays sealed: every file in it, and every file added later |
 | `:decrypt, :unseal` | take the file under the cursor back out of the vault — on a sealed folder, unseal it and every file inside |
 
-### Session
+### Settings & session
 
 | command | what it does |
 | --- | --- |
 | `:stats` | word, line and node counts |
-| `:set <option>` | vim, novim, clipboard, noclipboard, board, noboard |
-| `:backup [login <proton-username> \| logout]` | when the workspace was last mirrored to proton drive — login sets the mirror up, logout forgets its session |
+| `:set [option]` | vim, novim, clipboard, noclipboard, board, noboard — bare, the settings sheet |
+| `:backup [login <proton-username> \| logout]` | the proton drive mirror, in the settings sheet — login sets it up, logout forgets its session |
 | `:backup!` | back up to proton drive now, rather than when the workspace falls quiet |
-| `:sessions [rm <n>]` | every browser signed in, numbered — rm signs one of them out, and locks the vault |
-| `:sshkey [add <name> <key> \| rm <name> \| vault <name> on\|off]` | list, add or remove keys allowed to mount the workspace over sftp, and say which may read sealed files |
-| `:token [add <name> \| rm <name>]` | list, add or remove tokens that capture into the workspace from outside it — add shows the token once and copies it |
-| `:help, :h` | show the key and command reference |
+| `:sessions [rm <n>]` | every browser signed in, in the settings sheet — rm signs the n-th out, and locks the vault |
+| `:sshkey [add <name> <key> \| rm <name> \| vault <name> on\|off]` | the keys allowed to mount the workspace over sftp, in the settings sheet — add, rm, and vault on\|off for which may read sealed files |
+| `:token [add <name> \| rm <name>]` | the tokens that capture into the workspace from outside it, in the settings sheet — add shows a new one once and copies it, rm retires one |
+| `:help, :h [all]` | the keys to start with — ? again, or :help all, for every key and command |
+| `:settings [options\|vault\|backup\|sessions\|keys\|tokens]` | the settings sheet: vim and the clipboard, the vault, the backup, the browsers signed in, ssh keys and capture tokens — Tab between them (,) |
 | `:logout` | end the session |
 | `:logout!` | end every session, on every device — for a lost phone or a shared computer |
+
+### Old spellings
+
+These still work for one release, and run as the line beside them. Help and
+`Tab` no longer offer them.
+
+| was | now |
+| --- | --- |
+| `:space!` | `:space new` |
+| `:rmspace` | `:space rm` |
+| `:rms` | `:space rm` |
+| `:list!` | `:list rm` |
+| `:task!` | `:task edit` |
+| `:upload!` | `:upload seal` |
+| `:import!` | `:import zip` |
+| `:unshare` | `:share off` |
+| `:link` | `:share new` |
+| `:clear` | `:noh` |
+| `:download` | `:export` |
+| `:dl` | `:export` |
+| `:unlock` | `:vault unlock` |
+| `:lock` | `:vault lock` |
+| `:passwd` | `:vault passwd` |
+| `:name!` | `:list name` on the board, `:space name` elsewhere |
+| `:card!` | `:card` while reading the document |
+| `:unmark` | `Esc` in the list |

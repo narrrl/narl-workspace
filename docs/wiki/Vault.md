@@ -14,12 +14,12 @@ the vault is shut.
 
 | command | what it does |
 | --- | --- |
-| `:vault` | set the password the first time (ten characters at least); afterwards, say whether the vault is open |
-| `:unlock` / `:lock` | open / close the vault |
-| `:upload!` | upload files sealed, encrypted as they stream in, so the plaintext never touches the disk |
+| `:vault` | set the password the first time (ten characters at least); afterwards, the vault in the settings sheet (`,`), where `Enter` opens or locks it |
+| `:vault unlock` / `:vault lock` | open / close the vault |
+| `:upload seal` | upload files sealed, encrypted as they stream in, so the plaintext never touches the disk |
 | `:encrypt` | seal the file under the cursor; on a folder or space, seal it for good |
 | `:decrypt` | take the file, or the sealed folder, back out |
-| `:passwd` | change the password |
+| `:vault passwd` | change the password |
 
 A sealed file carries a lock in the list, and the bar says `vault open` while it
 is. While the vault is shut, `Enter` on a sealed file asks for the password.
@@ -51,7 +51,7 @@ copy once the vault shuts. A sealed file is never indexed for search.
 
 ## Changing the password
 
-`:passwd` makes a new master key as well as a new password. The old password
+`:vault passwd` makes a new master key as well as a new password. The old password
 stops opening anything at once. Every sealed file is then sealed again under the
 new key in the background while the vault is open; `:vault` shows how far it
 has come. After that, an old copy of `diary.db` together with the old password

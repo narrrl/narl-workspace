@@ -88,6 +88,21 @@ function commandSpecs(source: string): Spec[] {
   })
 }
 
+/** The `renamed` table in commands.ts: an old spelling and the line it runs as now. */
+function renamedRows(source: string): string[] {
+  const start = source.indexOf('const renamed: Record<')
+  const block = source.slice(start, source.indexOf('\n}\n', start))
+  const rows = [...block.matchAll(/^  '?([\w!]+)'?: '([^']+)',$/gm)].map(([, old, now]) => `| ${code(`:${old}`)} | ${code(`:${now}`)} |`)
+  if (rows.length === 0) throw new Error('commands.ts: no renamed commands found')
+  // The two that depend on where they are typed say so in their comment.
+  return [
+    ...rows,
+    `| ${code(':name!')} | ${code(':list name')} on the board, ${code(':space name')} elsewhere |`,
+    `| ${code(':card!')} | ${code(':card')} while reading the document |`,
+    `| ${code(':unmark')} | ${code('Esc')} in the list |`,
+  ]
+}
+
 function commandsPage(): string {
   const help = read('web/src/lib/Help.svelte')
   const source = read('web/src/lib/commands.ts')
@@ -144,10 +159,21 @@ ${keyTable('scratch')}
 
 ## Commands
 
-A command takes a \`!\` for its forcing variant where one exists, the way vim's
-do: \`:w!\`, \`:space! <name>\`, \`:import!\`.
+A \`!\` means force, or everything, and nothing else: \`:w!\` writes over a
+newer version, \`:search!\` looks in every space, \`:export!\` downloads the
+whole workspace. A command that does a second thing takes a word for it:
+\`:space new <name>\`, \`:share off\`, \`:vault unlock\`.
 
 ${sections.join('\n\n')}
+
+### Old spellings
+
+These still work for one release, and run as the line beside them. Help and
+\`Tab\` no longer offer them.
+
+| was | now |
+| --- | --- |
+${renamedRows(source).join('\n')}
 `
   )
 }

@@ -32,7 +32,7 @@
         {#if index < 10}<span class="n">{(index + 1) % 10}</span>{/if}<span class="slug">{space.slug}</span>
       </button>
     {/each}
-    <button class="pill add" title="new space (:space! <name>)" onclick={() => hooks.openCommandLine(':space! ')}>
+    <button class="pill add" title="new space (:space new <name>)" onclick={() => hooks.openCommandLine(':space new ')}>
       +
     </button>
   </nav>

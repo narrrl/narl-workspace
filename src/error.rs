@@ -30,7 +30,7 @@ impl IntoResponse for AppError {
             AppError::Conflict(m) => (StatusCode::CONFLICT, m),
             AppError::Locked => (
                 StatusCode::LOCKED,
-                "the vault is locked — :unlock opens it".to_string(),
+                "the vault is locked — :vault unlock opens it".to_string(),
             ),
             AppError::TooManyRequests(wait) => (
                 StatusCode::TOO_MANY_REQUESTS,

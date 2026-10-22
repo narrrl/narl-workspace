@@ -34,7 +34,7 @@ export type Pane = 'list' | 'document'
 export type TileKind = 'node' | 'board' | 'agenda' | 'calendar' | 'card'
 export type View = Exclude<TileKind, 'node'>
 /** What floats over the tiles; one at a time. */
-export type Sheet = 'help' | 'overview' | 'actions' | 'verify' | 'info' | 'trash'
+export type Sheet = 'help' | 'overview' | 'actions' | 'verify' | 'info' | 'trash' | 'settings'
 /** The info sheet's parts: what the open document holds, and what is around it. */
 export type InfoSection = 'outline' | 'history' | 'backlinks' | 'cards' | 'files' | 'share'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
@@ -1403,7 +1403,7 @@ class Workspace {
   /**
    * Delete a space and everything in it. The app has to land somewhere
    * afterwards, so it falls into the next space — or, if that was the last
-   * one, into an empty workspace that `:space! <name>` fills again.
+   * one, into an empty workspace that `:space new <name>` fills again.
    */
   async deleteSpace(id: number) {
     const { removed } = await api.deleteNode(id)
@@ -2384,7 +2384,7 @@ class Workspace {
     return { url, sealed }
   }
 
-  /** `:link`: a new link for a shared document, copied; the old one stops working. */
+  /** `:share new`: a new link for a shared document, copied; the old one stops working. */
   async renewShareLink(id: number) {
     const { url, sealed } = await this.mintShareLink(id)
     this.say(`new link → ${url} (copied) — the previous one is dead${sealedNote(sealed)}`, sealed > 0 ? 'error' : undefined)

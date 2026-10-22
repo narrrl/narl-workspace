@@ -81,7 +81,7 @@
   // A new link retires the one readers have, so it asks first.
   export async function renewLink(node: NodeSummary | null | undefined) {
     if (!node) return workspace.say('nothing selected', 'error')
-    if (!node.shared) return workspace.say('not shared — s shares it', 'error')
+    if (!node.shared) return workspace.say('not shared — :share shares it', 'error')
     if (!(await workspace.ask(`new share link for "${node.name.trim() || node.slug}"? the current one stops working`))) return
     await workspace.guard(() => workspace.renewShareLink(node.id))
   }
@@ -301,10 +301,6 @@
 </Sheet>
 
 <style>
-  .tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: none; }
-  .tabs button { text-transform: none; letter-spacing: 0; }
-  .tabs .on { background: var(--light); border-color: var(--light); color: var(--ink); }
-
   .split { display: flex; gap: 18px; min-height: 0; flex: 1; }
   .versions { width: 34ch; flex: none; }
   .when { color: var(--fg); font-size: 13px; }

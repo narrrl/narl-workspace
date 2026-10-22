@@ -26,6 +26,7 @@ export type Context =
   | 'cards'
   | 'history'
   | 'share'
+  | 'settings'
   | 'card'
   | 'drawer'
   | 'workspace'
@@ -64,24 +65,26 @@ export interface Binding {
   hint?: string
   /** The keycaps the footer and the rail show; from `keys` when not given. */
   caps?: readonly string[]
+  /** On the help's first page, among the keys to start with. */
+  essential?: boolean
 }
 
 const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] as const
 
 export const bindings = [
   // --- browsing and reading; `always` is heard in the editor too ---------------
-  { context: 'global', keys: digits, action: 'space', caps: ['1…9'], label: '1 … 9 · 0', help: 'switch to that space, like a workspace' },
+  { context: 'global', keys: digits, action: 'space', caps: ['1…9'], label: '1 … 9 · 0', help: 'switch to that space, like a workspace', essential: true },
   { context: 'global', keys: digits.map((digit) => `Shift-${digit}`), action: 'send', label: 'Shift 1 … 9', help: 'send the marked nodes, or the selected one, to that space' },
   { context: 'global', keys: ['Tab', 'Shift-Tab'], action: 'cycle', label: 'Tab · Shift-Tab', help: 'next / previous space' },
   { context: 'global', keys: ['w'], action: 'overview', help: 'overview of every space — hjkl, then Enter' },
   { context: 'global', keys: ['f'], action: 'fullscreen', help: 'fullscreen the focused pane or tile; again or Esc to leave' },
-  { context: 'always', keys: ['Alt-h', 'Alt-j', 'Alt-k', 'Alt-l'], action: 'focus', typing: true, label: 'Alt-h/j/k/l', help: 'focus the tile that way, from the editor too — left of the leftmost is the list' },
+  { context: 'always', keys: ['Alt-h', 'Alt-j', 'Alt-k', 'Alt-l'], action: 'focus', typing: true, label: 'Alt-h/j/k/l', help: 'focus the tile that way, from the editor too — left of the leftmost is the list', essential: true },
   { context: 'always', keys: ['Alt-Shift-h', 'Alt-Shift-j', 'Alt-Shift-k', 'Alt-Shift-l'], action: 'swap', typing: true, label: 'Alt-Shift-h/j/k/l', help: 'move the focused tile that way' },
   { context: 'tree', keys: ['L'], action: 'beside', label: 'L · Shift-Enter', help: 'open the row in a new tile beside the others' },
   { context: 'global', keys: ['gt'], action: 'nextTile', label: 'gt / gT', help: 'next / previous tile — a view too' },
   { context: 'global', keys: ['gT'], action: 'previousTile' },
   { context: 'always', keys: ['Alt-q'], action: 'close', typing: true, help: 'close the focused tile — :close; :only closes the others' },
-  { context: 'tree', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k · ↓ ↑', help: 'move down / up the list — scroll the document when it has focus' },
+  { context: 'tree', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k · ↓ ↑', help: 'move down / up the list — scroll the document when it has focus', essential: true },
   { context: 'tree', keys: ['k', 'ArrowUp'], action: 'up' },
   { context: 'tree', keys: ['gg'], action: 'top', label: 'gg / G', help: 'first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line' },
   { context: 'tree', keys: ['G'], action: 'bottom' },
@@ -90,49 +93,49 @@ export const bindings = [
   { context: 'tree', keys: ['zh', 'zl', 'zH', 'zL'], action: 'sideways', label: 'zl / zh · zL / zH', help: 'the wide table or code block at the top of the view, sideways — a little, or half its width' },
   { context: 'tree', keys: [']]'], action: 'nextHeading', label: ']] / [[', help: 'next / previous heading of the document — in the editor too' },
   { context: 'tree', keys: ['[['], action: 'previousHeading' },
-  { context: 'tree', keys: ['gi'], action: 'info', help: "the info sheet: the open document's headings, earlier versions, backlinks, cards and sharing — Tab between them" },
+  { context: 'tree', keys: ['gi'], action: 'info', help: "the info sheet: the open document's headings, earlier versions, backlinks, cards, files and sharing — :share there, Tab between them", essential: true },
   { context: 'tree', keys: ['gO'], action: 'outline', help: 'the headings as a list: j/k, Enter jumps there' },
   { context: 'tree', keys: ['F'], action: 'hints', help: 'hints over the links and buttons in view — type one to follow it' },
   { context: 'tree', label: 'gf / gx', help: 'in the editor: follow the link under the cursor / open it in a tab' },
   { context: 'tree', keys: ['gx'], action: 'inTab', help: 'open the file under the cursor in a tab of its own' },
-  { context: 'tree', keys: ['Enter', 'Shift-Enter', 'l', 'ArrowRight'], action: 'open', label: 'Enter · l', help: 'open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password' },
-  { context: 'tree', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h', help: 'from the document to the list, from the list up a level' },
-  { context: 'tree', keys: ['o'], action: 'new', help: 'new document here, straight into insert mode' },
+  { context: 'tree', keys: ['Enter', 'Shift-Enter', 'l', 'ArrowRight'], action: 'open', label: 'Enter · l', help: 'open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password', essential: true },
+  { context: 'tree', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h', help: 'from the document to the list, from the list up a level', essential: true },
+  { context: 'tree', keys: ['o'], action: 'new', help: 'new document here, straight into insert mode', essential: true },
   { context: 'tree', keys: ['O'], action: 'mkdir', caps: ['⇧ O'], help: 'new folder here' },
-  { context: 'tree', keys: ['i', 'a'], action: 'edit', help: 'edit the open document' },
+  { context: 'tree', keys: ['i', 'a'], action: 'edit', help: 'edit the open document', essential: true },
   { context: 'tree', keys: ['R'], action: 'rename', help: 'rename what is under the cursor — document, folder or card — starting from its name' },
-  { context: 'tree', keys: ['m'], action: 'mark', label: 'm / p', help: 'pick nodes up, then drop them all into the folder you walk to' },
+  { context: 'tree', keys: ['m'], action: 'mark', label: 'm / p', help: 'pick nodes up, then drop them all into the folder you walk to', essential: true },
   { context: 'tree', keys: ['p'], action: 'drop' },
   { context: 'tree', keys: ['za'], action: 'files', help: "a document's own files, folded open under it in the list — again folds them away; p drops marked files in there" },
   { context: 'tree', keys: ['M'], action: 'markAll', help: 'pick up the whole folder — again puts it all back' },
   { context: 'tree', label: 'Ctrl / Shift-click', help: 'pick a row up · every row up to it — drag them onto a folder' },
-  { context: 'global', keys: ['S'], action: 'plan', help: 'the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away' },
-  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — in a tile of its own' },
-  { context: 'global', keys: ['T'], action: 'today', help: "today's diary entry, started if there is none — from templates/day when the diary has one" },
+  { context: 'global', keys: ['S'], action: 'plan', help: 'the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away', essential: true },
+  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — in a tile of its own', essential: true },
+  { context: 'global', keys: ['T'], action: 'today', help: "today's diary entry, started if there is none — from templates/day when the diary has one", essential: true },
   { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, in a tile: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day beside it' },
   { context: 'tree', keys: ['[d'], action: 'previousEntry', label: '[d / ]d', help: 'the diary entry before / after the one open, by date' },
   { context: 'tree', keys: [']d'], action: 'nextEntry' },
-  { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'find anything, in every space — Enter opens the result lit beside them, n goes on' },
+  { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'find anything, in every space — Enter opens the result lit beside them, n goes on', essential: true },
   { context: 'global', keys: ['b'], action: 'board', help: "the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's" },
-  { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry" },
-  { context: 'tree', keys: ['q', 'Escape'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several' },
-  { context: 'tree', keys: ['/'], action: 'search', help: 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one' },
+  { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry", essential: true },
+  { context: 'tree', keys: ['q'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several — Esc first puts down what m picked up', essential: true },
+  { context: 'tree', keys: ['Escape'], action: 'escape' },
+  { context: 'tree', keys: ['/'], action: 'search', help: 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one', essential: true },
   { context: 'tree', keys: ['n'], action: 'next', label: 'n / N', help: 'next / previous search result, opened beside the results — :noh clears the search' },
   { context: 'tree', keys: ['N'], action: 'previous' },
-  { context: 'tree', keys: ['s'], action: 'share', help: 'toggle sharing for the document — asks before taking it back' },
-  { context: 'tree', keys: ['y'], action: 'link', help: 'mint a new share link and copy it — asks, the old one stops working' },
-  { context: 'tree', keys: ['x', 'dd'], action: 'delete', help: 'delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N)' },
-  { context: 'tree', keys: ['u'], action: 'undo', help: 'undo the last delete: it comes back out of the trash — :trash has the rest' },
+  { context: 'tree', keys: ['x', 'dd'], action: 'delete', help: 'delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N)', essential: true },
+  { context: 'tree', keys: ['u'], action: 'undo', help: 'undo the last delete: it comes back out of the trash — :trash has the rest', essential: true },
   { context: 'tree', keys: ['gh'], action: 'history', help: "the open document's earlier versions, as diffs — Enter brings one back" },
   { context: 'tree', keys: ['gb'], action: 'backlinks', help: 'the documents that link to the open one — [[title]] links by title, [[ completes one while writing' },
   { context: 'tree', keys: ['gc'], action: 'cards', help: 'the cards about the open document — j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board' },
-  { context: 'global', keys: [':'], action: 'line', help: 'command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before' },
+  { context: 'global', keys: [':'], action: 'line', help: 'command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before', essential: true },
   { context: 'always', keys: ['Ctrl-s', 'Meta-s'], action: 'save', typing: true, label: 'Ctrl-S', help: 'save, from anywhere' },
-  { context: 'global', keys: ['?'], action: 'help', help: 'this screen, from the editor too — h/l a column, / filters it down' },
+  { context: 'global', keys: ['?'], action: 'help', help: 'this screen — the keys to start with, then on a second ? every key and command; h/l a column, / filters it down', essential: true },
+  { context: 'global', keys: [','], action: 'settings', help: 'the settings sheet: vim and the clipboard, the vault, the backup, signed-in browsers, ssh keys, capture tokens', essential: true },
 
   // --- the workspace around the panes ------------------------------------------
   { context: 'workspace', keys: ['Escape'], action: 'escape', typing: true },
-  { context: 'workspace', keys: ['Q'], action: 'scratch', section: 'scratch', help: 'lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it' },
+  { context: 'workspace', keys: ['Q'], action: 'scratch', section: 'scratch', help: 'lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it', essential: true },
   // While a document is being written, a key that lands outside the editor
   // hands the focus back to it instead of walking the list unseen.
   { context: 'writing', keys: ['*'], action: 'refocus' },
@@ -232,6 +235,7 @@ export const bindings = [
   { context: 'help', keys: ['g'], action: 'start', caps: ['g', 'G'], hint: 'start · end' },
   { context: 'help', keys: ['G'], action: 'end' },
   { context: 'help', keys: ['/'], action: 'filter', hint: 'filter, and read the lines whole' },
+  { context: 'help', keys: ['?'], action: 'deeper', hint: 'all of it' },
 
   { context: 'overview', keys: ['h', 'ArrowLeft', 'l', 'ArrowRight', 'k', 'ArrowUp', 'j', 'ArrowDown'], action: 'step', caps: ['h', 'j', 'k', 'l'], hint: 'move' },
   { context: 'overview', keys: digits, action: 'go', caps: ['1…9', '↵'], hint: 'go' },
@@ -285,10 +289,18 @@ export const bindings = [
   { context: 'share', keys: ['s', 'Enter'], action: 'toggle', caps: ['s'], hint: 'share · stop' },
   { context: 'share', keys: ['y'], action: 'link', hint: 'new link' },
 
+  { context: 'settings', keys: ['Tab'], action: 'next', caps: ['tab'], hint: 'next part' },
+  { context: 'settings', keys: ['Shift-Tab'], action: 'previous' },
+  { context: 'settings', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
+  { context: 'settings', keys: ['k', 'ArrowUp'], action: 'up' },
+  { context: 'settings', keys: ['G'], action: 'bottom' },
+  { context: 'settings', keys: ['Enter', 'l', 'Space'], action: 'act', caps: ['↵'], hint: 'change' },
+  { context: 'settings', keys: ['x'], action: 'remove', hint: 'remove' },
+
   // --- the editor's own keymap, described only ---------------------------------------
   { context: 'editor', label: 'vim', help: 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros' },
-  { context: 'editor', label: 'autosave', help: 'a document, a description or a note saves itself as the typing stops; :w saves sooner' },
-  { context: 'editor', label: ':q · Esc', help: 'leave the editor, what is waiting written first — Esc in normal mode; :q! lets it go' },
+  { context: 'editor', label: 'autosave', help: 'a document, a description or a note saves itself as the typing stops; :w saves sooner', essential: true },
+  { context: 'editor', label: ':q · Esc', help: 'leave the editor, what is waiting written first — Esc in normal mode; :q! lets it go', essential: true },
   { context: 'editor', label: '[[', help: 'link a document by its title, offered as you type' },
   { context: 'editor', label: 'drop · paste', help: 'an image, video or audio file attaches it' },
   { context: 'editor', label: '$x^2$ · $$…$$', help: 'set as math' },
@@ -313,6 +325,13 @@ const named: Record<string, string> = { Escape: 'Esc' }
 
 /** The keys as the help writes them. */
 export const label = (binding: Binding) => binding.label ?? (binding.keys ?? []).map((key) => named[key] ?? key).join(' · ')
+
+/** The help's first page: the keys marked to start with, in the table's order. */
+export function essentials(): { key: string; description: string }[] {
+  return (bindings as readonly Binding[])
+    .filter((binding) => binding.essential && binding.help)
+    .map((binding) => ({ key: label(binding), description: binding.help! }))
+}
 
 /** The rows of one help column, in the table's order. */
 export function rows(section: Section): { key: string; description: string }[] {

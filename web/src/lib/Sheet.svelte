@@ -120,6 +120,11 @@
   .sheet :global(.item .muted) { font-size: 11px; }
   .sheet :global(.danger:hover) { background: var(--alarm); border-color: var(--alarm); color: var(--ink); }
 
+  /* The parts of a sheet with several, one button each — info, settings. */
+  .sheet :global(.tabs) { display: flex; flex-wrap: wrap; gap: 4px; flex: none; }
+  .sheet :global(.tabs button) { text-transform: none; letter-spacing: 0; }
+  .sheet :global(.tabs .on) { background: var(--light); border-color: var(--light); color: var(--ink); }
+
   @media (max-width: 767px) {
     .sheet { padding: 14px; gap: 14px; }
   }

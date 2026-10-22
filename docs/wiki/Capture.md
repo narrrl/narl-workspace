@@ -8,7 +8,7 @@ token in place of a login.
 
 ```text
 :token add phone     makes one, shows it once and copies it
-:token               lists them, with when each was last used
+:token               the settings sheet's tokens, each with when it was last used — x there retires one
 :token rm phone      and that one captures nothing from the next request on
 ```
 

@@ -1,6 +1,8 @@
 import { tick } from 'svelte'
-import { api, ApiError, isContainer, type BackupLogin, type BackupStatus } from './api'
-import { infoSections } from './Info.svelte'
+import { api, ApiError, isContainer, type BackupLogin, type BackupStatus, type NodeSummary } from './api'
+import { openHelp } from './Help.svelte'
+import { infoSections, renewLink, toggleSharing } from './Info.svelte'
+import { loadSettings, openSettings, settingsSections, type SettingsSection } from './Settings.svelte'
 import { workspace, type InfoSection } from './store.svelte'
 import { emptyTrash } from './Trash.svelte'
 import { formatDay, parseDay, parseDue, relative, titleHref, type Heading, type ScrollAmount, type SidewaysAmount } from './util'
@@ -65,8 +67,25 @@ export interface CommandSpec {
   run: (arg: string) => unknown
   /** What the argument can be, for Tab on the command line. */
   complete?: (arg: string) => string[]
-  /** The forcing variant, `:name!` — vim hands the bang over as an argument. */
+  /**
+   * The forcing or everything variant, `:w!`, `:search!` — vim hands the
+   * bang over as an argument. A `!` means nothing else: a command that does
+   * a second thing takes a word for it, `:space new`.
+   */
   bang?: { help: string; run: (arg: string) => unknown }
+  /** Among the few the first page of the help lists. */
+  essential?: true
+}
+
+/**
+ * The first word of `arg` when it is one of `verbs`, and what follows it:
+ * `rm work` is `['rm', 'work']`. Anything else is `['', arg]`, so a name
+ * that is not a verb is the plain command's argument.
+ */
+function verb(arg: string, verbs: readonly string[]): [string, string] {
+  const match = /^\s*(\S+)(?:\s+([\s\S]*))?$/.exec(arg)
+  if (match && verbs.includes(match[1])) return [match[1], (match[2] ?? '').trim()]
+  return ['', arg.trim()]
 }
 
 /** Close the focused tile; the index of the one that has the focus after. */
@@ -100,7 +119,7 @@ export async function openInfo(section?: InfoSection) {
 }
 
 /** A document is open and in focus — being written or read — rather than the list. */
-const readingDocument = () =>
+export const readingDocument = () =>
   workspace.editing || (workspace.focus === 'node' && workspace.open?.kind === 'document')
 
 /** The board's cursor, or the card turned over beside it, has the keys. */
@@ -113,6 +132,10 @@ const requireOpen = () => {
   }
   return workspace.open
 }
+
+/** A card about `node`, titled after it unless named. */
+const cardAbout = (node: NodeSummary, title: string) =>
+  workspace.guard(() => workspace.createCard(title.trim() || node.name.trim() || node.slug, node.id))
 
 const TITLE_HREF = titleHref('')
 
@@ -164,6 +187,15 @@ const describeTile = (index: number) => {
   const tile = workspace.tiles[index]
   const name = tile.kind !== 'node' ? tile.kind : tile.open ? tile.open.name.trim() || tile.open.slug : '(empty)'
   return `${index + 1}${index === workspace.focused ? '%' : ''} ${name}${tile.dirty ? ' [+]' : ''}`
+}
+
+/** `:space rm`: a space, the one you are in unless named, into the trash. */
+async function removeSpace(name: string) {
+  const wanted = name.toLowerCase()
+  const space = wanted ? workspace.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted) : workspace.space
+  if (!space) return workspace.say(`no such space: ${wanted || '(none open)'}`, 'error')
+  if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? it goes to the trash.`))) return
+  await workspace.guard(() => workspace.deleteSpace(space.id))
 }
 
 /** Move the cursor and follow it, so `:next` reads as well as `j` then `Enter`. */
@@ -277,7 +309,7 @@ const ago = (at: number | null) => {
 }
 
 /** "firefox on linux", out of a user-agent string, as far as it says. */
-function browserOf(agent: string): string {
+export function browserOf(agent: string): string {
   const browser = /Edg\//.test(agent)
     ? 'edge'
     : /Firefox\//.test(agent)
@@ -303,16 +335,66 @@ function browserOf(agent: string): string {
   return system ? `${browser} on ${system}` : browser
 }
 
-const describeBackup = (status: BackupStatus) => {
-  if (!status.configured) {
-    return workspace.say('proton drive backups are off — :backup login <proton-username> sets them up', 'error')
-  }
-  if (status.last_error) {
-    return workspace.say(`backup failed: ${status.last_error}`, 'error')
-  }
+/** The mirror in a line. */
+export function describeBackup(status: BackupStatus): string {
+  if (!status.configured) return 'proton drive backups are off — :backup login <proton-username> sets them up'
+  if (status.last_error) return `backup failed: ${status.last_error}`
   const where = status.device ? `${status.device} · ` : ''
   const state = status.running ? 'running now' : status.pending ? 'changes waiting' : 'up to date'
-  workspace.say(`${where}${state} · last ${ago(status.last_success_at)}`)
+  return `${where}${state} · last ${ago(status.last_success_at)}`
+}
+
+/** The vault in a line: open or locked, and what it is busy with. */
+export function describeVault(): string {
+  const vault = workspace.vault
+  if (!vault?.configured) return 'no vault yet'
+  const left = vault.locks_in ? ` · locks in ${Math.ceil(vault.locks_in / 60)}m unless used` : ''
+  const rekey = vault.rekey
+    ? vault.unlocked
+      ? ` · re-sealing after the password change, ${vault.rekey.total ? `${vault.rekey.done}/${vault.rekey.total}` : 'counting'}`
+      : ' · re-sealing after the password change waits for :vault unlock'
+    : ''
+  return vault.unlocked ? `open${left}${rekey}` : `locked${rekey}`
+}
+
+/** The first time: a password for the vault, asked twice. */
+async function setupVault() {
+  const password = await workspace.askSecret('new vault password, 10+ characters — it cannot be recovered')
+  if (password === null) return
+  const again = await workspace.askSecret('the same again')
+  if (again === null) return
+  if (again !== password) return workspace.say('the two passwords differ — nothing was set', 'error')
+  workspace.vault = await api.setupVault(password)
+  workspace.say('vault ready and open — :encrypt seals what is under the cursor, :upload seal seals new files')
+}
+
+async function changeVaultPassword() {
+  const current = await workspace.askSecret('current vault password')
+  if (current === null) return
+  const password = await workspace.askSecret('new vault password, 10+ characters')
+  if (password === null) return
+  const again = await workspace.askSecret('the same again')
+  if (again === null) return
+  if (again !== password) return workspace.say('the two passwords differ — nothing was changed', 'error')
+  workspace.vault = await api.changeVaultPassword(current, password)
+  workspace.say(
+    workspace.vault.rekey
+      ? `vault password changed — re-sealing ${workspace.vault.sealed} file(s) under the new key; leave the vault open, :vault shows how far`
+      : 'vault password changed',
+  )
+}
+
+/** The open document, or the one under the cursor, as a `.md` file in the downloads. */
+async function exportDocument(node: NodeSummary) {
+  const { name, body, created_at } = node.id === workspace.open?.id ? workspace.draft : await api.getNode(node.id)
+  const text = name.trim() ? `# ${name.trim()}\n\n${body}` : body
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = exportName(name.trim(), created_at)
+  anchor.click()
+  URL.revokeObjectURL(url)
+  workspace.say(`wrote ${anchor.download}`)
 }
 
 /**
@@ -377,6 +459,7 @@ export const commands: CommandSpec[] = [
     name: 'write',
     aliases: ['w'],
     group: 'editing',
+    essential: true,
     help: "save what is being written — the open document, a card's description, a note — rather than in a moment",
     run: () => workspace.guard(() => (workspace.writing ? workspace.saveWriting() : workspace.save())),
     bang: {
@@ -401,6 +484,7 @@ export const commands: CommandSpec[] = [
     name: 'quit',
     aliases: ['q'],
     group: 'editing',
+    essential: true,
     help: 'leave the editor with what is waiting written first, or close the document when already reading',
     run: async () => {
       if (workspace.writing || workspace.editing) return leaveEditor()
@@ -432,27 +516,32 @@ export const commands: CommandSpec[] = [
   {
     name: 'space',
     aliases: ['sp'],
-    args: '[name]',
+    args: '[name] | new <name> | name <text> | rm [name]',
     group: 'tree',
-    help: 'switch to a space, or list them',
-    complete: spaceNames,
+    help: 'switch to a space, or list them — new makes one, name renames the one you are in, rm puts one in the trash with everything in it (asks first)',
+    complete: (arg) => (arg.startsWith('rm ') ? spaceNames().map((name) => `rm ${name}`) : ['new ', 'name ', 'rm ', ...spaceNames()]),
     run: async (arg) => {
-      const wanted = arg.trim().toLowerCase()
+      const [what, rest] = verb(arg, ['new', 'name', 'rm'])
+      if (what === 'new') {
+        if (!rest) return workspace.say('usage: :space new <name>', 'error')
+        return workspace.guard(() => workspace.createSpace(rest))
+      }
+      if (what === 'name') {
+        const space = workspace.space
+        if (!space) return workspace.say('no space open', 'error')
+        if (!rest) return workspace.say('usage: :space name <text>', 'error')
+        return workspace.guard(() => workspace.renameNode(space.id, rest))
+      }
+      if (what === 'rm') return removeSpace(rest)
+      const wanted = rest.toLowerCase()
       if (!wanted) {
         return workspace.say(workspace.spaces.map((space) => space.slug).join(' · ') || 'no spaces')
       }
       const space = workspace.spaces.find(
         (candidate) => candidate.slug === wanted || candidate.name.toLowerCase() === wanted,
       )
-      if (!space) return workspace.say(`no such space: ${wanted} — :space! ${wanted} makes it`, 'error')
+      if (!space) return workspace.say(`no such space: ${wanted} — :space new ${wanted} makes it`, 'error')
       await workspace.guard(() => workspace.enterSpace(space.id))
-    },
-    bang: {
-      help: 'create a space with that name and switch to it',
-      run: async (arg) => {
-        if (!arg.trim()) return workspace.say('usage: :space! <name>', 'error')
-        await workspace.guard(() => workspace.createSpace(arg.trim()))
-      },
     },
   },
   {
@@ -488,12 +577,15 @@ export const commands: CommandSpec[] = [
   {
     name: 'import',
     aliases: ['imp'],
+    args: '[zip [/]]',
     group: 'tree',
-    help: 'upload a folder into this one — markdown becomes documents, links follow',
-    run: () => hooks.pickFolder(),
-    bang: {
-      help: 'import loose files, or a .zip of a folder; :import! / pours an :export! back in, spaces and boards and all',
-      run: (arg) => hooks.pickArchive(arg.trim() === '/'),
+    help: 'upload a folder into this one — markdown becomes documents, links follow; zip takes loose files or a .zip instead, and zip / pours an :export! back in, spaces and boards and all',
+    complete: () => ['zip', 'zip /'],
+    run: (arg) => {
+      const [what, rest] = verb(arg, ['zip'])
+      if (what === 'zip' && (rest === '' || rest === '/')) return hooks.pickArchive(rest === '/')
+      if (arg.trim()) return workspace.say('usage: :import [zip [/]]', 'error')
+      hooks.pickFolder()
     },
   },
   {
@@ -512,23 +604,14 @@ export const commands: CommandSpec[] = [
   {
     name: 'card',
     aliases: ['c'],
-    args: '<title>',
+    args: '[title]',
     group: 'board',
-    help: "add a card — on the board to the list under the cursor, elsewhere to this space's inbox",
+    help: "add a card — reading a document, one about it, titled after it unless named, and gf on it comes back; on the board to the list under the cursor, elsewhere to this space's inbox",
     run: async (arg) => {
+      const open = workspace.open
+      if (readingDocument() && open) return cardAbout(open, arg)
       if (!arg.trim()) return workspace.say('usage: :card <title>', 'error')
       await workspace.guard(() => workspace.createCard(arg.trim()))
-    },
-    bang: {
-      help: 'add a card linked to the open document — gf on it opens the document',
-      run: async (arg) => {
-        const node = workspace.target
-        if (!node || node.kind !== 'document') {
-          return workspace.say('no document to link — open one first', 'error')
-        }
-        const title = arg.trim() || node.name.trim() || node.slug
-        await workspace.guard(() => workspace.createCard(title, node.id))
-      },
     },
   },
   {
@@ -606,21 +689,14 @@ export const commands: CommandSpec[] = [
   {
     name: 'task',
     aliases: ['step'],
-    args: '<text>',
+    args: '[add] <text> | edit <text>',
     group: 'board',
-    help: "add a step to the open card's checklist, below the cursor",
+    help: "add a step to the open card's checklist, below the cursor — edit rewords the step under it; add is only needed for a step that starts with edit",
     run: async (arg) => {
       if (workspace.focus !== 'card') return workspace.say('no card turned over — Enter on the board turns one', 'error')
-      if (!arg.trim()) return workspace.say('usage: :task <text>', 'error')
-      await workspace.guard(() => workspace.addTask(arg.trim()))
-    },
-    bang: {
-      help: 'reword the step under the cursor',
-      run: async (arg) => {
-        if (workspace.focus !== 'card') return workspace.say('no card turned over — Enter on the board turns one', 'error')
-        if (!arg.trim()) return workspace.say('usage: :task! <text>', 'error')
-        await workspace.guard(() => workspace.renameTask(arg.trim()))
-      },
+      const [what, text] = verb(arg, ['add', 'edit'])
+      if (!text) return workspace.say(`usage: :task ${what === 'edit' ? 'edit' : '[add]'} <text>`, 'error')
+      await workspace.guard(() => (what === 'edit' ? workspace.renameTask(text) : workspace.addTask(text)))
     },
   },
   {
@@ -637,24 +713,27 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'list',
-    args: '<name>',
+    args: '<name> | name <text> | rm',
     group: 'board',
-    help: 'add a column to the board',
+    help: 'add a column to the board — name renames the one under the cursor, rm deletes it and every card on it (asks first)',
+    complete: () => ['name ', 'rm'],
     run: async (arg) => {
       if (!workspace.view('board')) return workspace.say('no board open — :board', 'error')
-      if (!arg.trim()) return workspace.say('usage: :list <name>', 'error')
-      await workspace.guard(() => workspace.createList(arg.trim()))
-    },
-    bang: {
-      help: 'delete the column under the cursor and every card on it',
-      run: async () => {
-        if (!workspace.view('board')) return workspace.say('no board open — :board', 'error')
-        const list = workspace.list
+      const [what, rest] = verb(arg, ['name', 'rm'])
+      const list = workspace.list
+      if (what === 'name') {
+        if (!list) return workspace.say('no list selected', 'error')
+        if (!rest) return workspace.say('usage: :list name <text>', 'error')
+        return workspace.guard(() => workspace.renameList(rest))
+      }
+      if (what === 'rm') {
         if (!list) return workspace.say('no list selected', 'error')
         const cards = list.cards.length
         if (!(await workspace.ask(`delete the list "${list.name}" and its ${cards} card${cards === 1 ? '' : 's'}?`))) return
-        await workspace.guard(() => workspace.deleteList())
-      },
+        return workspace.guard(() => workspace.deleteList())
+      }
+      if (!rest) return workspace.say('usage: :list <name>', 'error')
+      await workspace.guard(() => workspace.createList(rest))
     },
   },
   {
@@ -662,6 +741,7 @@ export const commands: CommandSpec[] = [
     aliases: ['mv'],
     args: '<folder|..|/>',
     group: 'tree',
+    essential: true,
     help: 'move the marked nodes, or else the selected one, into a folder here, up one level, or to the root of the space',
     complete: folderNames,
     run: async (arg) => {
@@ -686,16 +766,11 @@ export const commands: CommandSpec[] = [
     },
   },
   {
-    name: 'unmark',
-    group: 'tree',
-    help: 'put down everything picked up with m',
-    run: () => workspace.unmarkAll(),
-  },
-  {
     name: 'new',
     aliases: ['n', 'o'],
     args: '[template] [yyyy-mm-dd] [name]',
     group: 'documents',
+    essential: true,
     help: "start a new document here — from one of the space's templates, dated, named; in the diary from templates/day",
     complete: (arg) => (arg.includes(' ') ? [] : templateNames()),
     run: async (arg) => {
@@ -910,10 +985,11 @@ export const commands: CommandSpec[] = [
     aliases: ['title', 'rename'],
     args: '<text>',
     group: 'editing',
-    help: 'rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title',
+    help: 'rename what has focus — document, folder, file, or card on a board; bare, while writing, into the title — :space name and :list name rename those',
     run: async (arg) => {
       if (!arg.trim() && workspace.editing && workspace.pane === 'document') return hooks.focusTitle()
       if (onBoard()) {
+        if (!workspace.card) return workspace.say('no card here — :list name renames the list', 'error')
         if (!arg.trim()) return workspace.say('usage: :name <text>', 'error')
         return workspace.guard(() => workspace.patchCard({ title: arg.trim() }))
       }
@@ -928,40 +1004,8 @@ export const commands: CommandSpec[] = [
         return workspace.guard(() => workspace.save())
       }
 
-      if (!node) return workspace.say('nothing selected — :name! renames the space', 'error')
+      if (!node) return workspace.say('nothing selected — :space name renames the space', 'error')
       await workspace.guard(() => workspace.renameNode(node.id, arg))
-    },
-    bang: {
-      help: 'rename the space you are in — on the board, the list under the cursor',
-      run: async (arg) => {
-        if (onBoard()) {
-          if (!arg.trim()) return workspace.say('usage: :name! <list name>', 'error')
-          return workspace.guard(() => workspace.renameList(arg.trim()))
-        }
-        const space = workspace.space
-        if (!space) return workspace.say('no space open', 'error')
-        if (!arg.trim()) return workspace.say('usage: :name! <text>', 'error')
-        await workspace.guard(() => workspace.renameNode(space.id, arg))
-      },
-    },
-  },
-  {
-    name: 'rmspace',
-    aliases: ['rms'],
-    args: '[name]',
-    group: 'tree',
-    help: 'delete a space and everything in it, into the trash (asks first)',
-    complete: spaceNames,
-    run: async (arg) => {
-      const wanted = arg.trim().toLowerCase()
-      const space = wanted
-        ? workspace.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted)
-        : workspace.space
-      if (!space) return workspace.say(`no such space: ${wanted || '(none open)'}`, 'error')
-      if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? it goes to the trash.`))) {
-        return
-      }
-      await workspace.guard(() => workspace.deleteSpace(space.id))
     },
   },
   {
@@ -992,6 +1036,7 @@ export const commands: CommandSpec[] = [
     name: 'trash',
     args: '[purge]',
     group: 'tree',
+    essential: true,
     help: 'what was deleted — j/k, Enter brings it back, x deletes it for good; :trash purge empties it',
     complete: () => ['purge'],
     run: async (arg) => {
@@ -1020,38 +1065,20 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'share',
+    args: '[off|new]',
     group: 'sharing',
-    help: 'publish the document behind an unguessable link and copy it',
-    run: async () => {
+    essential: true,
+    help: 'publish the document behind an unguessable link and copy it — off takes it back, new mints a fresh link and the old one stops working; both ask first, and :info share shows where it stands',
+    complete: () => ['off', 'new'],
+    run: async (arg) => {
       const node = workspace.target
-      const id = node?.id
-      if (!id) return workspace.say('nothing selected', 'error')
-      if (node?.shared) return workspace.say('already shared — :link for a new link, :unshare to revoke')
-      await workspace.guard(() => workspace.toggleShare(id))
-    },
-  },
-  {
-    name: 'unshare',
-    group: 'sharing',
-    help: 'revoke the share link',
-    run: async () => {
-      const node = workspace.target
-      const id = node?.id
-      if (!id) return workspace.say('nothing selected', 'error')
-      if (!node?.shared) return workspace.say('not shared')
-      await workspace.guard(() => workspace.toggleShare(id))
-    },
-  },
-  {
-    name: 'link',
-    group: 'sharing',
-    help: 'mint a new share link for the document and copy it',
-    run: async () => {
-      const node = workspace.target
-      const id = node?.id
-      if (!id) return workspace.say('nothing selected', 'error')
-      if (!node?.shared) return workspace.say('not shared — :share first', 'error')
-      await workspace.guard(() => workspace.renewShareLink(id))
+      if (!node) return workspace.say('nothing selected', 'error')
+      const what = arg.trim()
+      if (what === 'off') return node.shared ? toggleSharing(node) : workspace.say('not shared')
+      if (what === 'new') return renewLink(node)
+      if (what) return workspace.say('usage: :share [off|new]', 'error')
+      if (node.shared) return workspace.say('already shared — :share new for a fresh link, :share off to take it back')
+      await workspace.guard(() => workspace.toggleShare(node.id))
     },
   },
   {
@@ -1070,19 +1097,21 @@ export const commands: CommandSpec[] = [
     name: 'export',
     aliases: ['exp'],
     group: 'sharing',
-    help: 'download the open document as a .md file',
-    run: () => {
-      if (!requireOpen()) return
-      const { name, body, created_at } = workspace.draft
-      const text = name.trim() ? `# ${name.trim()}\n\n${body}` : body
-      const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = exportName(name.trim(), created_at)
-      anchor.click()
-      URL.revokeObjectURL(url)
-      workspace.say(`wrote ${anchor.download}`)
-    },
+    essential: true,
+    help: 'download what has focus — the file under the cursor as it is, a document as a .md file with what is typed so far',
+    run: () =>
+      workspace.guard(async () => {
+        const node = workspace.target
+        if (!node) return workspace.say('nothing selected — :export! downloads everything', 'error')
+        if (node.kind === 'document') return exportDocument(node)
+        if (!node.file) return workspace.say(`a ${node.kind} goes with :export!, the whole workspace`, 'error')
+        if (node.file.encrypted && !(await workspace.ensureUnlocked())) return
+        const anchor = document.createElement('a')
+        anchor.href = node.file.url
+        anchor.download = node.name
+        anchor.click()
+        workspace.say(`downloading ${node.name}`)
+      }),
     bang: {
       help: 'download the whole workspace — every space, document and file — as a zip',
       run: async () => {
@@ -1102,25 +1131,6 @@ export const commands: CommandSpec[] = [
     },
   },
   {
-    name: 'download',
-    aliases: ['dl'],
-    group: 'sharing',
-    help: 'download the file under the cursor, or the open one — the open document goes as :export writes it',
-    run: () =>
-      workspace.guard(async () => {
-        const node = workspace.target
-        if (!node) return workspace.say('nothing selected', 'error')
-        if (node.kind === 'document' && node.id === workspace.open?.id) return runCommand('export')
-        if (!node.file) return workspace.say(`a ${node.kind} is no file — :export! downloads everything`, 'error')
-        if (node.file.encrypted && !(await workspace.ensureUnlocked())) return
-        const anchor = document.createElement('a')
-        anchor.href = node.file.url
-        anchor.download = node.name
-        anchor.click()
-        workspace.say(`downloading ${node.name}`)
-      }),
-  },
-  {
     name: 'source',
     group: 'documents',
     help: 'show an open markdown file as written, or rendered again',
@@ -1131,15 +1141,20 @@ export const commands: CommandSpec[] = [
   {
     name: 'upload',
     aliases: ['up'],
+    args: '[seal]',
     group: 'editing',
-    help: "files for the open document — while writing, embedded at the cursor — or, from the list, into this folder",
-    run: () => (readingDocument() ? hooks.pickFiles() : hooks.pickTreeFiles(false)),
-    bang: {
-      help: 'put files into this folder sealed in the vault — encrypted before they touch the disk',
-      run: () =>
-        workspace.guard(async () => {
+    essential: true,
+    help: 'files for the open document — while writing, embedded at the cursor — or, from the list, into this folder; seal puts them into this folder sealed in the vault, encrypted before they touch the disk',
+    complete: () => ['seal'],
+    run: (arg) => {
+      const what = arg.trim()
+      if (what === 'seal') {
+        return workspace.guard(async () => {
           if (await workspace.ensureUnlocked()) hooks.pickTreeFiles(true)
-        }),
+        })
+      }
+      if (what) return workspace.say('usage: :upload [seal]', 'error')
+      return readingDocument() ? hooks.pickFiles() : hooks.pickTreeFiles(false)
     },
   },
   {
@@ -1174,8 +1189,8 @@ export const commands: CommandSpec[] = [
     },
   },
   {
-    name: 'clear',
-    aliases: ['noh'],
+    name: 'noh',
+    aliases: ['nohlsearch'],
     group: 'documents',
     help: 'clear the search filter',
     run: () => workspace.guard(() => workspace.search('')),
@@ -1208,12 +1223,13 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'set',
-    args: '<option>',
+    args: '[option]',
     group: 'view',
-    help: 'vim, novim, clipboard, noclipboard, board, noboard',
+    help: 'vim, novim, clipboard, noclipboard, board, noboard — bare, the settings sheet',
     complete: () => ['vim', 'novim', 'clipboard', 'noclipboard', 'board', 'noboard'],
     run: (arg) => {
       const option = arg.trim()
+      if (!option) return openSettings('options')
       if (option === 'vim') return workspace.setVim(true), workspace.say('vim keys on')
       if (option === 'novim') return workspace.setVim(false), workspace.say('vim keys off')
       if (option === 'clipboard')
@@ -1231,12 +1247,12 @@ export const commands: CommandSpec[] = [
     name: 'backup',
     group: 'view',
     args: '[login <proton-username> | logout]',
-    help: 'when the workspace was last mirrored to proton drive — login sets the mirror up, logout forgets its session',
+    help: 'the proton drive mirror, in the settings sheet — login sets it up, logout forgets its session',
     complete: () => ['login ', 'logout'],
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
-        if (trimmed === '') return describeBackup(await api.backupStatus())
+        if (trimmed === '') return openSettings('backup')
         const loginMatch = /^login\s+(\S+)$/.exec(trimmed)
         if (loginMatch) return protonLogin(loginMatch[1])
         if (trimmed === 'logout') {
@@ -1270,18 +1286,12 @@ export const commands: CommandSpec[] = [
     name: 'sessions',
     args: '[rm <n>]',
     group: 'view',
-    help: 'every browser signed in, numbered — rm signs one of them out, and locks the vault',
+    help: 'every browser signed in, in the settings sheet — rm signs the n-th out, and locks the vault',
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
+        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') return openSettings('sessions')
         const sessions = await api.sessions()
-        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
-          return workspace.say(
-            sessions
-              .map((s, i) => `${i + 1} ${s.current ? 'this one' : browserOf(s.user_agent)}, seen ${relative(s.last_seen)}`)
-              .join(' · '),
-          )
-        }
         const rmMatch = /^rm\s+(\d+)$/.exec(trimmed)
         if (!rmMatch) return workspace.say('usage: :sessions [rm <n>]', 'error')
         const target = sessions[Number(rmMatch[1]) - 1]
@@ -1296,15 +1306,12 @@ export const commands: CommandSpec[] = [
     name: 'sshkey',
     args: '[add <name> <key> | rm <name> | vault <name> on|off]',
     group: 'view',
-    help: 'list, add or remove keys allowed to mount the workspace over sftp, and say which may read sealed files',
+    help: 'the keys allowed to mount the workspace over sftp, in the settings sheet — add, rm, and vault on|off for which may read sealed files',
+    complete: () => ['add ', 'rm ', 'vault '],
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
-        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
-          const keys = await api.listSshKeys()
-          if (keys.length === 0) return workspace.say('no keys registered — :sshkey add <name> <key>')
-          return workspace.say(keys.map((k) => `${k.name}${k.vault ? ' [vault]' : ''} ${k.fingerprint}`).join(' · '))
-        }
+        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') return openSettings('keys')
         const addMatch = /^add\s+(\S+)\s+(.+)$/.exec(trimmed)
         if (addMatch) {
           const [, name, key] = addMatch
@@ -1340,7 +1347,7 @@ export const commands: CommandSpec[] = [
     name: 'token',
     args: '[add <name> | rm <name>]',
     group: 'view',
-    help: 'list, add or remove tokens that capture into the workspace from outside it — add shows the token once and copies it',
+    help: 'the tokens that capture into the workspace from outside it, in the settings sheet — add shows a new one once and copies it, rm retires one',
     complete: (arg) => {
       // Tab cannot wait for the server, so the names are fetched the first
       // time it is pressed here and offered from then on.
@@ -1353,16 +1360,7 @@ export const commands: CommandSpec[] = [
     run: (arg) =>
       workspace.guard(async () => {
         const trimmed = arg.trim()
-        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') {
-          const tokens = await api.listTokens()
-          tokenNames = tokens.map((t) => t.name)
-          if (tokens.length === 0) return workspace.say('no tokens — :token add <name> makes one')
-          return workspace.say(
-            tokens
-              .map((t) => `${t.name}, ${t.last_used_at === null ? 'never used' : `used ${relative(t.last_used_at)}`}`)
-              .join(' · '),
-          )
-        }
+        if (trimmed === '' || trimmed === 'ls' || trimmed === 'list') return openSettings('tokens')
         const addMatch = /^add\s+(.+)$/.exec(trimmed)
         if (addMatch) {
           const added = await api.addToken(addMatch[1].trim())
@@ -1388,73 +1386,27 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'vault',
+    args: '[unlock|lock|passwd]',
     group: 'vault',
-    help: 'whether the vault is open — or, the first time, set its password',
-    run: () =>
+    help: 'the vault in the settings sheet, or, the first time, set its password — unlock opens it, lock closes it now, passwd changes the password and re-seals every file under a new key',
+    complete: () => ['unlock', 'lock', 'passwd'],
+    run: (arg) =>
       workspace.guard(async () => {
+        const what = arg.trim()
         await workspace.loadVault()
-        const vault = workspace.vault
-        if (vault?.configured) {
-          const left = vault.locks_in ? ` · locks in ${Math.ceil(vault.locks_in / 60)}m unless used` : ''
-          const rekey = vault.rekey
-            ? vault.unlocked
-              ? ` · re-sealing after the password change, ${vault.rekey.total ? `${vault.rekey.done}/${vault.rekey.total}` : 'counting'}`
-              : ' · re-sealing after the password change waits for :unlock'
-            : ''
-          return workspace.say(
-            vault.unlocked ? `vault open${left}${rekey} — :lock closes it` : `vault locked${rekey} — :unlock opens it`,
-          )
+        if (what === 'unlock') {
+          if (workspace.vault?.unlocked) return workspace.say('the vault is already open')
+          return workspace.ensureUnlocked()
         }
-        const password = await workspace.askSecret('new vault password, 10+ characters — it cannot be recovered')
-        if (password === null) return
-        const again = await workspace.askSecret('the same again')
-        if (again === null) return
-        if (again !== password) return workspace.say('the two passwords differ — nothing was set', 'error')
-        workspace.vault = await api.setupVault(password)
-        workspace.say('vault ready and open — :encrypt seals what is under the cursor, :upload! seals new files')
-      }),
-  },
-  {
-    name: 'unlock',
-    group: 'vault',
-    help: 'open the vault with its password, so sealed files can be read',
-    run: () =>
-      workspace.guard(async () => {
-        await workspace.loadVault()
-        if (workspace.vault?.unlocked) return workspace.say('the vault is already open')
-        await workspace.ensureUnlocked()
-      }),
-  },
-  {
-    name: 'lock',
-    group: 'vault',
-    help: 'close the vault now — it also closes itself when left alone, and on logout',
-    run: () =>
-      workspace.guard(async () => {
-        workspace.vault = await api.lockVault()
-        if (workspace.open?.file?.encrypted) workspace.open = await api.getNode(workspace.open.id)
-        workspace.say('vault locked')
-      }),
-  },
-  {
-    name: 'passwd',
-    group: 'vault',
-    help: "change the vault's password — every sealed file is then re-sealed under a new key, while the vault is open",
-    run: () =>
-      workspace.guard(async () => {
-        const current = await workspace.askSecret('current vault password')
-        if (current === null) return
-        const password = await workspace.askSecret('new vault password, 10+ characters')
-        if (password === null) return
-        const again = await workspace.askSecret('the same again')
-        if (again === null) return
-        if (again !== password) return workspace.say('the two passwords differ — nothing was changed', 'error')
-        workspace.vault = await api.changeVaultPassword(current, password)
-        workspace.say(
-          workspace.vault.rekey
-            ? `vault password changed — re-sealing ${workspace.vault.sealed} file(s) under the new key; leave the vault open, :vault shows how far`
-            : 'vault password changed',
-        )
+        if (what === 'lock') {
+          workspace.vault = await api.lockVault()
+          if (workspace.open?.file?.encrypted) workspace.open = await api.getNode(workspace.open.id)
+          return workspace.say('vault locked')
+        }
+        if (what === 'passwd') return changeVaultPassword()
+        if (what) return workspace.say('usage: :vault [unlock|lock|passwd]', 'error')
+        if (!workspace.vault?.configured) return setupVault()
+        await openSettings('vault')
       }),
   },
   {
@@ -1474,11 +1426,30 @@ export const commands: CommandSpec[] = [
   {
     name: 'help',
     aliases: ['h'],
+    args: '[all]',
     group: 'view',
-    help: 'show the key and command reference',
-    run: () => {
-      if (workspace.overlay === 'help') workspace.closeSheet()
-      else workspace.openSheet('help')
+    essential: true,
+    help: 'the keys to start with — ? again, or :help all, for every key and command',
+    complete: () => ['all'],
+    run: (arg) => {
+      const all = arg.trim() === 'all'
+      if (workspace.overlay === 'help' && !all) return workspace.closeSheet()
+      openHelp(all)
+    },
+  },
+  {
+    name: 'settings',
+    args: '[options|vault|backup|sessions|keys|tokens]',
+    group: 'view',
+    essential: true,
+    help: 'the settings sheet: vim and the clipboard, the vault, the backup, the browsers signed in, ssh keys and capture tokens — Tab between them (,)',
+    complete: () => settingsSections,
+    run: (arg) => {
+      const section = arg.trim()
+      if (section && !settingsSections.includes(section as SettingsSection)) {
+        return workspace.say(`usage: :settings [${settingsSections.join('|')}]`, 'error')
+      }
+      return openSettings((section || undefined) as SettingsSection | undefined)
     },
   },
   {
@@ -1492,6 +1463,38 @@ export const commands: CommandSpec[] = [
     },
   },
 ]
+
+/**
+ * Old spellings, kept for one release so the fingers and notes that know
+ * them still work: each runs as the line it is now. Help and Tab do not
+ * offer them.
+ */
+const renamed: Record<string, string | ((arg: string) => unknown)> = {
+  'space!': 'space new',
+  rmspace: 'space rm',
+  rms: 'space rm',
+  'list!': 'list rm',
+  'task!': 'task edit',
+  'upload!': 'upload seal',
+  'import!': 'import zip',
+  unshare: 'share off',
+  link: 'share new',
+  clear: 'noh',
+  download: 'export',
+  dl: 'export',
+  unlock: 'vault unlock',
+  lock: 'vault lock',
+  passwd: 'vault passwd',
+  // On the board it renamed the list, elsewhere the space.
+  'name!': (arg) => runCommand(`${onBoard() ? 'list' : 'space'} name ${arg}`),
+  // It linked the card to the document under the cursor, read or not.
+  'card!': (arg) => {
+    const node = workspace.target
+    if (node?.kind !== 'document') return workspace.say('no document to link — open one first', 'error')
+    return cardAbout(node, arg)
+  },
+  unmark: () => workspace.unmarkAll(),
+}
 
 const lookup = new Map<string, CommandSpec>()
 for (const spec of commands) {
@@ -1512,6 +1515,12 @@ export async function runCommand(line: string): Promise<void> {
   const [head, ...rest] = input.split(/\s+/)
   const arg = rest.join(' ')
 
+  const old = renamed[head]
+  if (old !== undefined) {
+    await (typeof old === 'string' ? runCommand(`${old} ${arg}`) : old(arg))
+    return
+  }
+
   // `:12` jumps to a node by id, the way `:12` jumps to a line in vim.
   if (/^\d+$/.test(head)) {
     await workspace.guard(() => workspace.openNode(Number(head)))
@@ -1528,9 +1537,9 @@ export async function runCommand(line: string): Promise<void> {
   if (forced) {
     if (!spec.bang) return workspace.say(`E477: no ! allowed: ${head}`, 'error')
     await spec.bang.run(arg)
-    return
-  }
-  await spec.run(arg)
+  } else await spec.run(arg)
+  // What a line changed shows in the settings sheet it was typed over.
+  if (workspace.overlay === 'settings') await workspace.guard(() => loadSettings())
 }
 
 /**

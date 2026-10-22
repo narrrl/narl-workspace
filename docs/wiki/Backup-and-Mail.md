@@ -61,7 +61,7 @@ narl-workspace/          the device
 
 | command | what it does |
 | --- | --- |
-| `:backup` | when the last one finished, and whether it failed |
+| `:backup` | the backup in the settings sheet (`,`): when the last one finished, and whether it failed; `Enter` there runs one |
 | `:backup!` | run one now |
 | `:backup logout` | forget the session; the mirror stays where it is |
 | `narl-workspace proton-status` | account, device, schedule, how much is mirrored |

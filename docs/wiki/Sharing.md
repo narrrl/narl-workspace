@@ -5,10 +5,10 @@ reader needs no account.
 
 | key or command | what it does |
 | --- | --- |
-| `s`, `:share` | share the document and copy its link; on a shared one, `s` asks before taking it back |
-| `y`, `:link` | make a new link for the same document; the old one stops working |
-| `:unshare` | stop sharing |
-| `:info share` | the share part of the info sheet: whether the document is public, the shape of its link, and the same `s` and `y` |
+| `:share` | share the document and copy its link |
+| `:share new` | make a new link for the same document; the old one stops working (asks first) |
+| `:share off` | stop sharing (asks first) |
+| `:info share` | the share part of the info sheet: whether the document is public and the shape of its link; `s` there shares or stops, `y` makes a new link |
 
 The link looks like `https://your-host/s/<token>#<key>`. The page renders the
 document read-only and serves only the pictures and videos it embeds right now:
@@ -27,7 +27,7 @@ kept only the path holds a link that answers `404`.
 The server keeps only a SHA-256 of the key and compares it in constant time, and
 a wrong key is answered exactly like an unknown token. That also means the full
 link exists only once, when `:share` copies it. It cannot be read back from the
-document later; `:link` makes a new one instead, which is also the way to cut a
+document later; `:share new` makes a new one instead, which is also the way to cut a
 reader off without unpublishing.
 
 A document in the trash answers like an unknown link, and works again with the
