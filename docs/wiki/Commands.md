@@ -22,7 +22,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Alt-h/j/k/l` | focus the tile that way, from the editor too — left of the leftmost is the list |
 | `Alt-Shift-h/j/k/l` | move the focused tile that way |
 | `L · Shift-Enter` | open the row in a new tile beside the others |
-| `gt / gT` | next / previous tile — in the editor too |
+| `gt / gT` | next / previous tile — a view too |
 | `Alt-q` | close the focused tile — :close; :only closes the others |
 | `j / k · ↓ ↑` | move down / up the list — scroll the document when it has focus |
 | `gg / G` | first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line |
@@ -43,14 +43,13 @@ arguments and `↑` / `↓` recall earlier lines.
 | `m / p` | pick nodes up, then drop them all into the folder you walk to |
 | `M` | pick up the whole folder — again puts it all back |
 | `Ctrl / Shift-click` | pick a row up · every row up to it — drag them onto a folder |
-| `S` | the special workspace: the board, the agenda and the calendar side by side — S again, q or Esc leave it |
-| `Tab · Alt-h/j/k/l` | in the special workspace: the next tile, or the one that way — l past the last list and j past the agenda go on too |
-| `t` | agenda — late, due this week, in hand, on every board — in the special workspace |
+| `S` | the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away |
+| `t` | agenda — late, due this week, in hand, on every board — in a tile of its own |
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
-| `C` | the diary by month, in the special workspace: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day |
+| `C` | the diary by month, in a tile: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day beside it |
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
-| `b` | the board, in the special workspace: this space's, or the last one shown — 1 … 9 there shows another's |
+| `b` | the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here |
 | `Esc · q` | close the document, and its tile when there are several |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
@@ -64,6 +63,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `:` | command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before |
 | `Ctrl-S` | save, from anywhere |
 | `?` | this screen, from the editor too — h/l a column, / filters it down |
+| `q · Esc` | in a view — the board, the agenda, the calendar, a card's back — close its tile; the focus goes back to the tile before |
 
 ### On a board
 
@@ -71,13 +71,13 @@ The first list is the inbox, the last list is done.
 
 | key | what it does |
 | --- | --- |
-| `h / l` | to the list left / right — right of the last is the agenda |
+| `h / l` | to the list left / right — right of the last, to the tile beside |
 | `j / k` | down / up the cards |
 | `gg / G` | first / last card of the list |
 | `J / K` | move the card down / up its list |
 | `H / L` | move the card to the list left / right |
 | `Space` | into the done list, or back out to the inbox |
-| `Enter` | turn the card over: its labels, description and checklist |
+| `Enter` | turn the card over, in a tile beside: its labels, description and checklist |
 | `gf` | the card's notes — a document, made on first use; q comes back |
 | `o · c` | new card on this list |
 | `D` | due date: fri, tm, +3d, 10-31 … |
@@ -86,7 +86,6 @@ The first list is the inbox, the last list is done.
 | `F` | a letter over every card in view — type it to put the cursor there |
 | `r` | read the board again, for changes made elsewhere |
 | `x · dd` | delete the card (asks y/N) |
-| `q · Esc` | leave the special workspace |
 
 ### On the back of a card
 
@@ -104,21 +103,19 @@ The first list is the inbox, the last list is done.
 | `R · D` | rename the card, its due date |
 | `H / L` | send the card to the list left / right |
 | `gf` | the card's notes — a document, made on first use; q comes back |
-| `q · Esc` | back to the board |
 
 ### In the agenda
 
 | key | what it does |
 | --- | --- |
-| `j / k` | down / up the cards, then what was written on this day in earlier years, then into the calendar |
-| `h` | to the board |
+| `j / k` | down / up the cards, then what was written on this day in earlier years, then on to the tile below |
+| `h` | to the tile on the left |
 | `Enter` | to the card, on its own board beside — or to the entry |
 | `Space` | done, where it stands |
 | `D` | due date: fri, tm, +3d … — :due on the line |
 | `:` | the line, with the agenda kept up — :repeat weekly acts on the card |
 | `H / L` | to the list left / right on its board |
 | `T` | today's diary entry |
-| `q · Esc` | leave the special workspace — a document opened from it comes back here on q |
 
 ### In the scratchpad
 
@@ -156,11 +153,11 @@ do: `:w!`, `:space! <name>`, `:import!`.
 
 | command | what it does |
 | --- | --- |
-| `:board` | this space's board, in the special workspace |
-| `:special` | the special workspace: the board, the agenda and the calendar side by side — S puts it up and away, Tab walks its tiles, 1 … 9 picks the board |
+| `:board` | this space's board, in a tile — the last one shown when this space has none |
+| `:plan, :special` | the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board |
 | `:card, :c <title>` | add a card — on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:card!` | add a card linked to the open document — gf on it opens the document |
-| `:due <when\|->` | due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
+| `:due <when\|->` | due date of the card — on the board, its back, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
 | `:done` | move the selected card into the done list, or back out to the inbox |
 | `:task, :step <text>` | add a step to the open card's checklist, below the cursor |

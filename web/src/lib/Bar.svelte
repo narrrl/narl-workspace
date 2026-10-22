@@ -35,43 +35,30 @@
     <button class="pill add" title="new space (:space! <name>)" onclick={() => hooks.openCommandLine(':space! ')}>
       +
     </button>
-    <!-- The special workspace, beside the others as the desktop bar shows its own. -->
-    <button
-      class="pill special"
-      aria-current={workspace.view === 'special'}
-      title="the special workspace: board, agenda, calendar (S)"
-      onclick={() => workspace.guard(() => workspace.toggleSpecial())}
-    >
-      <span class="slug">special</span>
-    </button>
   </nav>
 
   <span class="divider path"></span>
 
   <nav class="crumbs" aria-label="path">
-    {#if workspace.view === 'special'}
-      <span class="here">special:{workspace.specialFocus}</span>
-    {:else}
+    <button
+      class="crumb"
+      class:here={crumbs.length === 0}
+      onclick={() => workspace.spaceId !== null && workspace.guard(() => workspace.goTo(workspace.spaceId!))}
+      {@attach into(workspace.spaceId, 'into ~')}
+    >
+      ~
+    </button>
+    {#each crumbs as crumb, index (crumb.id)}
+      <span class="sep">/</span>
       <button
         class="crumb"
-        class:here={crumbs.length === 0}
-        onclick={() => workspace.spaceId !== null && workspace.guard(() => workspace.goTo(workspace.spaceId!))}
-        {@attach into(workspace.spaceId, 'into ~')}
+        class:here={index === crumbs.length - 1}
+        onclick={() => workspace.guard(() => workspace.goTo(crumb.id))}
+        {@attach into(crumb.id, `into ${crumb.slug}`)}
       >
-        ~
+        {crumb.slug}
       </button>
-      {#each crumbs as crumb, index (crumb.id)}
-        <span class="sep">/</span>
-        <button
-          class="crumb"
-          class:here={index === crumbs.length - 1}
-          onclick={() => workspace.guard(() => workspace.goTo(crumb.id))}
-          {@attach into(crumb.id, `into ${crumb.slug}`)}
-        >
-          {crumb.slug}
-        </button>
-      {/each}
-    {/if}
+    {/each}
   </nav>
 
   <span class="spacer"></span>
@@ -123,7 +110,6 @@
   .pill:hover .n { color: var(--light-dim); }
   .pill[aria-current='true'] .n { color: var(--ink); opacity: 0.55; }
   .pill.add { color: var(--muted); }
-  .pill.special { margin-left: 6px; }
   .pill.add:hover { color: var(--light); }
 
   /* A crumb is a link along the path; a hairline grows under it on hover. */
@@ -152,9 +138,8 @@
   }
   .crumb:hover { background: transparent; color: var(--light); }
   .crumb:hover::after { transform: scaleX(1); }
-  .crumb.here, .here { color: var(--light); }
+  .crumb.here { color: var(--light); }
   .sep { color: var(--overlay); }
-  span.here { letter-spacing: 0.06em; text-transform: none; }
 
   /*
    * On a phone the other spaces are only their number, like the desktop's

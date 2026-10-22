@@ -14,7 +14,7 @@ import { focusHelpFilter, scrollHelp } from './Help.svelte'
 import { copyMedia, insertMedia, removeMedia } from './MediaBrowser.svelte'
 import { purgeTrashed, restoreTrashed } from './Trash.svelte'
 import { goHeading, moveHistory, openBacklink, renewLink, restoreShown, toggleSharing, turnInfo } from './Info.svelte'
-import { workspace, type SpecialTile } from './store.svelte'
+import { workspace } from './store.svelte'
 import { dwindle, formatDay, neighbour, type Direction } from './util'
 
 export type Run = (key: string, event: KeyboardEvent) => boolean | void
@@ -75,20 +75,10 @@ function openInTab() {
 
 /** Focus moves between the panes, out of the editor too. */
 function focusPane(pane: 'list' | 'document') {
-  if (pane === 'document' && !workspace.open) return
+  if (pane === 'document' && workspace.tile.empty) return
   workspace.pane = pane
   if (pane === 'document' && workspace.editing) hooks.focusEditor()
   else hooks.focusList()
-}
-
-/*
- * The special workspace is three tiles: the board on the left, the agenda
- * over the calendar on the right. Alt-h/j/k/l moves between them.
- */
-const specialNeighbours: Record<SpecialTile, Partial<Record<Direction, SpecialTile>>> = {
-  board: { l: 'agenda' },
-  agenda: { h: 'board', j: 'calendar' },
-  calendar: { h: 'board', k: 'agenda' },
 }
 
 /*
@@ -97,12 +87,7 @@ const specialNeighbours: Record<SpecialTile, Partial<Record<Direction, SpecialTi
  * goes that way instead, swapping places with the one it lands on.
  */
 function tileKey(direction: Direction, shift: boolean) {
-  if (workspace.view === 'special') {
-    const next = specialNeighbours[workspace.specialFocus][direction]
-    if (next && !shift) workspace.specialFocus = next
-    return
-  }
-  if (workspace.pane === 'list' || !workspace.open) {
+  if (workspace.focus === 'list') {
     if (direction === 'l' && !shift) focusPane('document')
     return
   }
@@ -131,10 +116,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   },
 
   sheet: {
-    // A description or a note being written has had its Esc; the sheet
-    // stays up under it.
+    // A note being written has had its Esc; the sheet stays up under it.
     close: () => {
-      if (workspace.describing || workspace.scratchEditing) return
+      if (workspace.scratchEditing) return
       workspace.closeSheet()
     },
   },
@@ -233,16 +217,16 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     restore: () => void restoreShown(),
   },
 
-  /** Its sharing: the same s and y as on the document itself. */
+  /** Its sharing: s shares or stops, y makes a new link. */
   share: {
     toggle: () => void toggleSharing(workspace.open),
     link: () => void renewLink(workspace.open),
   },
 
   /*
-   * The card sheet reads the list keys over its checklist, and the board's
+   * A card's back reads the list keys over its checklist, and the board's
    * card keys for the card itself — `D`, `H`/`L`, `R` act on it as they do
-   * on the board under it. While the description is being written the keys
+   * on the board beside it. While the description is being written the keys
    * are the editor's.
    */
   card: {
@@ -265,12 +249,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     due: () => line(':due '),
     sendLeft: () => guard(() => workspace.sendCard(-1)),
     sendRight: () => guard(() => workspace.sendCard(1)),
-    notes: () => {
-      workspace.closeSheet()
-      guard(() => workspace.openCard())
-    },
+    notes: () => guard(() => workspace.openCard()),
     line: () => line(':'),
-    close: () => workspace.closeCardSheet(),
   },
 
   /*
@@ -346,9 +326,6 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       if (workspace.open && workspace.pane === 'document') focusPane('list')
       else guard(() => workspace.up())
     },
-    // `gt` / `gT` walk the tiles, as they walk vim's tab pages.
-    nextTile: () => void cycleTile(1),
-    previousTile: () => void cycleTile(-1),
     sideways: (key) => {
       const amount = ({ zh: -1, zl: 1, zH: 'halfleft', zL: 'halfright' } as const)[key as 'zh' | 'zl' | 'zH' | 'zL']
       if (!reading() || !hooks.scrollWide(amount)) workspace.say('nothing wider than the column in view', 'error')
@@ -385,9 +362,6 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     // names are typed — this only saves typing `:mkdir `.
     mkdir: () => line(':mkdir '),
     edit: () => void runCommand('edit'),
-    // The board is a view of the space, not a row in the list, so it needs
-    // a key as plain as the one that opens a document.
-    board: () => void runCommand('board'),
     // Renaming starts from the name it has, so a typo is a fix, not a retype.
     rename: () => {
       const target = workspace.target
@@ -419,9 +393,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    */
   board: {
     left: () => workspace.moveList(-1),
-    // Right of the last list is the agenda, the tile beside the board.
+    // Right of the last list is the tile beside the board.
     right: () => {
-      if (workspace.listCursor >= (workspace.board?.lists.length ?? 0) - 1) workspace.specialFocus = 'agenda'
+      if (workspace.listCursor >= (workspace.board?.lists.length ?? 0) - 1) tileKey('l', false)
       else workspace.moveList(1)
     },
     down: () => workspace.moveCard(1),
@@ -433,7 +407,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     sendLeft: () => guard(() => workspace.sendCard(-1)),
     sendRight: () => guard(() => workspace.sendCard(1)),
     done: () => guard(() => workspace.toggleDone()),
-    turn: () => workspace.openCardSheet(),
+    turn: () => guard(() => workspace.turnCard()),
     // The card's notes, without turning it over first: `gf` as on its back.
     notes: () => guard(() => workspace.openCard()),
     new: () => line(':card '),
@@ -449,27 +423,26 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
     reload: () => guard(() => workspace.reloadBoard()),
     delete: () => void runCommand('delete'),
-    leave: () => workspace.closeSpecial(),
   },
 
   /*
    * The agenda: j/k down the list, Enter to the card, Space finishes it.
    * Past the cards the cursor walks on into what was written on this day,
-   * and past that into the calendar under it; `h` is the board to its left.
+   * and past that into the tile under it; `h` is the tile to its left.
    */
   agenda: {
     down: () => {
       const last = Math.max(workspace.agendaCards.length + workspace.agenda.on_this_day.length - 1, 0)
-      if (workspace.agendaCursor >= last) workspace.specialFocus = 'calendar'
+      if (workspace.agendaCursor >= last) tileKey('j', false)
       else workspace.agendaCursor += 1
     },
     up: () => void (workspace.agendaCursor = Math.max(workspace.agendaCursor - 1, 0)),
-    left: () => void (workspace.specialFocus = 'board'),
+    left: () => tileKey('h', false),
     open: () => {
       const card = workspace.agendaCards[workspace.agendaCursor]
       const past = workspace.agenda.on_this_day[workspace.agendaCursor - workspace.agendaCards.length]
       if (card) guard(() => workspace.goToCard(card))
-      // Opened from the special workspace, so `q` on it comes back here.
+      // Beside the agenda, so `q` on it comes back here.
       else if (past) guard(() => workspace.openPath(past.path))
     },
     finish: () => {
@@ -483,7 +456,6 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     sendLeft: () => sendAgendaCard(-1),
     sendRight: () => sendAgendaCard(1),
     today: () => void runCommand('today'),
-    leave: () => workspace.closeSpecial(),
   },
 
   /** The calendar: h/l a day, j/k a week, H/L a month, Enter to the day. */
@@ -496,15 +468,11 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       guard(() => workspace.loadCalendar())
     },
     open: () => void workspace.guard(() => workspace.openCalendarDay()).then(() => hooks.focusEditor()),
-    leave: () => workspace.closeSpecial(),
   },
 
-  special: {
-    // Tab walks the tiles here, as it walks the spaces everywhere else; the
-    // digits still switch space, and the board with it.
-    cycle: (key) => workspace.cycleSpecial(shifted(key) ? -1 : 1),
-    board: () => void runCommand('board'),
-    leave: () => workspace.closeSpecial(),
+  /** What every view shares: `q` closes its tile, back to the one before. */
+  views: {
+    close: () => void runCommand('close'),
   },
 
   global: {
@@ -524,6 +492,12 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     cycle: (key) => guard(() => workspace.cycleSpace(shifted(key) ? -1 : 1)),
     overview: () => void openOverview(),
     fullscreen: () => void (workspace.fullscreen = !workspace.fullscreen),
+    // `gt` / `gT` walk the tiles, as they walk vim's tab pages.
+    nextTile: () => void cycleTile(1),
+    previousTile: () => void cycleTile(-1),
+    // The board is a view of the space, not a row in the list, so it needs
+    // a key as plain as the one that opens a document.
+    board: () => void runCommand('board'),
     // The agenda and today's entry are a key away from anywhere, the board
     // included: they are the two questions asked most.
     agenda: () => void runCommand('agenda'),
@@ -532,7 +506,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     // `S`, as the desktop's special workspace is bound: the board, the
     // agenda and the calendar, put up and away again. `b`, `t` and `C` only
     // ever go to their tile.
-    special: () => void runCommand('special'),
+    plan: () => void runCommand('plan'),
     line: () => line(':'),
     help: () => void runCommand('help'),
   },

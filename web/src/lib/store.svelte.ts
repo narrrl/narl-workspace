@@ -26,22 +26,23 @@ import { formatBytes, formatDay, formatStamp, formatWeekday, isTouchDevice, pars
 
 export type Pane = 'list' | 'document'
 /**
- * The tree of documents, or the special workspace: the board of the space
- * being browsed, the agenda and the calendar, tiled side by side and a key
- * away from anywhere, like the desktop's scratchpad.
+ * What a tile shows: a node of the tree — a document or a file — or one of
+ * the views over the boards and the diary, which are tiled beside the
+ * documents like any other window.
  */
-export type View = 'tree' | 'special'
-/** The tile of the special workspace that has focus. */
-export type SpecialTile = 'board' | 'agenda' | 'calendar'
+export type TileKind = 'node' | 'board' | 'agenda' | 'calendar' | 'card'
+export type View = Exclude<TileKind, 'node'>
 /** What floats over the tiles; one at a time. */
-export type Sheet = 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'info' | 'trash' | 'card'
+export type Sheet = 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'info' | 'trash'
 /** The info sheet's parts: what the open document holds, and what is around it. */
 export type InfoSection = 'outline' | 'history' | 'backlinks' | 'share'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
 
 /**
- * Where a space was left: the folder, the open documents, the row, the pane.
- * `openId` is the focused tile's, all a spot held before there were tiles.
+ * Where a space was left: the folder, the tiles, the row, the pane. A tile
+ * is the id of the node it shows, or the name of the view. `openId` is the
+ * focused tile's, all a spot held before there were tiles, and `open` the
+ * documents alone, all it held before there were views.
  */
 type Spot = {
   parentId: number
@@ -49,6 +50,7 @@ type Spot = {
   cursor: number
   pane: Pane
   open?: number[]
+  tiles?: (number | View)[]
   focused?: number
 }
 
@@ -63,12 +65,15 @@ function doneSaid(moved: Moved): string {
 let tiles = 0
 
 /**
- * One document on screen, and everything that belongs to it rather than to
+ * One window on screen, and everything that belongs to it rather than to
  * the workspace: what it shows, the draft being written, whether that is
- * saved, and the timer that will save it.
+ * saved, and the timer that will save it. A view keeps its state in the
+ * workspace — there is one board, one agenda, one calendar — so its tile
+ * holds only its kind.
  */
 export class Tile {
   readonly id = ++tiles
+  kind = $state<TileKind>('node')
   open = $state<WorkspaceNode | null>(null)
   draft = $state<Draft>({ name: '', body: '', created_at: 0 })
   editing = $state(false)
@@ -77,12 +82,6 @@ export class Tile {
   dirty = $state(false)
   /** The editor's vim mode, for the status line while this tile has focus. */
   vimMode = $state('normal')
-  /*
-   * Set when a card's document was opened from the board, so closing the
-   * document goes back to the board — on the same card — rather than leaving
-   * you in a tree you never asked for.
-   */
-  returnTo = $state<'special' | null>(null)
   /*
    * The document `o` just made. If it is left with neither a name nor a word
    * in it, it is removed on the way out rather than left as an empty row.
@@ -98,9 +97,19 @@ export class Tile {
     this.autosave = null
   }
 
-  /** Put the tile back to showing nothing. Where it goes back to stays. */
+  constructor(kind: TileKind = 'node') {
+    this.kind = kind
+  }
+
+  /** Showing nothing: a node tile with no node in it. */
+  get empty(): boolean {
+    return this.kind === 'node' && !this.open
+  }
+
+  /** Put the tile back to showing nothing. */
   clear() {
     this.stopAutosave()
+    this.kind = 'node'
     this.open = null
     this.editing = false
     this.dirty = false
@@ -173,12 +182,6 @@ class Workspace {
   set dirty(dirty: boolean) {
     this.tile.dirty = dirty
   }
-  get returnTo() {
-    return this.tile.returnTo
-  }
-  set returnTo(to: 'special' | null) {
-    this.tile.returnTo = to
-  }
   get vimMode() {
     return this.tile.vimMode
   }
@@ -191,6 +194,23 @@ class Workspace {
     return this.tiles.filter((tile) => tile.open?.id === id)
   }
 
+  /*
+   * The tiles focused before the one focused now, the last the latest:
+   * closing a tile goes back to the one that had the focus before it — to
+   * the board a card's notes were opened from, to the calendar a day was.
+   */
+  #trail: Tile[] = []
+
+  /** What has the keys: the list, or the kind of the focused tile. */
+  get focus(): 'list' | TileKind {
+    return this.pane === 'list' || this.tile.empty ? 'list' : this.tile.kind
+  }
+
+  /** The tile showing `kind`, if one is. */
+  view(kind: View): Tile | undefined {
+    return this.tiles.find((tile) => tile.kind === kind)
+  }
+
   /**
    * Focus a tile, and follow it in the list and the address bar, as opening
    * its document did.
@@ -198,34 +218,48 @@ class Workspace {
   focusTile(index: number) {
     const tile = this.tiles[index]
     if (!tile) return
+    if (tile !== this.tile) {
+      this.#leaveCard()
+      this.#trail = [...this.#trail.filter((t) => t !== tile && t !== this.tile), this.tile].slice(-20)
+    }
     this.focused = index
-    if (!tile.open) return
+    if (tile.empty) return
     this.pane = 'document'
+    if (!tile.open) return
     const row = this.nodes.findIndex((n) => n.id === tile.open?.id)
     if (row >= 0) this.cursor = row
     this.#syncUrl(tile.open.path)
   }
 
+  /** A tile of its own for what opens next, beside what is on screen. */
+  #addTile(tile = new Tile()) {
+    this.tiles.push(tile)
+    this.focusTile(this.tiles.length - 1)
+  }
+
   /**
    * Tiles with nothing in them go, as long as one is left: a closed document
-   * closes its tile, as `:q` closes a window in vim.
+   * closes its tile, as `:q` closes a window in vim. When the focused one
+   * went, the focus goes back along the trail.
    */
   prune() {
     const current = this.tile
     if (this.tiles.length > 1) {
-      const kept = this.tiles.filter((tile) => tile.open)
+      const kept = this.tiles.filter((tile) => !tile.empty)
       this.tiles = kept.length > 0 ? kept : [current]
-      const at = this.tiles.indexOf(current)
-      this.focused = at >= 0 ? at : Math.min(this.focused, this.tiles.length - 1)
+      const back = this.tiles.includes(current) ? current : [...this.#trail].reverse().find((tile) => this.tiles.includes(tile))
+      this.focused = back ? this.tiles.indexOf(back) : Math.min(this.focused, this.tiles.length - 1)
     }
-    if (!this.open) this.pane = 'list'
+    this.#trail = this.#trail.filter((tile) => this.tiles.includes(tile) && tile !== this.tile)
+    if (this.tile.empty) this.pane = 'list'
   }
 
-  /** `:close`: the focused tile goes, or with only one, its document. */
+  /** `:close`: the focused tile goes, or with only one, what it shows. */
   closeTile() {
+    if (this.tile.kind === 'card' && this.describing && !this.stopDescribing()) return
     this.tile.clear()
     this.prune()
-    if (this.open) this.focusTile(this.focused)
+    if (!this.tile.empty) this.focusTile(this.focused)
   }
 
   /**
@@ -238,10 +272,7 @@ class Workspace {
     if (isContainer(selected)) return this.say(`${selected.slug} is a ${selected.kind} — l goes into it`, 'error')
     const shown = this.tiles.findIndex((tile) => tile.open?.id === selected.id)
     if (shown >= 0) return this.focusTile(shown)
-    if (this.open) {
-      this.tiles.push(new Tile())
-      this.focused = this.tiles.length - 1
-    }
+    if (!this.tile.empty) this.#addTile()
     try {
       await this.openSelected()
     } finally {
@@ -261,11 +292,10 @@ class Workspace {
     for (const tile of others) tile.stopAutosave()
     this.tiles = [this.tile]
     this.focused = 0
+    this.#trail = []
   }
 
-  /** The board of the current space, loaded only while it is being looked at. */
-  view = $state<View>('tree')
-  /** The board as the server sent it. */
+  /** The board as the server sent it, loaded only while it is being looked at. */
   rawBoard = $state<Board | null>(null)
   /*
    * The board as it is walked and drawn: the done list keeps only what was
@@ -329,10 +359,8 @@ class Workspace {
   overlay = $state<'none' | Sheet>('none')
   /** The part of the info sheet on show; it stays for the next time it opens. */
   infoSection = $state<InfoSection>('outline')
-  /** Which of the special workspace's tiles the keys go to. */
-  specialFocus = $state<SpecialTile>('board')
   /**
-   * The space whose board the special workspace shows: the one being browsed
+   * The space whose board the board's tile shows: the one being browsed
    * when it has a board, or else the last one shown, so that coming from the
    * diary does not leave the board's tile empty.
    */
@@ -794,33 +822,49 @@ class Workspace {
     if (start) await this.enterSpace(start.id)
   }
 
-  #rememberSpot() {
+  /** `views` false: the views are leaving with the focus, and are not left behind. */
+  #rememberSpot(views = true) {
     if (this.spaceId === null || this.parentId === null) return
-    const open = this.tiles.flatMap((tile) => (tile.open ? [tile.open.id] : []))
+    // A card's back is the card under the board's cursor, which is not kept.
+    const kept = this.tiles.filter((tile) => !tile.empty && (tile.kind === 'node' || (views && tile.kind !== 'card')))
     this.#spots[this.spaceId] = {
       parentId: this.parentId,
       openId: this.open?.id ?? null,
       cursor: this.cursor,
       pane: this.pane,
-      open,
-      focused: Math.max(open.indexOf(this.open?.id ?? -1), 0),
+      tiles: kept.map((tile) => (tile.kind === 'node' ? tile.open!.id : tile.kind)),
+      focused: Math.max(kept.indexOf(this.tile), 0),
     }
     localStorage.setItem('diary:spots', JSON.stringify(this.#spots))
   }
 
   async enterSpace(id: number) {
     const leaving = this.spaceId !== null && this.spaceId !== id
+    /*
+     * The views look at every board and the whole diary, so with one of them
+     * focused they come along — moved, not copied — as the special workspace
+     * once did: a digit on the board shows that space's board, and the
+     * agenda stays beside it.
+     */
+    let carried: Tile[] = []
+    let carriedFocus: Tile | undefined
     if (leaving) {
       await this.flush()
-      this.#rememberSpot()
+      const carry = this.focus !== 'list' && this.focus !== 'node'
+      this.#rememberSpot(!carry)
       const from = this.spaces.findIndex((s) => s.id === this.spaceId)
       const to = this.spaces.findIndex((s) => s.id === id)
       this.switchDirection = to >= from ? 1 : -1
+      if (carry) {
+        carried = this.tiles.filter((tile) => tile.kind !== 'node' && tile.kind !== 'card')
+        carriedFocus = this.tile.kind === 'card' ? (this.view('board') ?? carried[0]) : this.tile
+      }
       // Each space has tiles of its own; these come back with this one.
       for (const tile of this.tiles) tile.stopAutosave()
-      this.tiles = [new Tile()]
-      this.focused = 0
-      this.pane = 'list'
+      this.tiles = carried.length > 0 ? carried : [new Tile()]
+      this.focused = carriedFocus ? this.tiles.indexOf(carriedFocus) : 0
+      this.#trail = []
+      this.pane = carried.length > 0 ? 'document' : 'list'
     }
     this.spaceId = id
     localStorage.setItem('diary:space', String(id))
@@ -836,44 +880,49 @@ class Workspace {
       await this.goTo(id)
     }
     if (spot && this.parentId === spot.parentId) {
-      const ids = spot.open ?? (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId) ? [spot.openId] : [])
-      let opened = 0
-      for (const open of ids) {
-        if (opened > 0) {
+      const entries =
+        spot.tiles ?? spot.open ?? (spot.openId !== null && this.nodes.some((n) => n.id === spot.openId) ? [spot.openId] : [])
+      const restored: Tile[] = []
+      for (const entry of entries) {
+        if (typeof entry === 'string') {
+          let tile = this.view(entry)
+          if (!tile) this.tiles.push((tile = new Tile(entry)))
+          restored.push(tile)
+          continue
+        }
+        const empty = this.tiles.findIndex((tile) => tile.empty)
+        if (empty >= 0) this.focused = empty
+        else {
           this.tiles.push(new Tile())
           this.focused = this.tiles.length - 1
         }
         try {
-          // Reopened under the board, if that is what is on screen.
-          await this.openNode(open, false, true)
-          opened++
+          await this.openNode(entry)
+          restored.push(this.tile)
         } catch {
           /* deleted or moved away since: one tile fewer */
         }
       }
       this.prune()
-      if (opened > 0) {
-        this.focusTile(Math.min(spot.focused ?? 0, this.tiles.length - 1))
-        this.pane = spot.pane
+      const back = carriedFocus ?? restored[Math.min(spot.focused ?? 0, restored.length - 1)]
+      if (back && this.tiles.includes(back)) {
+        this.focusTile(this.tiles.indexOf(back))
+        if (!carriedFocus) this.pane = spot.pane
       } else {
         this.cursor = Math.min(spot.cursor, Math.max(this.nodes.length - 1, 0))
       }
     }
-    // Switching space with the special workspace up shows the new space's
-    // board; a space without one leaves the last board where it is.
-    if (this.view === 'special' && this.space?.has_board) {
-      this.listCursor = 0
-      this.cardCursor = 0
-      await this.reloadBoard(id, undefined)
-    }
+    this.#trail = []
+    await this.#loadViews()
   }
 
   /** Show the children of `id`, which must be a space or a folder. */
   async goTo(id: number, keep?: number) {
     await this.flush()
     const folder = await api.getNode(id)
-    // Walking into another space by a link leaves this one where it was.
-    if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot()
+    // Walking into another space by a link leaves this one where it was; the
+    // views stay on screen, so they go along rather than stay behind too.
+    if (this.spaceId !== null && folder.path[0]?.id !== this.spaceId) this.#rememberSpot(false)
     this.parentId = id
     this.parentSealed = folder.sealed
     this.query = ''
@@ -905,8 +954,6 @@ class Workspace {
   }
 
   async search(query: string, global = this.globalSearch) {
-    // The results are rows in the list, which the board would hide.
-    if (query && this.view === 'special') this.closeSpecial()
     this.query = query
     this.globalSearch = global && query !== ''
     this.cursor = 0
@@ -936,19 +983,10 @@ class Workspace {
     this.cursor = Math.min(Math.max(this.cursor + delta, 0), this.nodes.length - 1)
   }
 
-  async openNode(id: number, edit = false, underBoard = false) {
+  async openNode(id: number, edit = false) {
     if (this.open?.id !== id) await this.flushTile()
 
     const node = await api.getNode(id)
-    // What is asked for from the board — `:12`, `T`, a search — is shown, not
-    // opened behind it; closing a document goes back to the board.
-    if (this.view === 'special' && !underBoard) {
-      if (isContainer(node)) this.closeSpecial()
-      else {
-        this.view = 'tree'
-        this.returnTo = 'special'
-      }
-    }
     if (isContainer(node)) {
       await this.goTo(node.id)
       return
@@ -961,6 +999,10 @@ class Workspace {
       if (edit && node.kind === 'document') this.editing = true
       return
     }
+    // A view is never put away by what is opened from it — a card's notes,
+    // a day of the calendar, a search from the board: that opens beside it,
+    // and closing it goes back there.
+    if (this.tile.kind !== 'node') this.#addTile()
 
     this.open = node
     this.draft = { name: node.name, body: node.body, created_at: node.created_at }
@@ -1112,7 +1154,7 @@ class Workspace {
       this.say(`restored the space ${name}`)
     } else {
       const parent = node.path.at(-2)
-      if (parent && node.path[0]?.id === this.spaceId && this.view === 'tree') {
+      if (parent && node.path[0]?.id === this.spaceId) {
         if (parent.id === this.parentId && !this.query) await this.refresh(node.id)
         else if (this.overlay !== 'trash') await this.goTo(parent.id, node.id)
       }
@@ -1256,7 +1298,6 @@ class Workspace {
     this.prune()
     this.rawBoard = null
     this.boardSpaceId = null
-    this.view = 'tree'
     this.spaces = await api.listSpaces()
     const next = this.spaces.find((space) => space.role === 'diary') ?? this.spaces[0]
     if (next) await this.enterSpace(next.id)
@@ -1356,7 +1397,7 @@ class Workspace {
     if (late + due === 0) return
     localStorage.setItem('diary:agenda-seen', today)
     this.agendaCursor = 0
-    await this.openSpecial('agenda')
+    await this.showView('agenda')
   }
 
   /** `C`: the calendar, on the day of the entry being read or else today. */
@@ -1364,7 +1405,7 @@ class Workspace {
     const open = this.open
     const reading = open && this.spaces.find((space) => space.id === open.path[0]?.id)?.role === 'diary'
     this.calendarDay = formatDay(reading ? open.created_at : Math.floor(Date.now() / 1000))
-    await this.openSpecial('calendar')
+    await this.showView('calendar')
   }
 
   async loadCalendar() {
@@ -1385,7 +1426,7 @@ class Workspace {
   async openCalendarDay() {
     const day = this.calendarDay
     const entry = this.calendarEntries.find((e) => e.day === day)
-    // Opened from the special workspace, so `q` on the entry comes back here.
+    // Beside the calendar, so `q` on the entry comes back to it.
     if (entry) return this.openPath(entry.path)
     await this.openDay(day)
   }
@@ -1423,10 +1464,10 @@ class Workspace {
 
   /** Enter in the agenda: to the card, on its own board, beside the agenda. */
   async goToCard(card: AgendaCard) {
+    // From the agenda's tile, which comes along into the card's space.
     if (this.spaceId !== card.space_id) await this.enterSpace(card.space_id)
     await this.reloadBoard(card.space_id, card.id)
-    this.view = 'special'
-    this.specialFocus = 'board'
+    await this.showView('board')
   }
 
   /** Space in the agenda: into that board's done list, from wherever it is. */
@@ -1435,7 +1476,7 @@ class Workspace {
     if (!done) return
     const moved = await api.moveCard(card.id, done.id, done.cards.length)
     await this.loadAgenda()
-    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
+    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
     this.say(doneSaid(moved))
   }
 
@@ -1448,7 +1489,7 @@ class Workspace {
     // It may have changed group; the cursor goes with it.
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
-    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
+    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
     return updated
   }
 
@@ -1465,7 +1506,7 @@ class Workspace {
     await this.loadAgenda()
     const at = this.agendaCards.findIndex((c) => c.id === card.id)
     if (at >= 0) this.agendaCursor = at
-    if (this.view === 'special' && this.boardSpaceId === card.space_id) await this.reloadBoard()
+    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
     this.say(from + delta === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
   }
 
@@ -1533,56 +1574,85 @@ class Workspace {
    * where a card is would be worse than a round trip.
    */
 
-  /**
-   * The special workspace, with `focus` the tile the keys go to. Everything
-   * in it is read again on the way in: it is looked at in passing, and what
-   * it says should be what is true now.
+  /*
+   * The views — the board, the agenda, the calendar, a card's back — are
+   * tiles, opened beside what is on screen. Each is read again whenever it is
+   * gone to: it is looked at in passing, and what it says should be what is
+   * true now.
    */
-  async openSpecial(focus: SpecialTile = this.specialFocus) {
+
+  /** `b`, `t`, `C`, Enter on a card: to that view's tile, opening it first when it is not up. */
+  async showView(kind: View) {
+    await this.#loadView(kind)
+    if (!this.view(kind)) {
+      // The one empty tile there can be takes it; otherwise it goes beside.
+      if (this.tile.empty) this.tile.kind = kind
+      else this.tiles.push(new Tile(kind))
+    }
+    this.focusTile(this.tiles.indexOf(this.view(kind)!))
+    if (kind === 'board' && this.boardSpaceId === null) this.say('no space has a board — :set board turns one on', 'error')
+  }
+
+  /** The views `S` puts up together, in the order they are tiled. */
+  static readonly PLAN: View[] = ['board', 'agenda', 'calendar']
+
+  /**
+   * `S`: the board, the agenda and the calendar, tiled ahead of the
+   * documents with the board focused — or, when all three are up, every view
+   * put away again.
+   */
+  async togglePlan() {
+    if (Workspace.PLAN.every((kind) => this.view(kind))) {
+      for (const tile of this.tiles) if (tile.kind !== 'node') tile.clear()
+      this.prune()
+      if (!this.tile.empty) this.focusTile(this.focused)
+      return
+    }
+    await Promise.all(Workspace.PLAN.map((kind) => this.#loadView(kind)))
+    const current = this.tile
+    const missing = Workspace.PLAN.filter((kind) => !this.view(kind)).map((kind) => new Tile(kind))
+    this.tiles = [...missing, ...this.tiles]
+    this.focused = this.tiles.indexOf(current)
+    this.prune()
+    this.focusTile(this.tiles.indexOf(this.view('board')!))
+    if (this.boardSpaceId === null) this.say('no space has a board — :set board turns one on', 'error')
+  }
+
+  /** Read again what a view shows. */
+  async #loadView(kind: View) {
+    if (kind === 'board' || kind === 'card') await this.#loadBoard()
+    else if (kind === 'agenda') await this.loadAgenda()
+    else {
+      if (!this.calendarDay) this.calendarDay = formatDay(Math.floor(Date.now() / 1000))
+      await this.loadCalendar()
+    }
+  }
+
+  /** Every view on screen read again, after a space switch brought them. */
+  async #loadViews() {
+    if (this.view('board') || this.view('card')) await this.#loadBoard()
+    if (this.view('calendar')) await this.#loadView('calendar')
+  }
+
+  /**
+   * The board of the space being browsed, or else the one shown last, or
+   * else the first space's that has one; null when no space has a board.
+   */
+  async #loadBoard() {
     const space = this.space
     const shown = this.boardSpace?.has_board ? this.boardSpace : this.spaces.find((s) => s.has_board)
     const board = space?.has_board ? space : shown
-    if (board) await this.reloadBoard(board.id, board.id === this.boardSpaceId ? this.card?.id : undefined)
-    else {
+    if (!board) {
       this.rawBoard = null
       this.boardSpaceId = null
+      return
     }
-    if (!this.calendarDay) this.calendarDay = formatDay(Math.floor(Date.now() / 1000))
-    await Promise.all([this.loadAgenda(), this.loadCalendar()])
-    this.view = 'special'
-    this.specialFocus = focus
-    if (focus === 'board' && !board) this.say('no space has a board — :set board turns one on', 'error')
-  }
-
-  closeSpecial() {
-    this.view = 'tree'
-    this.returnTo = null
-  }
-
-  /** `S`: the special workspace up, on the tile it was left on, or away again. */
-  async toggleSpecial() {
-    if (this.view === 'special') this.closeSpecial()
-    else await this.openSpecial()
-  }
-
-  /**
-   * `b`, `t` and `C`: to that tile of the special workspace, putting it up
-   * first when it is not. They only ever go somewhere; leaving is `S`,
-   * `q` or `Esc`, from whichever tile.
-   */
-  async showSpecial(focus: SpecialTile) {
-    if (this.view === 'special') this.specialFocus = focus
-    else await this.openSpecial(focus)
-  }
-
-  /** `Tab` / `Shift-Tab` in the special workspace: the next tile round, or the one before. */
-  cycleSpecial(by: 1 | -1) {
-    const order: SpecialTile[] = ['board', 'agenda', 'calendar']
-    this.specialFocus = order[(order.indexOf(this.specialFocus) + by + order.length) % order.length]
-  }
-
-  async openBoard() {
-    await this.openSpecial('board')
+    // Another space's board starts at its top left, as a space switch did.
+    if (board.id !== this.boardSpaceId) {
+      this.listCursor = 0
+      this.cardCursor = 0
+    }
+    await this.reloadBoard(board.id, board.id === this.boardSpaceId ? this.card?.id : undefined)
   }
 
   get boardSpace(): NodeSummary | undefined {
@@ -1677,7 +1747,7 @@ class Workspace {
    * it goes on the list under the cursor instead.
    */
   async createCard(title: string, nodeId: number | null = null) {
-    if (this.view === 'special') {
+    if (this.focus === 'board' || this.focus === 'card') {
       const list = this.list
       if (!list) return this.say('no list to put it on', 'error')
       const card = await api.createCard(list.id, { title, node_id: nodeId })
@@ -1733,11 +1803,23 @@ class Workspace {
    * too, and the cursor follows it wherever a move puts it.
    */
 
-  openCardSheet() {
+  /** Enter on a card: its back, in a tile beside the board. */
+  async turnCard() {
     if (!this.card) return this.say('no card selected', 'error')
     this.taskCursor = 0
-    this.describing = false
-    this.openSheet('card')
+    await this.showView('card')
+  }
+
+  /*
+   * Leaving a card's back while its description is being written: what is
+   * written is kept, as leaving a document's tile keeps its draft.
+   */
+  #leaveCard() {
+    if (this.tile.kind !== 'card' || !this.describing) return
+    void this.guard(async () => {
+      if (this.descriptionDirty) await this.saveDescription()
+      this.stopDescribing(true)
+    })
   }
 
   get scratchNote(): ScratchNote | undefined {
@@ -1864,25 +1946,17 @@ class Workspace {
     await this.dropScratchNote(false)
     this.scratchEditing = false
     this.scratchOpen = false
-    if (this.view === 'special') this.closeSpecial()
     await this.refresh(node.id)
     await this.openNode(node.id)
     this.say(`kept as ${node.path.map((crumb) => crumb.slug).join('/')}`)
-  }
-
-  /** `q`: the sheet away, unless that would lose a description being written. */
-  closeCardSheet() {
-    if (this.describing && !this.stopDescribing()) return
-    this.overlay = 'none'
   }
 
   openSheet(sheet: Sheet) {
     this.overlay = sheet
   }
 
-  /** Esc, q, a click beside it: the sheet away — the card's asks first. */
+  /** Esc, q, a click beside it: the sheet away. */
   closeSheet() {
-    if (this.overlay === 'card') return this.closeCardSheet()
     this.overlay = 'none'
   }
 
@@ -2065,31 +2139,12 @@ class Workspace {
       await api.updateCard(card.id, { node_id: node.id })
       nodeId = node.id
     }
-    this.view = 'tree'
     if (this.parentId !== space) await this.goTo(space)
     else await this.refresh()
-    // The notes open beside whatever was being read, and `q` takes their
-    // tile away again on the way back to the board.
-    if (this.open && this.open.id !== nodeId) {
-      this.tiles.push(new Tile())
-      this.focused = this.tiles.length - 1
-    }
+    // The notes open beside the board, and `q` takes their tile away again
+    // on the way back to it.
     await this.openNode(nodeId, card.node_id === null)
-    this.prune()
     if (card.node_id === null) this.enterInsert = true
-    this.returnTo = 'special'
-  }
-
-  /**
-   * Back to the special workspace a document was opened from — a card's
-   * notes, a day of the calendar, an entry of the agenda — on the tile it
-   * was opened from.
-   */
-  async returnToSpecial() {
-    this.returnTo = null
-    this.closeTile()
-    this.pane = 'list'
-    await this.openSpecial(this.specialFocus)
   }
 
   /** Turn a space's board on or off. The diary ships with it off. */
@@ -2098,11 +2153,11 @@ class Workspace {
     if (!space) return
     await api.updateNode(space.id, { has_board: on })
     this.spaces = await api.listSpaces()
-    if (on) await this.openBoard()
+    if (on) await this.showView('board')
     else if (this.boardSpaceId === space.id) {
       this.rawBoard = null
       this.boardSpaceId = null
-      if (this.view === 'special') await this.openSpecial()
+      if (this.view('board') || this.view('card')) await this.#loadBoard()
     }
     this.say(on ? `${space.slug} has a board` : `${space.slug} has no board any more`)
   }

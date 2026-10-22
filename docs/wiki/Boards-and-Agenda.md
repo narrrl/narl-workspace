@@ -1,38 +1,44 @@
 # Boards and the agenda
 
-## The special workspace
+## Views
 
-The board, the agenda and the [calendar](Diary.md#the-calendar) share one
-workspace of their own, as the desktop's special workspace holds what is
-looked at in passing. `S` (or `:special`, or the `special` pill in the bar)
-puts it up and away again. It is three tiles: the board on the left, the
-agenda over the calendar on the right.
+The board, the agenda, the [calendar](Diary.md#the-calendar) and the back of
+a card are views: tiles like the documents' tiles, opened beside what is on
+screen and walked the same way. `S` (or `:plan`) puts the board, the agenda
+and the calendar up together, ahead of the documents with the board focused —
+the board on the left, the agenda over the calendar on the right when nothing
+else is open — and puts every view away again.
 
-![The special workspace](../images/board.png)
+![The board, the agenda and the calendar](../images/board.png)
 
 | key | what it does |
 | --- | --- |
-| `S` | put the special workspace up, or away |
-| `b`, `t`, `C` | to the board, the agenda or the calendar, from anywhere |
-| `Tab` / `Shift-Tab` | the next / previous tile |
-| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | the tile that way |
+| `S` | the board, the agenda and the calendar up together, or every view away |
+| `b`, `t`, `C` | to the board, the agenda or the calendar, opening its tile when it is not up |
+| `gt` / `gT` | the next / previous tile |
+| `Alt-h` / `Alt-j` / `Alt-k` / `Alt-l` | the tile that way; left of the leftmost is the list |
 | `l` past the last list, `h` in the agenda, `j` past its end | on into the tile beside |
 | `f` | the focused tile fills the screen; again or `Esc` to leave |
-| `1` … `9` | switch space, and the board with it |
-| `q`, `Esc` | leave, back to where you were |
+| `1` … `9` | switch space; with a view focused, the views come along |
+| `q`, `Esc` | close the view's tile, back to the tile focused before it |
 
 The keys go to the tile with focus, which wears the light border and its key
-lit in its head; the other tiles keep their cursors, dimmed. `b`, `t` and `C`
-only ever go to their tile, and `Esc` only ever leaves — or, with a tile
-filling the screen, leaves that first. A document opened from the workspace —
-a card's notes, a day of the calendar, an entry of the agenda, `T` — comes
-back to the tile it was opened from on `q`. Everything in it is read again
-each time it comes up.
+lit in its head; the other views keep their cursors, dimmed. A view is never
+replaced by what is opened from it — a card's notes, a day of the calendar, an
+entry of the agenda, a row of the list: that opens in a tile beside it, and
+`q` on it comes back to the view. Each view is read again whenever it is gone
+to.
+
+Each space keeps its own tiles, views among them. Switching space with a view
+focused takes the board, the agenda and the calendar along, the way the
+special workspace used to stay up: a digit on the board shows that space's
+board, with the agenda still beside it. Switching with a document or the list
+focused leaves them in the space, and they are there again on coming back.
 
 ## The board
 
 Every space except the diary has a board. `b`, the board button on the rail, or
-`:board` shows it in the special workspace, and `Esc` goes back to the tree.
+`:board` shows it in a tile beside what is open, and `q` or `Esc` closes it.
 It is the board of the space being browsed, or, in a space without one such as
 the diary, the last board shown. The head of the board names every space that
 has one, with the digit that goes there.
@@ -64,13 +70,14 @@ a week fold away until `z` shows them.
 | `z` | show done cards older than a week |
 | `F` | a letter over every card; type it to jump there |
 | `x`, `dd` | delete the card |
-| `q`, `Esc` | leave the special workspace |
+| `q`, `Esc` | close the board's tile |
 
 ### The back of a card
 
-`Enter` on a card turns it over: a sheet floats over the board with its
-labels, its description and its checklist. The card stays the one under the
-board's cursor, so `D`, `R`, `H` and `L` act on it as they do on the board.
+`Enter` on a card turns it over: a tile beside the board with its labels, its
+description and its checklist. It is the card under the board's cursor, so
+walking the board leafs through the backs, and `D`, `R`, `H` and `L` act on it
+as they do on the board.
 
 | key | what it does |
 | --- | --- |
@@ -83,11 +90,12 @@ board's cursor, so `D`, `R`, `H` and `L` act on it as they do on the board.
 | `e`, `i`, `Enter` | write the description |
 | `a` | put a label on, or take it off (`:label <name>`) |
 | `gf` | the card's notes, below |
-| `q`, `Esc` | back to the board |
+| `q`, `Esc` | close the back, back to the board |
 
 The description is markdown, written in the same editor as a document, vim
 and all: `:w` writes it to the card, `:q` or `Esc` in normal mode leaves, and
-`:q!` throws away what was not written. A fenced block in a language is
+`:q!` throws away what was not written. Leaving the tile while writing keeps
+what is written. A fenced block in a language is
 coloured the way nvim colours it, written and read.
 
 Labels are lower case, and each name keeps its colour on every card and every
@@ -101,15 +109,15 @@ step open again.
 
 ### Capturing a card
 
-`c` anywhere outside the special workspace opens `:card ` on the command line. The card goes
+`c` in the tree opens `:card ` on the command line. The card goes
 into the inbox of the space you are in, or of the first space with a board, and
 you stay where you were. From outside the browser, see [Capture](Capture.md).
 
 ### Notes
 
 `gf` on a card, or on its back, opens its notes: a document named after the card, made in the
-root of the space the first time. Closing it goes back to the board, on the
-same card. `:card!` while reading a document makes a card that points at it.
+root of the space the first time, in a tile beside the board. Closing it goes
+back to the board, on the same card. `:card!` while reading a document makes a card that points at it.
 
 The link is loose on purpose: deleting the document leaves the card, because the
 work is still open when its notes are gone.
@@ -150,8 +158,8 @@ does not make a second copy. The board and the agenda show the rule as
 
 ## The agenda
 
-`t` (or `:agenda`) gathers what needs you from every board at once, in the
-special workspace beside the board.
+`t` (or `:agenda`) gathers what needs you from every board at once, in a tile
+of its own.
 
 ![The agenda](../images/agenda.png)
 
@@ -163,15 +171,15 @@ special workspace beside the board.
 
 | key | what it does |
 | --- | --- |
-| `j` / `k` | down / up, on into the diary entries, then into the calendar |
-| `h` | to the board |
+| `j` / `k` | down / up, on into the diary entries, then into the tile below |
+| `h` | to the tile on the left |
 | `Enter` | to the card on its own board, in the tile beside, or open the entry |
 | `Space` | finish the card where it stands |
 | `D` | due date |
 | `H` / `L` | to the list left / right on its board |
 | `:` | the command line with the agenda kept up, so `:repeat` acts on the card |
 | `T` | today's diary entry |
-| `q`, `Esc` | leave the special workspace |
+| `q`, `Esc` | close the agenda's tile |
 
 The agenda opens by itself once a day when something is late or due. "Today"
 is the day in `WORKSPACE_TIMEZONE`, the same as for the mails, so a browser in

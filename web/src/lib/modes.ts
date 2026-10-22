@@ -4,12 +4,13 @@
  * a context takes it.
  *
  *   always     Ctrl-S, Alt-h/j/k/l — heard in the editor too
- *   a sheet    help, info, trash, the card's back …; nothing under one hears a key
+ *   a sheet    help, info, trash …; nothing under one hears a key
  *   drawer     the scratchpad, while it is down
  *   workspace  Esc out of fullscreen, Q
  *   writing    a document being written takes every plain key back
- *   tile       the focused kind: tree, board, agenda or calendar
- *   special    what the three tiles of the special workspace share
+ *   tile       what has the focus: the tree, or a view — board, agenda,
+ *              calendar, a card's back
+ *   views      what the views share: q, gt, b
  *   global     spaces, t, T, C, S, :, ?
  *
  * The `[y/N]` prompt sits over all of it, in App.svelte, and the command
@@ -20,7 +21,7 @@ import { bindings, type Binding, type Context } from './keymap'
 import { workspace } from './store.svelte'
 
 /** The sheets with keys of their own, under the same name as the sheet. */
-const sheets = new Set<string>(['help', 'overview', 'media', 'trash', 'card'])
+const sheets = new Set<string>(['help', 'overview', 'media', 'trash'])
 
 /** The stack, the topmost first. */
 export function stack(): Context[] {
@@ -29,16 +30,19 @@ export function stack(): Context[] {
   if (overlay !== 'none') {
     // The info sheet hears the keys of the part on show, then its own Tab.
     if (overlay === 'info') modes.push(workspace.infoSection, 'info')
-    // While the description is written, the card's back has no keys of its own.
-    else if (sheets.has(overlay) && !(overlay === 'card' && workspace.describing)) modes.push(overlay as Context)
+    else if (sheets.has(overlay)) modes.push(overlay as Context)
     return [...modes, 'sheet']
   }
   if (workspace.scratchOpen && !workspace.scratchEditing) modes.push('drawer')
   modes.push('workspace')
-  if (workspace.view === 'special') modes.push(workspace.specialFocus, 'special')
-  else {
-    if (workspace.editing && workspace.pane === 'document') modes.push('writing')
+  const focus = workspace.focus
+  if (focus === 'list' || focus === 'node') {
+    if (workspace.editing && focus === 'node') modes.push('writing')
     modes.push('tree')
+  } else {
+    // While the description is written, the card's back has no keys of its own.
+    if (!(focus === 'card' && workspace.describing)) modes.push(focus)
+    modes.push('views')
   }
   modes.push('global')
   return modes

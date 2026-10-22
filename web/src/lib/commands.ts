@@ -95,6 +95,11 @@ export async function openInfo(section?: InfoSection) {
   })
 }
 
+/** The board's cursor, or the card turned over beside it, has the keys. */
+const onBoard = () => workspace.focus === 'board' || workspace.focus === 'card'
+/** A card has the keys: on the board, its back, or highlighted in the agenda. */
+const cardFocused = () => onBoard() || workspace.focus === 'agenda'
+
 const requireOpen = () => {
   if (!workspace.open) {
     workspace.say('no document open', 'error')
@@ -151,7 +156,7 @@ export function cycleTile(delta: 1 | -1) {
 /** `:ls`'s line for one tile: number, `%` for the focused one, `[+]` unsaved. */
 const describeTile = (index: number) => {
   const tile = workspace.tiles[index]
-  const name = tile.open ? tile.open.name.trim() || tile.open.slug : '(empty)'
+  const name = tile.kind !== 'node' ? tile.kind : tile.open ? tile.open.name.trim() || tile.open.slug : '(empty)'
   return `${index + 1}${index === workspace.focused ? '%' : ''} ${name}${tile.dirty ? ' [+]' : ''}`
 }
 
@@ -373,16 +378,12 @@ export const commands: CommandSpec[] = [
       if (workspace.scratchEditing) return workspace.leaveScratchNote()
       if (workspace.describing) return void workspace.stopDescribing()
       // A document `o` made and nothing was written in is not kept.
-      if (await workspace.abandonIfBlank()) {
-        if (workspace.returnTo === 'special') await workspace.guard(() => workspace.returnToSpecial())
-        return hooks.focusList()
-      }
+      if (await workspace.abandonIfBlank()) return hooks.focusList()
       if (workspace.dirty) {
         workspace.say('unsaved changes — :w to write, :q! to discard', 'error')
         return
       }
       if (workspace.editing) workspace.editing = false
-      else if (workspace.returnTo === 'special') return void workspace.guard(() => workspace.returnToSpecial())
       else if (workspace.tiles.length > 1) return focusTile(closeFocused())
       else workspace.closeTile()
       hooks.focusList()
@@ -472,14 +473,15 @@ export const commands: CommandSpec[] = [
   {
     name: 'board',
     group: 'board',
-    help: "this space's board, in the special workspace",
-    run: () => workspace.guard(() => workspace.showSpecial('board')),
+    help: "this space's board, in a tile — the last one shown when this space has none",
+    run: () => workspace.guard(() => workspace.showView('board')),
   },
   {
-    name: 'special',
+    name: 'plan',
+    aliases: ['special'],
     group: 'board',
-    help: 'the special workspace: the board, the agenda and the calendar side by side — S puts it up and away, Tab walks its tiles, 1 … 9 picks the board',
-    run: () => workspace.guard(() => workspace.toggleSpecial()),
+    help: 'the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board',
+    run: () => workspace.guard(() => workspace.togglePlan()),
   },
   {
     name: 'card',
@@ -494,9 +496,7 @@ export const commands: CommandSpec[] = [
     bang: {
       help: 'add a card linked to the open document — gf on it opens the document',
       run: async (arg) => {
-        // On the board the tree is not on screen, so only the open document
-        // can be meant; elsewhere it is whatever has focus.
-        const node = workspace.view === 'special' ? workspace.open : workspace.target
+        const node = workspace.target
         if (!node || node.kind !== 'document') {
           return workspace.say('no document to link — open one first', 'error')
         }
@@ -509,11 +509,11 @@ export const commands: CommandSpec[] = [
     name: 'due',
     args: '<when|->',
     group: 'board',
-    help: 'due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
+    help: 'due date of the card — on the board, its back, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
     complete: () => ['today', 'tm', 'fri', '+3d'],
     run: async (arg) => {
-      const agenda = workspace.view === 'special' && workspace.specialFocus === 'agenda'
-      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      const agenda = workspace.focus === 'agenda'
+      if (!cardFocused()) return workspace.say('no card in focus — :board', 'error')
       const set = (due_at: number | null) =>
         agenda ? workspace.patchAgendaCard({ due_at }) : workspace.patchCard({ due_at })
       const target = arg.trim()
@@ -531,8 +531,8 @@ export const commands: CommandSpec[] = [
     help: 'once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it',
     complete: () => ['daily', 'weekly', 'monthly', 'yearly', '+2w', '-'],
     run: async (arg) => {
-      const agenda = workspace.view === 'special' && workspace.specialFocus === 'agenda'
-      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      const agenda = workspace.focus === 'agenda'
+      if (!cardFocused()) return workspace.say('no card in focus — :board', 'error')
       const rule = arg.trim()
       const repeat = rule === '-' || rule === '' ? null : rule
       await workspace.guard(async () => {
@@ -547,7 +547,11 @@ export const commands: CommandSpec[] = [
     group: 'board',
     help: 'move the selected card into the done list, or back out to the inbox',
     run: () => {
-      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      if (workspace.focus === 'agenda') {
+        const card = workspace.agendaCards[workspace.agendaCursor]
+        return card ? workspace.guard(() => workspace.finishCard(card)) : workspace.say('no card highlighted', 'error')
+      }
+      if (!onBoard()) return workspace.say('no card in focus — :board', 'error')
       return workspace.guard(() => workspace.toggleDone())
     },
   },
@@ -579,14 +583,14 @@ export const commands: CommandSpec[] = [
     group: 'board',
     help: "add a step to the open card's checklist, below the cursor",
     run: async (arg) => {
-      if (workspace.overlay !== 'card') return workspace.say('no card open — Enter on the board opens one', 'error')
+      if (workspace.focus !== 'card') return workspace.say('no card turned over — Enter on the board turns one', 'error')
       if (!arg.trim()) return workspace.say('usage: :task <text>', 'error')
       await workspace.guard(() => workspace.addTask(arg.trim()))
     },
     bang: {
       help: 'reword the step under the cursor',
       run: async (arg) => {
-        if (workspace.overlay !== 'card') return workspace.say('no card open — Enter on the board opens one', 'error')
+        if (workspace.focus !== 'card') return workspace.say('no card turned over — Enter on the board turns one', 'error')
         if (!arg.trim()) return workspace.say('usage: :task! <text>', 'error')
         await workspace.guard(() => workspace.renameTask(arg.trim()))
       },
@@ -599,7 +603,7 @@ export const commands: CommandSpec[] = [
     help: 'put a label on the card, or take it off when it has it — each name keeps its colour everywhere',
     complete: () => workspace.boardLabels,
     run: async (arg) => {
-      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      if (!onBoard()) return workspace.say('no card in focus — :board', 'error')
       if (!arg.trim()) return workspace.say(workspace.card?.labels.join(' · ') || 'no labels — :label <name> adds one')
       await workspace.guard(() => workspace.toggleLabel(arg))
     },
@@ -610,14 +614,14 @@ export const commands: CommandSpec[] = [
     group: 'board',
     help: 'add a column to the board',
     run: async (arg) => {
-      if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+      if (!workspace.view('board')) return workspace.say('no board open — :board', 'error')
       if (!arg.trim()) return workspace.say('usage: :list <name>', 'error')
       await workspace.guard(() => workspace.createList(arg.trim()))
     },
     bang: {
       help: 'delete the column under the cursor and every card on it',
       run: async () => {
-        if (workspace.view !== 'special') return workspace.say('no board open — :board', 'error')
+        if (!workspace.view('board')) return workspace.say('no board open — :board', 'error')
         const list = workspace.list
         if (!list) return workspace.say('no list selected', 'error')
         const cards = list.cards.length
@@ -695,7 +699,7 @@ export const commands: CommandSpec[] = [
     help: 'the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it',
     run: () =>
       workspace.guard(async () => {
-        if (workspace.view === 'special') return void (workspace.specialFocus = 'calendar')
+        if (workspace.view('calendar')) return workspace.showView('calendar')
         await workspace.openCalendar()
       }),
   },
@@ -706,8 +710,8 @@ export const commands: CommandSpec[] = [
     help: 'what is late, due this week, or in hand — across every board',
     run: () =>
       workspace.guard(async () => {
-        if (workspace.view !== 'special') workspace.agendaCursor = 0
-        await workspace.showSpecial('agenda')
+        if (!workspace.view('agenda')) workspace.agendaCursor = 0
+        await workspace.showView('agenda')
       }),
   },
   {
@@ -797,14 +801,16 @@ export const commands: CommandSpec[] = [
     args: '<n|name>',
     group: 'tiles',
     help: 'focus a tile by its number in :ls, or by the start of its name',
-    complete: () => workspace.tiles.flatMap((tile) => (tile.open ? [tile.open.slug] : [])),
+    complete: () => workspace.tiles.flatMap((tile) => (tile.kind !== 'node' ? [tile.kind] : tile.open ? [tile.open.slug] : [])),
     run: (arg) => {
       const wanted = arg.trim().toLowerCase()
       if (!wanted) return workspace.say(describeTile(workspace.focused))
       const index = /^\d+$/.test(wanted)
         ? Number(wanted) - 1
-        : workspace.tiles.findIndex(
-            (tile) => tile.open && (tile.open.slug.startsWith(wanted) || tile.open.name.toLowerCase().startsWith(wanted)),
+        : workspace.tiles.findIndex((tile) =>
+            tile.kind !== 'node'
+              ? tile.kind.startsWith(wanted)
+              : tile.open && (tile.open.slug.startsWith(wanted) || tile.open.name.toLowerCase().startsWith(wanted)),
           )
       if (!workspace.tiles[index]) return workspace.say(`E86: no tile ${arg.trim()} — :ls lists them`, 'error')
       return focusTile(index)
@@ -850,7 +856,7 @@ export const commands: CommandSpec[] = [
     help: 'delete a node, and everything under it, into the trash (asks first) — u brings it back',
     run: async (arg) => {
       // On the board the thing under the cursor is a card, not a node.
-      if (workspace.view === 'special') {
+      if (onBoard() && !arg) {
         const card = workspace.card
         if (!card) return workspace.say('no card selected', 'error')
         if (!(await workspace.ask(`delete the card "${card.title}"?`))) return
@@ -878,7 +884,7 @@ export const commands: CommandSpec[] = [
     help: 'rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title',
     run: async (arg) => {
       if (!arg.trim() && workspace.editing && workspace.pane === 'document') return hooks.focusTitle()
-      if (workspace.view === 'special') {
+      if (onBoard()) {
         if (!arg.trim()) return workspace.say('usage: :name <text>', 'error')
         return workspace.guard(() => workspace.patchCard({ title: arg.trim() }))
       }
@@ -899,7 +905,7 @@ export const commands: CommandSpec[] = [
     bang: {
       help: 'rename the space you are in — on the board, the list under the cursor',
       run: async (arg) => {
-        if (workspace.view === 'special') {
+        if (onBoard()) {
           if (!arg.trim()) return workspace.say('usage: :name! <list name>', 'error')
           return workspace.guard(() => workspace.renameList(arg.trim()))
         }

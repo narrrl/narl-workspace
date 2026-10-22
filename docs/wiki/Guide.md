@@ -11,9 +11,9 @@ The keys are the desktop's. On a phone, every one of these has a button; see
 ## Morning: what needs you
 
 The first time you open the workspace each day, the **agenda** opens by itself
-when anything is late or due. Any other time, press `t`. It opens in the
-**special workspace**, beside the board and the calendar; `S` puts that up and
-away from anywhere, and `Tab` walks its tiles.
+when anything is late or due. Any other time, press `t`. It opens in a tile
+beside what is open; `S` puts it up with the board and the calendar, and puts
+them away again, and `Alt-h`/`j`/`k`/`l` walk the tiles.
 
 ![The agenda](../images/agenda.png)
 
@@ -35,7 +35,7 @@ Walk it with `j` and `k`. On a card:
 - `H` and `L` move it to the list left or right on its board;
 - `Enter` goes to the card on its own board, in the tile beside.
 
-`Esc` leaves the special workspace. The bar keeps showing the `late` and `today`
+`Esc` closes the agenda's tile. The bar keeps showing the `late` and `today`
 counts while either is above zero. More in [Boards and the agenda](Boards-and-Agenda.md).
 
 ## At work: spaces, documents and tiles
@@ -86,7 +86,7 @@ In a meeting someone asks you to renew a certificate. Press `c`, type
 `Renew the gateway certificate`, and `Enter`. The card is in this space's
 inbox, and you have not left the document you were reading.
 
-Press `b` to see the **board**, in the special workspace. A digit there
+Press `b` to see the **board**, in a tile beside the document. A digit there
 shows the board of another space.
 
 ![The board](../images/board.png)
@@ -94,10 +94,11 @@ shows the board of another space.
 The first list is the inbox and the last is done; the ones between are work in
 hand. `h`/`l` move between lists and `j`/`k` between cards. `H`/`L` move a
 card across, `Space` finishes it, and `D` sets its due date. `Enter` turns a
-card over to its labels, description and checklist, and `gf` opens its notes:
-a document made for the card the first time you ask. `:repeat weekly`
-makes a card come back in the inbox each time it is finished. `q` goes back to
-the tree.
+card over to its labels, description and checklist, in a tile beside, and
+`gf` opens its notes: a document made for the card the first time you ask,
+also beside, and `q` on it comes back to the board. `:repeat weekly` makes a
+card come back in the inbox each time it is finished. `q` on the board closes
+its tile.
 
 ### Finding things
 

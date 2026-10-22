@@ -82,7 +82,7 @@
                 class:done={card.done_at !== null}
                 data-at="{listIndex}:{cardIndex}"
                 onclick={() => pick(listIndex, cardIndex)}
-                ondblclick={() => workspace.openCardSheet()}
+                ondblclick={() => workspace.guard(() => workspace.turnCard())}
                 title="Enter turns the card over"
               >
                 {#if card.labels.length}
@@ -143,7 +143,7 @@
 
   <!-- The board's keys are not the list's, so they are spelled out where they apply. -->
   <div class="keys">
-    <Keys contexts={['board', 'special']}><span class="rule-hint">first list is the inbox · last list is done</span></Keys>
+    <Keys contexts={['board', 'views']}><span class="rule-hint">first list is the inbox · last list is done</span></Keys>
   </div>
 </div>
 

@@ -1,11 +1,12 @@
 <script lang="ts">
   /*
-   * Enter on a card turns it over: a window floated over the board, as the
-   * desktop floats one, with what the card holds on its back — labels, the
-   * description, the checklist. The keys live in actions.ts with the others;
-   * this draws and lets a pointer do the same.
+   * Enter on a card turns it over: a tile beside the board with what the
+   * card holds on its back — labels, the description, the checklist. It is
+   * the card under the board's cursor, so walking the board leafs through
+   * the backs. The keys live in actions.ts with the others; this draws and
+   * lets a pointer do the same.
    */
-  import Sheet from './Sheet.svelte'
+  import Keys from './Keys.svelte'
   import { followLink } from './commands'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
@@ -18,11 +19,21 @@
   const ticked = $derived(card?.checklist.filter((task) => task.done).length ?? 0)
   const html = $derived(card?.body.trim() ? renderMarkdown(card.body, { wikilinks: card.wikilinks }) : '')
 
-  // A card deleted or moved out of sight under the sheet takes the sheet with it.
+  let root = $state<HTMLDivElement>()
+
+  // Another card's back starts at its first step.
+  let shown: number | undefined
   $effect(() => {
-    if (!card) workspace.closeSheet()
+    if (card?.id === shown) return
+    shown = card?.id
+    workspace.taskCursor = 0
   })
 
+  // Keep the step under the cursor on screen.
+  $effect(() => {
+    const index = workspace.taskCursor
+    root?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
+  })
 
   /** A link in the description leaves the card for what it leads to, as one in a document does. */
   function follow(event: MouseEvent) {
@@ -30,7 +41,6 @@
     const href = (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href') ?? ''
     if (!href.startsWith('/n/')) return
     event.preventDefault()
-    workspace.closeCardSheet()
     followLink(href)
   }
 
@@ -44,9 +54,16 @@
   }
 </script>
 
-{#if card}
-  <Sheet title="card" detail="{workspace.boardSpace?.slug ?? ''} / {list?.name ?? ''}{role ? ` · ${role}` : ''}" width={76} cursor={workspace.taskCursor} keys={['card']}>
+<div class="back" bind:this={root}>
+  <header>
+    <span class="label rule">
+      <span class="marker"></span><span class="title">card</span>
+      {#if card}{workspace.boardSpace?.slug ?? ''} / {list?.name ?? ''}{role ? ` · ${role}` : ''}{/if}
+    </span>
+    <span class="kbd tile-key" title="the key that turns a card over, on the board">↵</span>
+  </header>
 
+  {#if card}
     <div class="scroll">
       <h2 class:done={card.done_at !== null}>{card.title}</h2>
 
@@ -113,12 +130,28 @@
         </ul>
       </section>
     </div>
-  </Sheet>
-{/if}
+  {:else}
+    <p class="none muted">no card under the board's cursor — o on the board adds one</p>
+  {/if}
+
+  <Keys contexts={['card', 'views']} />
+</div>
 
 <style>
+  .back {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    height: 100%;
+    min-height: 0;
+    padding: 20px 24px;
+  }
 
-  .scroll { display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-y: auto; }
+  header { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  header .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header .marker { background: var(--light); }
+  header .title { color: var(--light); }
+  .scroll { flex: 1; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-y: auto; }
 
   h2 { margin: 0; font-family: var(--font-sans); font-size: 20px; font-weight: 600; color: var(--light); }
   h2.done { text-decoration: line-through; color: var(--muted); }
@@ -170,4 +203,7 @@
   li.at .tick { border-color: var(--ink); }
   li.at.ticked .tick { background: var(--ink); }
 
+  @media (max-width: 767px) {
+    .back { padding: 14px; gap: 14px; }
+  }
 </style>

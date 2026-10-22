@@ -79,20 +79,17 @@
     {/each}
   </section>
 
-  <Keys contexts={['calendar', 'special']} />
+  <Keys contexts={['calendar', 'views']} />
 </div>
 
 <style>
+  /* A tile's window is its frame, so it only fills it. */
   .sheet {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    width: min(100%, 60ch);
-    max-height: 100%;
+    height: 100%;
     overflow-y: auto;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
     padding: 20px 24px;
   }
 

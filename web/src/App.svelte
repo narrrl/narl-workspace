@@ -20,7 +20,7 @@
   import Overview from './lib/Overview.svelte'
   import MediaBrowser from './lib/MediaBrowser.svelte'
   import Trash from './lib/Trash.svelte'
-  import CardSheet from './lib/CardSheet.svelte'
+  import CardTile from './lib/CardTile.svelte'
   import Scratch from './lib/Scratch.svelte'
   import Actions from './lib/Actions.svelte'
   import Prompt from './lib/Prompt.svelte'
@@ -62,7 +62,6 @@
     verify: Verify,
     info: Info,
     trash: Trash,
-    card: CardSheet,
     media: MediaBrowser,
   }
   let boardEl = $state<HTMLDivElement>()
@@ -244,8 +243,8 @@
     [[...keysOf('tree', 'down'), ...keysOf('tree', 'up')], 'browse, l opens, L opens beside'],
     [keysOf('global', 'space'), 'switch space, Tab cycles'],
     [keysOf('global', 'overview'), 'overview of every space'],
-    [keysOf('global', 'special'), 'board, agenda and calendar'],
-    [[...keysOf('tree', 'board'), ...keysOf('global', 'agenda'), ...keysOf('global', 'calendar')], 'straight to one of them'],
+    [keysOf('global', 'plan'), 'board, agenda and calendar'],
+    [[...keysOf('global', 'board'), ...keysOf('global', 'agenda'), ...keysOf('global', 'calendar')], 'one of them, in a tile'],
     [keysOf('tree', 'capture'), 'capture a card to the inbox'],
     [keysOf('global', 'find'), 'find in every space'],
     [keysOf('tree', 'search'), 'search this space'],
@@ -287,39 +286,17 @@
       <!-- Keyed on the space, so a switch slides the new one in, as the desktop
            does between workspaces: from below when moving right, above when left. -->
       {#key workspace.spaceId}
-      {#if workspace.view === 'special'}
-        <!-- The special workspace: the board, and the agenda over the
-             calendar beside it. `f` gives the focused one the whole porthole. -->
-        <div class="panes special switch" class:full={workspace.fullscreen} data-focus={workspace.specialFocus} style="--dir: {workspace.switchDirection}">
-          {#each ['board', 'agenda', 'calendar'] as const as tile (tile)}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="window {tile}"
-              class:focused={workspace.specialFocus === tile}
-              onpointerdown={() => (workspace.specialFocus = tile)}
-            >
-              {#if tile === 'board'}
-                <div class="fill" bind:this={boardEl}><Board /></div>
-              {:else if tile === 'agenda'}
-                <Agenda />
-              {:else}
-                <Calendar />
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {:else}
         <div
           class="panes switch"
-          class:reading={workspace.tiles.some((tile) => tile.open)}
+          class:reading={workspace.tiles.some((tile) => !tile.empty)}
           class:full={workspace.fullscreen}
-          class:focus-doc={!!workspace.open && workspace.pane === 'document'}
+          class:focus-doc={workspace.focus !== 'list'}
           style="--dir: {workspace.switchDirection}"
         >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="window list"
-            class:focused={!workspace.open || workspace.pane === 'list'}
+            class:focused={workspace.focus === 'list'}
             onpointerdown={() => (workspace.pane = 'list')}
           ><Sidebar /></div>
           <div class="tiles" class:only={workspace.tiles.length === 1}>
@@ -329,13 +306,23 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="window entry"
+                class:view={tile.kind !== 'node'}
+                data-kind={tile.kind}
                 class:current={index === workspace.focused}
-                class:focused={!!tile.open && index === workspace.focused && workspace.pane === 'document'}
+                class:focused={!tile.empty && index === workspace.focused && workspace.pane === 'document'}
                 style="--x: {rect.x}; --y: {rect.y}; --w: {rect.w}; --h: {rect.h}"
-                onpointerdown={() => tile.open && workspace.focusTile(index)}
-                onfocusin={() => tile.open && index !== workspace.focused && workspace.focusTile(index)}
+                onpointerdown={() => !tile.empty && workspace.focusTile(index)}
+                onfocusin={() => !tile.empty && index !== workspace.focused && workspace.focusTile(index)}
               >
-                {#if tile.open?.kind === 'file'}
+                {#if tile.kind === 'board'}
+                  <div class="fill" bind:this={boardEl}><Board /></div>
+                {:else if tile.kind === 'agenda'}
+                  <Agenda />
+                {:else if tile.kind === 'calendar'}
+                  <Calendar />
+                {:else if tile.kind === 'card'}
+                  <CardTile />
+                {:else if tile.open?.kind === 'file'}
                   <FilePane {tile} />
                 {:else if tile.open}
                   <DocumentPane {tile} />
@@ -358,7 +345,6 @@
             {/each}
           </div>
         </div>
-      {/if}
       {/key}
     </main>
 
@@ -402,48 +388,23 @@
 <style>
   .boot { display: grid; place-items: center; height: 100%; }
 
-  /*
-   * The special workspace: the board takes what the right column leaves,
-   * the agenda takes what the calendar leaves under it.
-   */
-  .panes.special {
-    grid-template-columns: minmax(0, 1fr) minmax(44ch, 30vw);
-    grid-template-rows: minmax(0, 1fr) auto;
-    grid-template-areas: 'board agenda' 'board calendar';
-  }
-  .special > .board { grid-area: board; }
-  .special > .agenda { grid-area: agenda; }
-  .special > .calendar { grid-area: calendar; }
-  .special .fill { height: 100%; }
-  /* The focused tile's key is lit, as its border is. */
-  .special > .window.focused :global(.tile-key) { background: var(--light); border-color: var(--light); color: var(--ink); }
+  .fill { height: 100%; }
+  /* The focused view's key is lit, as its border is. */
+  .tiles > .window.focused :global(.tile-key) { background: var(--light); border-color: var(--light); color: var(--ink); }
 
-  /* One cursor is lit at a time: the other tiles keep theirs, dimmed. */
-  .special > .window:not(.focused) :global(:is(.card.active, .row.at, .day.at)) {
+  /* One cursor is lit at a time: the views without the focus keep theirs, dimmed. */
+  .view:not(.focused) :global(:is(.card.active, .row.at, .day.at, li.at)) {
     background: var(--surface-alt);
     color: var(--light);
   }
-  .special > .window:not(.focused) :global(.row.at :is(.where, .due)) { color: var(--muted); }
-  .special > .window:not(.focused) :global(.card.active :is(.meta, .doc)) { color: var(--muted); }
-  .special > .window:not(.focused) :global(:is(.card.active .today, .today .row.at .due)) { color: var(--light); }
-  .special > .window:not(.focused) :global(:is(.card.active .overdue, .overdue .row.at .due)) { color: var(--alarm); }
-  .special > .window:not(.focused) :global(.card.active .tick) { border-color: var(--outline); }
-  .special > .window:not(.focused) :global(.day.at :is(.dot)) { background: var(--light); }
-  .special > .window:not(.focused) :global(.day.at .many) { color: var(--light); }
-  .panes.special.full { grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: none; }
-  .panes.special.full > .window:not(.focused) { display: none; }
-  .panes.special.full > .window { grid-area: auto; }
+  .view:not(.focused) :global(.row.at :is(.where, .due)) { color: var(--muted); }
+  .view:not(.focused) :global(.card.active :is(.meta, .doc)) { color: var(--muted); }
+  .view:not(.focused) :global(:is(.card.active .today, .today .row.at .due)) { color: var(--light); }
+  .view:not(.focused) :global(:is(.card.active .overdue, .overdue .row.at .due)) { color: var(--alarm); }
+  .view:not(.focused) :global(:is(.card.active, li.at) .tick) { border-color: var(--outline); }
+  .view:not(.focused) :global(.day.at :is(.dot)) { background: var(--light); }
+  .view:not(.focused) :global(.day.at .many) { color: var(--light); }
 
-  /* The agenda and the calendar are sheets of their own as overlays; as tiles
-     the window is their sheet. */
-  .special > .window :global(.sheet) {
-    width: 100%;
-    height: 100%;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    background: none;
-  }
   .window.list { --pane-bg: color-mix(in oklab, var(--surface) 60%, var(--base)); }
 
   /* Only one pane on screen: nothing to tell apart, so no active border. */
@@ -516,9 +477,5 @@
     .tiles > .window:not(.current) { display: none; }
     .tiles > .window.current { inset: calc(var(--gap) / 2); width: auto; height: auto; }
     .overlay { padding: 12px; }
-    /* A phone shows the special workspace's focused tile alone. */
-    .panes.special { grid-template-columns: 1fr; grid-template-rows: 1fr; grid-template-areas: none; }
-    .panes.special > .window { grid-area: auto; }
-    .panes.special > .window:not(.focused) { display: none; }
   }
 </style>

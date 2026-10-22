@@ -10,8 +10,8 @@
 
 /**
  * Where a key is heard. modes.ts stacks them, the topmost first:
- * always > a sheet > the drawer > workspace > writing > the focused tile's
- * kind (tree, board, agenda, calendar) > special > global.
+ * always > a sheet > the drawer > workspace > writing > what has the focus
+ * (the tree, or a view: board, agenda, calendar, card) > views > global.
  */
 export type Context =
   | 'always'
@@ -33,7 +33,7 @@ export type Context =
   | 'board'
   | 'agenda'
   | 'calendar'
-  | 'special'
+  | 'views'
   | 'global'
   | 'editor'
 
@@ -77,8 +77,8 @@ export const bindings = [
   { context: 'always', keys: ['Alt-h', 'Alt-j', 'Alt-k', 'Alt-l'], action: 'focus', typing: true, label: 'Alt-h/j/k/l', help: 'focus the tile that way, from the editor too — left of the leftmost is the list' },
   { context: 'always', keys: ['Alt-Shift-h', 'Alt-Shift-j', 'Alt-Shift-k', 'Alt-Shift-l'], action: 'swap', typing: true, label: 'Alt-Shift-h/j/k/l', help: 'move the focused tile that way' },
   { context: 'tree', keys: ['L'], action: 'beside', label: 'L · Shift-Enter', help: 'open the row in a new tile beside the others' },
-  { context: 'tree', keys: ['gt'], action: 'nextTile', label: 'gt / gT', help: 'next / previous tile — in the editor too' },
-  { context: 'tree', keys: ['gT'], action: 'previousTile' },
+  { context: 'global', keys: ['gt'], action: 'nextTile', label: 'gt / gT', help: 'next / previous tile — a view too' },
+  { context: 'global', keys: ['gT'], action: 'previousTile' },
   { context: 'always', keys: ['Alt-q'], action: 'close', typing: true, help: 'close the focused tile — :close; :only closes the others' },
   { context: 'tree', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k · ↓ ↑', help: 'move down / up the list — scroll the document when it has focus' },
   { context: 'tree', keys: ['k', 'ArrowUp'], action: 'up' },
@@ -104,16 +104,14 @@ export const bindings = [
   { context: 'tree', keys: ['p'], action: 'drop' },
   { context: 'tree', keys: ['M'], action: 'markAll', help: 'pick up the whole folder — again puts it all back' },
   { context: 'tree', label: 'Ctrl / Shift-click', help: 'pick a row up · every row up to it — drag them onto a folder' },
-  { context: 'global', keys: ['S'], action: 'special', help: 'the special workspace: the board, the agenda and the calendar side by side — S again, q or Esc leave it' },
-  { context: 'special', keys: ['Tab', 'Shift-Tab'], action: 'cycle', label: 'Tab · Alt-h/j/k/l', hint: 'tile', help: 'in the special workspace: the next tile, or the one that way — l past the last list and j past the agenda go on too' },
-  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — in the special workspace' },
+  { context: 'global', keys: ['S'], action: 'plan', help: 'the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away' },
+  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — in a tile of its own' },
   { context: 'global', keys: ['T'], action: 'today', help: "today's diary entry, started if there is none — from templates/day when the diary has one" },
-  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, in the special workspace: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day' },
+  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, in a tile: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day beside it' },
   { context: 'tree', keys: ['[d'], action: 'previousEntry', label: '[d / ]d', help: 'the diary entry before / after the one open, by date' },
   { context: 'tree', keys: [']d'], action: 'nextEntry' },
   { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'find anything, in every space — Enter opens the result lit beside them, n goes on' },
-  { context: 'tree', keys: ['b'], action: 'board', help: "the board, in the special workspace: this space's, or the last one shown — 1 … 9 there shows another's" },
-  { context: 'special', keys: ['b'], action: 'board' },
+  { context: 'global', keys: ['b'], action: 'board', help: "the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's" },
   { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here" },
   { context: 'tree', keys: ['q', 'Escape'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several' },
   { context: 'tree', keys: ['/'], action: 'search', help: 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one' },
@@ -136,11 +134,11 @@ export const bindings = [
   // hands the focus back to it instead of walking the list unseen.
   { context: 'writing', keys: ['*'], action: 'refocus' },
 
-  // --- the special workspace -------------------------------------------------
-  { context: 'special', keys: ['Escape'], action: 'leave', caps: ['esc'], hint: 'leave' },
+  // --- what the views share: the board, the agenda, the calendar, a card's back
+  { context: 'views', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: "in a view — the board, the agenda, the calendar, a card's back — close its tile; the focus goes back to the tile before" },
 
   // --- on a board ---------------------------------------------------------------
-  { context: 'board', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h / l', caps: ['h', 'j', 'k', 'l'], hint: 'move', help: 'to the list left / right — right of the last is the agenda' },
+  { context: 'board', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h / l', caps: ['h', 'j', 'k', 'l'], hint: 'move', help: 'to the list left / right — right of the last, to the tile beside' },
   { context: 'board', keys: ['l', 'ArrowRight'], action: 'right' },
   { context: 'board', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k', help: 'down / up the cards' },
   { context: 'board', keys: ['k', 'ArrowUp'], action: 'up' },
@@ -151,7 +149,7 @@ export const bindings = [
   { context: 'board', keys: ['H'], action: 'sendLeft', label: 'H / L', caps: ['H', 'L'], hint: 'send', help: 'move the card to the list left / right' },
   { context: 'board', keys: ['L'], action: 'sendRight' },
   { context: 'board', keys: ['Space'], action: 'done', hint: 'done', help: 'into the done list, or back out to the inbox' },
-  { context: 'board', keys: ['Enter'], action: 'turn', hint: 'turn over', help: 'turn the card over: its labels, description and checklist' },
+  { context: 'board', keys: ['Enter'], action: 'turn', hint: 'turn over', help: 'turn the card over, in a tile beside: its labels, description and checklist' },
   { context: 'board', keys: ['gf'], action: 'notes', help: "the card's notes — a document, made on first use; q comes back" },
   { context: 'board', keys: ['o', 'c'], action: 'new', label: 'o · c', caps: ['o'], hint: 'new', help: 'new card on this list' },
   { context: 'board', keys: ['D'], action: 'due', hint: 'due', help: 'due date: fri, tm, +3d, 10-31 …' },
@@ -161,7 +159,6 @@ export const bindings = [
   { context: 'board', keys: ['r'], action: 'reload', help: 'read the board again, for changes made elsewhere' },
   { context: 'board', keys: ['x', 'dd'], action: 'delete', caps: ['dd'], hint: 'delete', help: 'delete the card (asks y/N)' },
   { context: 'board', caps: ['1…9'], hint: 'board' },
-  { context: 'board', keys: ['q'], action: 'leave', label: 'q · Esc', help: 'leave the special workspace' },
 
   // --- the back of a card ---------------------------------------------------
   { context: 'card', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k', caps: ['j', 'k'], hint: 'step', help: 'down / up the checklist' },
@@ -182,7 +179,6 @@ export const bindings = [
   { context: 'card', keys: ['L'], action: 'sendRight' },
   { context: 'card', keys: ['gf'], action: 'notes', hint: 'notes', help: "the card's notes — a document, made on first use; q comes back" },
   { context: 'card', keys: [':'], action: 'line' },
-  { context: 'card', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: 'back to the board' },
 
   // --- the scratchpad, while it is down --------------------------------------------
   { context: 'drawer', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k', caps: ['j', 'k'], hint: 'note', help: 'down / up the notes, the one touched last on top' },
@@ -200,9 +196,9 @@ export const bindings = [
   { context: 'drawer', keys: ['*'], action: 'nothing' },
 
   // --- the agenda --------------------------------------------------------------
-  { context: 'agenda', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k', caps: ['j', 'k'], hint: 'move', help: 'down / up the cards, then what was written on this day in earlier years, then into the calendar' },
+  { context: 'agenda', keys: ['j', 'ArrowDown'], action: 'down', label: 'j / k', caps: ['j', 'k'], hint: 'move', help: 'down / up the cards, then what was written on this day in earlier years, then on to the tile below' },
   { context: 'agenda', keys: ['k', 'ArrowUp'], action: 'up' },
-  { context: 'agenda', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h', help: 'to the board' },
+  { context: 'agenda', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h', help: 'to the tile on the left' },
   { context: 'agenda', keys: ['Enter'], action: 'open', hint: 'open', help: 'to the card, on its own board beside — or to the entry' },
   { context: 'agenda', keys: ['Space'], action: 'finish', hint: 'done', help: 'done, where it stands' },
   { context: 'agenda', keys: ['D'], action: 'due', hint: 'due', help: 'due date: fri, tm, +3d … — :due on the line' },
@@ -211,7 +207,6 @@ export const bindings = [
   { context: 'agenda', keys: ['H'], action: 'sendLeft', label: 'H / L', caps: ['H', 'L'], hint: 'list', help: 'to the list left / right on its board' },
   { context: 'agenda', keys: ['L'], action: 'sendRight' },
   { context: 'agenda', keys: ['T'], action: 'today', hint: 'diary', help: "today's diary entry" },
-  { context: 'agenda', keys: ['q'], action: 'leave', label: 'q · Esc', help: 'leave the special workspace — a document opened from it comes back here on q' },
 
   // --- the calendar ------------------------------------------------------------
   { context: 'calendar', keys: ['h', 'ArrowLeft', 'l', 'ArrowRight'], action: 'day', caps: ['h', 'l'], hint: 'day' },
@@ -219,7 +214,6 @@ export const bindings = [
   { context: 'calendar', keys: ['H', 'L'], action: 'month', hint: 'month' },
   { context: 'calendar', keys: ['.'], action: 'today', hint: 'today' },
   { context: 'calendar', keys: ['Enter'], action: 'open', hint: 'open' },
-  { context: 'calendar', keys: ['q'], action: 'leave' },
 
   // --- the sheets over everything --------------------------------------------------
   { context: 'sheet', keys: ['Escape'], action: 'close', typing: true, caps: ['q', 'esc'], hint: 'close' },
@@ -286,7 +280,7 @@ export const bindings = [
 
 /** The help's key columns, in order, and the context each draws from. */
 export const sections: readonly { section: Section; title: string; contexts: readonly Context[]; rule?: string }[] = [
-  { section: 'keys', title: 'keys', contexts: ['always', 'workspace', 'global', 'tree', 'special'] },
+  { section: 'keys', title: 'keys', contexts: ['always', 'workspace', 'global', 'tree', 'views'] },
   { section: 'board', title: 'board keys', contexts: ['board'], rule: 'the first list is the inbox, the last list is done' },
   { section: 'card', title: 'card keys', contexts: ['card'] },
   { section: 'scratch', title: 'scratchpad keys', contexts: ['drawer'] },

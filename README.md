@@ -141,9 +141,9 @@ it; in the document pane it is that document. In the browse pane:
 | `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:name!` renames the space) |
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
-| `S` | the special workspace: the board, the agenda and the calendar side by side; `Tab` or `Alt-h`/`j`/`k`/`l` move between them, `f` gives one the screen, `Esc` leaves |
-| `b` | the board of this space, in the special workspace; a digit there shows another space's |
-| `t` | the agenda: what is late, due this week, or in hand, on every board, in the special workspace |
+| `S` | the board, the agenda and the calendar tiled ahead of what is open, or every view away again; `Alt-h`/`j`/`k`/`l` move between the tiles, `f` gives one the screen |
+| `b` | the board of this space, in a tile; a digit there shows another space's |
+| `t` | the agenda: what is late, due this week, or in hand, on every board, in a tile |
 | `T` | today's diary entry, started if there is none |
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
@@ -247,9 +247,9 @@ start as `sftp_host_key` in the data directory.
 
 ## Boards
 
-`b`, the board door on the rail, or `:board` swaps the tree for the special
-workspace — the board of the space being browsed, with the agenda and the
-calendar beside it — and `Esc` swaps it back. Every space has one except the
+`b`, the board door on the rail, or `:board` shows the board of the space
+being browsed in a tile beside what is open, and `q` or `Esc` closes it; `S`
+puts it up with the agenda and the calendar. Every space has one except the
 diary — a journal has no backlog — and `:set board` / `:set noboard` changes
 that for the space you are in (the dimmed board door on the rail does the
 same). A new board starts with `backlog`, `doing` and `done`, and the columns mean
@@ -271,8 +271,8 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `j` / `k` | down / up the cards of that list |
 | `J` / `K` | move the card down / up its list |
 | `H` / `L` | move the card to the list on the left / right |
-| `Enter` | turn the card over: labels, a markdown description, a checklist |
-| `gf` | the card's notes, a document made on first use; `q` comes back |
+| `Enter` | turn the card over, in a tile beside: labels, a markdown description, a checklist |
+| `gf` | the card's notes, a document made on first use, beside; `q` comes back |
 | `Space` | into the done column, or back out to the inbox |
 | `o`, `c` | a new card on this list |
 | `D` | due date — `fri`, `tm`, `+3d`, `+2w`, `10-31`, `2026-10-31` |
@@ -280,7 +280,7 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `z` | show done cards older than a week |
 | `F` | a letter over every card in view; typing it puts the cursor on that card |
 | `x`, `dd` | delete the card |
-| `q`, `Esc` | back to the tree |
+| `q`, `Esc` | close the board's tile |
 
 On the back of a card, `j`/`k` walk the checklist, `Space` ticks a step, `o`
 adds one and `dd` drops it; `e` writes the description in the vim editor, `:w`

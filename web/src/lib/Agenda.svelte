@@ -112,23 +112,20 @@
     </section>
   {/if}
 
-  <Keys contexts={['agenda', 'special']} />
+  <Keys contexts={['agenda', 'views']} />
 </div>
 
 <style>
   li:has(.finish) { display: flex; align-items: center; }
   .finish { flex: none; display: grid; place-items: center; width: 44px; height: 40px; padding: 0; border: 0; background: none; color: var(--muted); }
 
+  /* A tile's window is its frame, so it only fills it. */
   .sheet {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    width: min(100%, 84ch);
-    max-height: 100%;
+    height: 100%;
     overflow-y: auto;
-    background: color-mix(in oklab, var(--hull) 97%, transparent);
-    border: 1px solid var(--surface-alt);
-    border-radius: var(--frame-radius);
     padding: 20px 24px;
   }
 
