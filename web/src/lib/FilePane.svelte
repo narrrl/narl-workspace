@@ -14,7 +14,7 @@
   const node = $derived(tile.open!)
   const file = $derived(node.file!)
   /* A sealed file cannot be fetched while the vault is shut. */
-  const locked = $derived(file.encrypted && !workspace.vault?.unlocked)
+  const locked = $derived(file.encrypted && !workspace.vault.status?.unlocked)
   const kind = $derived(previewKind(node.name, file.mime))
   /* What the browser can show by itself; everything else is a download. */
   const viewable = $derived(file.mime !== 'application/octet-stream')

@@ -20,32 +20,32 @@
   })
 
   function enter(spaceId: number) {
-    workspace.closeSheet()
-    void workspace.guard(() => workspace.enterSpace(spaceId))
+    workspace.sheets.close()
+    void workspace.guard(() => workspace.tree.enterSpace(spaceId))
   }
 
   /** A recent document opens in place, in its own space. */
   function open(doc: NodeSummary) {
-    workspace.closeSheet()
+    workspace.sheets.close()
     void workspace.guard(async () => {
       const node = await api.getNode(doc.id)
-      await workspace.openPath(node.path.map((crumb) => crumb.slug).join('/'))
+      await workspace.tree.openPath(node.path.map((crumb) => crumb.slug).join('/'))
     })
   }
 </script>
 
-<Sheet title="overview" detail="{workspace.overview.length} spaces" width={140} cursor={workspace.overviewCursor} keys={['overview']}>
+<Sheet title="overview" detail="{workspace.sheets.overview.length} spaces" width={140} cursor={workspace.sheets.overviewCursor} keys={['overview']}>
   <ol class="grid" bind:this={grid}>
-    {#each workspace.overview as { space, recent }, index (space.id)}
+    {#each workspace.sheets.overview as { space, recent }, index (space.id)}
       <li>
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div
           class="card"
-          class:at={index === workspace.overviewCursor}
-          class:current={space.id === workspace.spaceId}
+          class:at={index === workspace.sheets.overviewCursor}
+          class:current={space.id === workspace.tree.spaceId}
           data-index={index}
           onclick={() => enter(space.id)}
-          onpointerenter={() => (workspace.overviewCursor = index)}
+          onpointerenter={() => (workspace.sheets.overviewCursor = index)}
         >
           <div class="top">
             <span class="index">{index < 10 ? (index + 1) % 10 : ''}</span>

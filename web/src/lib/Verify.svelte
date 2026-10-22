@@ -10,7 +10,7 @@
   import { workspace } from './store.svelte'
 
   const ORIGIN = 'https://verify.proton.me'
-  const asked = workspace.verify
+  const asked = workspace.prompts.verify
   let height = $state(560)
 
   function onmessage(event: MessageEvent) {
@@ -26,11 +26,11 @@
     const payload = data?.payload
     if (data?.type === 'HUMAN_VERIFICATION_SUCCESS' && typeof payload?.token === 'string') {
       asked?.resolve(payload.token)
-      workspace.closeSheet()
+      workspace.sheets.close()
     } else if (data?.type === 'RESIZE' && typeof payload?.height === 'number') {
       height = Math.min(Math.max(payload.height, 320), 900)
     } else if (data?.type === 'CLOSE') {
-      workspace.closeSheet()
+      workspace.sheets.close()
     }
   }
 

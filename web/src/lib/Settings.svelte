@@ -29,7 +29,7 @@
       api.listSshKeys(),
       api.listTokens(),
       api.backupStatus(),
-      workspace.loadVault(),
+      workspace.vault.load(),
     ])
     Object.assign(settings, { sessions, keys, tokens, backup })
     settings.cursor = Math.min(settings.cursor, Math.max(settingRows().length - 1, 0))
@@ -43,7 +43,7 @@
         settings.cursor = 0
       }
       await loadSettings()
-      workspace.openSheet('settings')
+      workspace.sheets.open('settings')
     })
   }
 
@@ -59,7 +59,7 @@
   const run = (line: string) => () => runCommand(line)
   const type = (line: string) => () => hooks.openCommandLine(line)
   const confirm = (question: string, line: string) => async () => {
-    if (await workspace.ask(question)) await runCommand(line)
+    if (await workspace.prompts.ask(question)) await runCommand(line)
   }
   const used = (at: number | null) => (at === null ? 'never used' : `used ${relative(at)}`)
 
@@ -67,7 +67,7 @@
   export function settingRows(section = settings.section): Setting[] {
     switch (section) {
       case 'options': {
-        const space = workspace.space
+        const space = workspace.tree.space
         return [
           {
             name: 'vim keys',
@@ -91,7 +91,7 @@
         ]
       }
       case 'vault': {
-        const vault = workspace.vault
+        const vault = workspace.vault.status
         if (!vault?.configured) {
           return [{ name: 'set a password', detail: 'files sealed under it open only with it — it cannot be recovered', act: run('vault') }]
         }
@@ -166,7 +166,7 @@
 
   const tabs = $derived<[SettingsSection, string][]>([
     ['options', 'options'],
-    ['vault', workspace.vault?.configured ? `vault ${workspace.vault.unlocked ? 'open' : 'locked'}` : 'vault'],
+    ['vault', workspace.vault.status?.configured ? `vault ${workspace.vault.status.unlocked ? 'open' : 'locked'}` : 'vault'],
     ['backup', settings.backup?.configured ? `backup${settings.backup.last_error ? ' failing' : ''}` : 'backup off'],
     ['sessions', `sessions ${settings.sessions.length}`],
     ['keys', `ssh keys ${settings.keys.length}`],

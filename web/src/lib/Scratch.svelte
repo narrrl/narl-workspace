@@ -13,63 +13,63 @@
 
   let list = $state<HTMLUListElement>()
 
-  const note = $derived(workspace.scratchNote)
-  const html = $derived(note && !workspace.scratchEditing ? renderMarkdown(note.body) : '')
+  const note = $derived(workspace.scratch.note)
+  const html = $derived(note && !workspace.scratch.editing ? renderMarkdown(note.body) : '')
 
   $effect(() => {
-    const at = workspace.scratchCursor
+    const at = workspace.scratch.cursor
     list?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
   })
 
   function pick(index: number) {
-    if (workspace.scratchEditing) return
-    workspace.scratchCursor = index
+    if (workspace.scratch.editing) return
+    workspace.scratch.cursor = index
   }
 </script>
 
 <div class="drawer">
   <header class="label rule">
     <span class="marker"></span><span class="title">scratch</span>
-    {workspace.scratchNotes.length} {workspace.scratchNotes.length === 1 ? 'note' : 'notes'}
+    {workspace.scratch.notes.length} {workspace.scratch.notes.length === 1 ? 'note' : 'notes'}
     <span class="kbd tile-key" title="the key that lowers and raises the scratchpad">Q</span>
   </header>
 
   <div class="body">
     <ul class="notes" bind:this={list}>
-      {#if workspace.scratchEditing && workspace.scratchNew}
-        <li class="at new"><span class="line">{headline(workspace.writing?.text ?? '') || 'new note'}</span><span class="when">now</span></li>
+      {#if workspace.scratch.editing && workspace.scratch.writingNew}
+        <li class="at new"><span class="line">{headline(workspace.drafts.writing?.text ?? '') || 'new note'}</span><span class="when">now</span></li>
       {/if}
-      {#each workspace.scratchNotes as entry, index (entry.id)}
+      {#each workspace.scratch.notes as entry, index (entry.id)}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
         <li
-          class:at={index === workspace.scratchCursor && !workspace.scratchNew}
-          class:dim={workspace.scratchEditing}
+          class:at={index === workspace.scratch.cursor && !workspace.scratch.writingNew}
+          class:dim={workspace.scratch.editing}
           data-index={index}
           onclick={() => pick(index)}
-          ondblclick={() => workspace.editScratchNote()}
+          ondblclick={() => workspace.scratch.editNote()}
         >
           <span class="line">{headline(entry.body) || '—'}</span>
           <span class="when">{relative(entry.updated_at)}</span>
         </li>
       {:else}
-        {#if !workspace.scratchNew}
+        {#if !workspace.scratch.writingNew}
           <li class="none muted">nothing here — <span class="kbd">o</span> takes a note</li>
         {/if}
       {/each}
     </ul>
 
     <div class="page">
-      {#if workspace.scratchEditing && workspace.writing}
+      {#if workspace.scratch.editing && workspace.drafts.writing}
         {#await import('./Editor.svelte')}
           <div class="muted label">loading editor</div>
         {:then { default: Editor }}
-          {#key workspace.writing.session}
-            <Editor writing={workspace.writing} fill hint="anything — it saves itself; :keep makes it a document" />
+          {#key workspace.drafts.writing.session}
+            <Editor writing={workspace.drafts.writing} fill hint="anything — it saves itself; :keep makes it a document" />
           {/key}
         {/await}
       {:else if html}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <article class="md" ondblclick={() => workspace.editScratchNote()}>
+        <article class="md" ondblclick={() => workspace.scratch.editNote()}>
           <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
           {@html html}
         </article>
@@ -79,7 +79,7 @@
     </div>
   </div>
 
-  {#if workspace.scratchEditing}
+  {#if workspace.scratch.editing}
     <footer class="label">
       <span>writing — it saves itself</span>
       <span><span class="kbd">esc</span> back to the notes</span>

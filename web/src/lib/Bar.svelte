@@ -11,8 +11,8 @@
   import { workspace } from './store.svelte'
 
   // The space is the first crumb, and it is already named by its pill.
-  const crumbs = $derived(workspace.path.slice(1))
-  const due = $derived(workspace.dueCounts)
+  const crumbs = $derived(workspace.tree.path.slice(1))
+  const due = $derived(workspace.cards.dueCounts)
 
 </script>
 
@@ -21,12 +21,12 @@
   <span class="divider"></span>
 
   <nav class="spaces" aria-label="spaces">
-    {#each workspace.spaces as space, index (space.id)}
+    {#each workspace.tree.spaces as space, index (space.id)}
       <button
         class="pill"
-        aria-current={space.id === workspace.spaceId}
+        aria-current={space.id === workspace.tree.spaceId}
         title="{space.name} ({index < 10 ? (index + 1) % 10 : ''})"
-        onclick={() => workspace.guard(() => workspace.enterSpace(space.id))}
+        onclick={() => workspace.guard(() => workspace.tree.enterSpace(space.id))}
         {@attach into(space.id, `→ ${space.slug}`)}
       >
         {#if index < 10}<span class="n">{(index + 1) % 10}</span>{/if}<span class="slug">{space.slug}</span>
@@ -43,8 +43,8 @@
     <button
       class="crumb"
       class:here={crumbs.length === 0}
-      onclick={() => workspace.spaceId !== null && workspace.guard(() => workspace.goTo(workspace.spaceId!))}
-      {@attach into(workspace.spaceId, 'into ~')}
+      onclick={() => workspace.tree.spaceId !== null && workspace.guard(() => workspace.tree.goTo(workspace.tree.spaceId!))}
+      {@attach into(workspace.tree.spaceId, 'into ~')}
     >
       ~
     </button>
@@ -53,7 +53,7 @@
       <button
         class="crumb"
         class:here={index === crumbs.length - 1}
-        onclick={() => workspace.guard(() => workspace.goTo(crumb.id))}
+        onclick={() => workspace.guard(() => workspace.tree.goTo(crumb.id))}
         {@attach into(crumb.id, `into ${crumb.slug}`)}
       >
         {crumb.slug}

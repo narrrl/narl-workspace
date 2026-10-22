@@ -35,16 +35,16 @@ const reading = () => !!workspace.open && !workspace.editing && workspace.pane =
 
 /** A cursor down a sheet's list, kept on it. */
 function step(cursor: 'outlineCursor' | 'filesCursor' | 'trashCursor' | 'backlinksCursor' | 'cardsCursor', length: number, by: number) {
-  workspace[cursor] = Math.min(Math.max(workspace[cursor] + by, 0), Math.max(length - 1, 0))
+  workspace.sheets[cursor] = Math.min(Math.max(workspace.sheets[cursor] + by, 0), Math.max(length - 1, 0))
 }
 
 export async function openOverview() {
-  await workspace.guard(() => workspace.loadOverview())
-  workspace.overviewCursor = Math.max(
-    workspace.overview.findIndex((entry) => entry.space.id === workspace.spaceId),
+  await workspace.guard(() => workspace.sheets.loadOverview())
+  workspace.sheets.overviewCursor = Math.max(
+    workspace.sheets.overview.findIndex((entry) => entry.space.id === workspace.tree.spaceId),
     0,
   )
-  workspace.openSheet('overview')
+  workspace.sheets.open('overview')
 }
 
 /*
@@ -69,7 +69,7 @@ function openInTab() {
   if (!file) return workspace.say('gx opens a file — put the cursor on one', 'error')
   // A tab opened after the vault's question would be stopped as a popup, so
   // a sealed file asks for the vault to be opened first instead.
-  if (file.encrypted && !workspace.vault?.unlocked) return workspace.say('sealed — :vault unlock first, then gx', 'error')
+  if (file.encrypted && !workspace.vault.status?.unlocked) return workspace.say('sealed — :vault unlock first, then gx', 'error')
   followLink(file.url, true)
 }
 
@@ -91,23 +91,23 @@ function tileKey(direction: Direction, shift: boolean) {
     if (direction === 'l' && !shift) focusPane('document')
     return
   }
-  const next = neighbour(dwindle(workspace.tiles.length), workspace.focused, direction)
+  const next = neighbour(dwindle(workspace.tiles.all.length), workspace.tiles.focused, direction)
   if (next < 0) {
     if (direction === 'h' && !shift) focusPane('list')
     return
   }
   if (!shift) return void focusTile(next)
-  const tiles = [...workspace.tiles]
-  ;[tiles[workspace.focused], tiles[next]] = [tiles[next], tiles[workspace.focused]]
-  workspace.tiles = tiles
-  workspace.focused = next
+  const tiles = [...workspace.tiles.all]
+  ;[tiles[workspace.tiles.focused], tiles[next]] = [tiles[next], tiles[workspace.tiles.focused]]
+  workspace.tiles.all = tiles
+  workspace.tiles.focused = next
 }
 
 export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   always: {
     save: () => {
-      if (workspace.writing) guard(() => workspace.saveWriting())
-      else if (workspace.open) guard(() => workspace.save())
+      if (workspace.drafts.writing) guard(() => workspace.drafts.saveWriting())
+      else if (workspace.open) guard(() => workspace.drafts.save())
     },
     close: () => void runCommand('close'),
     focus: (key) => tileKey(key.slice(-1) as Direction, false),
@@ -117,8 +117,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   sheet: {
     // A note being written has had its Esc; the sheet stays up under it.
     close: () => {
-      if (workspace.scratchEditing) return
-      workspace.closeSheet()
+      if (workspace.scratch.editing) return
+      workspace.sheets.close()
     },
   },
 
@@ -143,11 +143,11 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     step: (key) => {
       const columns = hooks.overviewColumns()
       const by = { h: -1, ArrowLeft: -1, l: 1, ArrowRight: 1, k: -columns, ArrowUp: -columns, j: columns, ArrowDown: columns }[key] ?? 0
-      workspace.overviewCursor = Math.min(Math.max(workspace.overviewCursor + by, 0), workspace.overview.length - 1)
+      workspace.sheets.overviewCursor = Math.min(Math.max(workspace.sheets.overviewCursor + by, 0), workspace.sheets.overview.length - 1)
     },
     go: (key) => goToSpace(spaceIndex(key)),
-    enter: () => goToSpace(workspace.overviewCursor),
-    close: () => workspace.closeSheet(),
+    enter: () => goToSpace(workspace.sheets.overviewCursor),
+    close: () => workspace.sheets.close(),
   },
 
   /** The info sheet: Tab from one of its parts to the next. */
@@ -158,9 +158,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
 
   /** Its headings: j/k down them, Enter to the one picked. */
   outline: {
-    down: () => step('outlineCursor', workspace.outline.length, 1),
-    up: () => step('outlineCursor', workspace.outline.length, -1),
-    bottom: () => step('outlineCursor', workspace.outline.length, Infinity),
+    down: () => step('outlineCursor', workspace.sheets.outline.length, 1),
+    up: () => step('outlineCursor', workspace.sheets.outline.length, -1),
+    bottom: () => step('outlineCursor', workspace.sheets.outline.length, Infinity),
     go: () => goHeading(),
   },
 
@@ -170,41 +170,41 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     up: () => step('filesCursor', workspace.open?.files.length ?? 0, -1),
     bottom: () => step('filesCursor', workspace.open?.files.length ?? 0, Infinity),
     open: () => {
-      const file = workspace.open?.files[workspace.filesCursor]
+      const file = workspace.open?.files[workspace.sheets.filesCursor]
       if (file) void openFile(file)
     },
     insert: () => {
-      const file = workspace.open?.files[workspace.filesCursor]
+      const file = workspace.open?.files[workspace.sheets.filesCursor]
       if (file) embedFile(file)
     },
     copy: () => {
-      const file = workspace.open?.files[workspace.filesCursor]
+      const file = workspace.open?.files[workspace.sheets.filesCursor]
       if (file) void copyEmbed(file)
     },
   },
 
   /** The trash: j/k down what was deleted, Enter or r restores, x deletes for good. */
   trash: {
-    down: () => step('trashCursor', workspace.trash.length, 1),
-    up: () => step('trashCursor', workspace.trash.length, -1),
-    bottom: () => step('trashCursor', workspace.trash.length, Infinity),
+    down: () => step('trashCursor', workspace.sheets.trash.length, 1),
+    up: () => step('trashCursor', workspace.sheets.trash.length, -1),
+    bottom: () => step('trashCursor', workspace.sheets.trash.length, Infinity),
     restore: () => {
-      const item = workspace.trash[workspace.trashCursor]
+      const item = workspace.sheets.trash[workspace.sheets.trashCursor]
       if (item) void restoreTrashed(item)
     },
     purge: () => {
-      const item = workspace.trash[workspace.trashCursor]
+      const item = workspace.sheets.trash[workspace.sheets.trashCursor]
       if (item) void purgeTrashed(item)
     },
   },
 
   /** Its backlinks: j/k through the documents that link here, Enter opens one. */
   backlinks: {
-    down: () => step('backlinksCursor', workspace.backlinks.length, 1),
-    up: () => step('backlinksCursor', workspace.backlinks.length, -1),
-    bottom: () => step('backlinksCursor', workspace.backlinks.length, Infinity),
+    down: () => step('backlinksCursor', workspace.sheets.backlinks.length, 1),
+    up: () => step('backlinksCursor', workspace.sheets.backlinks.length, -1),
+    bottom: () => step('backlinksCursor', workspace.sheets.backlinks.length, Infinity),
     open: () => {
-      const link = workspace.backlinks[workspace.backlinksCursor]
+      const link = workspace.sheets.backlinks[workspace.sheets.backlinksCursor]
       if (link) void openBacklink(link)
     },
   },
@@ -218,20 +218,20 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     up: () => step('cardsCursor', workspace.open?.cards.length ?? 0, -1),
     bottom: () => step('cardsCursor', workspace.open?.cards.length ?? 0, Infinity),
     turn: () => {
-      const card = workspace.open?.cards[workspace.cardsCursor]
+      const card = workspace.open?.cards[workspace.sheets.cardsCursor]
       if (!card) return
-      workspace.closeSheet()
-      guard(() => workspace.turnTo(card))
+      workspace.sheets.close()
+      guard(() => workspace.cards.turnTo(card))
     },
-    done: () => guard(() => workspace.toggleDone()),
-    sendLeft: () => guard(() => workspace.sendCard(-1)),
-    sendRight: () => guard(() => workspace.sendCard(1)),
+    done: () => guard(() => workspace.cards.toggleDone()),
+    sendLeft: () => guard(() => workspace.cards.sendCard(-1)),
+    sendRight: () => guard(() => workspace.cards.sendCard(1)),
     due: () => {
-      if (workspace.focusedCard) line(':due ')
+      if (workspace.cards.focusedCard) line(':due ')
     },
     new: () => line(':card '),
     label: () => {
-      if (workspace.focusedCard) line(':label ')
+      if (workspace.cards.focusedCard) line(':label ')
     },
     line: () => line(':'),
   },
@@ -240,7 +240,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   history: {
     down: () => moveHistory(1),
     up: () => moveHistory(-1),
-    bottom: () => moveHistory(workspace.history.length),
+    bottom: () => moveHistory(workspace.sheets.history.length),
     restore: () => void restoreShown(),
   },
 
@@ -268,27 +268,27 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    * are the editor's.
    */
   card: {
-    down: () => void workspace.moveTask(1),
-    up: () => void workspace.moveTask(-1),
-    top: () => void workspace.moveTask(-Infinity),
-    bottom: () => void workspace.moveTask(Infinity),
-    tick: () => guard(() => workspace.toggleTask()),
+    down: () => void workspace.cards.moveTask(1),
+    up: () => void workspace.cards.moveTask(-1),
+    top: () => void workspace.cards.moveTask(-Infinity),
+    bottom: () => void workspace.cards.moveTask(Infinity),
+    tick: () => guard(() => workspace.cards.toggleTask()),
     // `add` spelled out, so a step that starts with "edit" is added too.
     add: () => line(':task add '),
     reword: () => {
-      const task = workspace.card?.checklist[workspace.taskCursor]
+      const task = workspace.cards.card?.checklist[workspace.cards.taskCursor]
       if (task) line(`:task edit ${task.text}`)
     },
-    nudgeDown: () => guard(() => workspace.nudgeTask(1)),
-    nudgeUp: () => guard(() => workspace.nudgeTask(-1)),
-    drop: () => guard(() => workspace.deleteTask()),
-    describe: () => workspace.describe(),
+    nudgeDown: () => guard(() => workspace.cards.nudgeTask(1)),
+    nudgeUp: () => guard(() => workspace.cards.nudgeTask(-1)),
+    drop: () => guard(() => workspace.cards.deleteTask()),
+    describe: () => workspace.cards.describe(),
     label: () => line(':label '),
-    rename: () => line(`:name ${workspace.card?.title ?? ''}`),
+    rename: () => line(`:name ${workspace.cards.card?.title ?? ''}`),
     due: () => line(':due '),
-    sendLeft: () => guard(() => workspace.sendCard(-1)),
-    sendRight: () => guard(() => workspace.sendCard(1)),
-    notes: () => guard(() => workspace.openCard()),
+    sendLeft: () => guard(() => workspace.cards.sendCard(-1)),
+    sendRight: () => guard(() => workspace.cards.sendCard(1)),
+    notes: () => guard(() => workspace.cards.openCard()),
     line: () => line(':'),
   },
 
@@ -298,34 +298,34 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    * nothing else hears a key until it is raised again.
    */
   drawer: {
-    down: () => void (workspace.scratchCursor = Math.min(workspace.scratchCursor + 1, Math.max(workspace.scratchNotes.length - 1, 0))),
-    up: () => void (workspace.scratchCursor = Math.max(workspace.scratchCursor - 1, 0)),
-    top: () => void (workspace.scratchCursor = 0),
-    bottom: () => void (workspace.scratchCursor = Math.max(workspace.scratchNotes.length - 1, 0)),
-    new: () => workspace.newScratchNote(),
-    write: () => workspace.editScratchNote(),
-    keep: () => guard(() => workspace.keepScratchNote()),
-    card: () => guard(() => workspace.cardScratchNote()),
+    down: () => void (workspace.scratch.cursor = Math.min(workspace.scratch.cursor + 1, Math.max(workspace.scratch.notes.length - 1, 0))),
+    up: () => void (workspace.scratch.cursor = Math.max(workspace.scratch.cursor - 1, 0)),
+    top: () => void (workspace.scratch.cursor = 0),
+    bottom: () => void (workspace.scratch.cursor = Math.max(workspace.scratch.notes.length - 1, 0)),
+    new: () => workspace.scratch.newNote(),
+    write: () => workspace.scratch.editNote(),
+    keep: () => guard(() => workspace.scratch.keepNote()),
+    card: () => guard(() => workspace.scratch.cardNote()),
     append: () => {
-      const open = [workspace.tile, ...workspace.tiles].find((tile) => tile.open?.kind === 'document')?.open
+      const open = [workspace.tile, ...workspace.tiles.all].find((tile) => tile.open?.kind === 'document')?.open
       line(`:append ${open ? open.name.trim() || open.slug : ''}`)
     },
     drop: () => {
-      if (!workspace.scratchNote) return
+      if (!workspace.scratch.note) return
       void (async () => {
-        if (await workspace.ask('drop this scratch note?')) await workspace.guard(() => workspace.dropScratchNote())
+        if (await workspace.prompts.ask('drop this scratch note?')) await workspace.guard(() => workspace.scratch.dropNote())
       })()
     },
     line: () => line(':'),
     help: () => void runCommand('help'),
-    raise: () => void workspace.closeScratch(),
+    raise: () => void workspace.scratch.close(),
     nothing: () => {},
   },
 
   workspace: {
     /** Esc leaves one thing: the line, or fullscreen. */
     escape: () => {
-      if (workspace.writing) return
+      if (workspace.drafts.writing) return
       if (hooks.closeCommandLine()) return
       if (workspace.fullscreen && !workspace.editing) return void (workspace.fullscreen = false)
       return false
@@ -333,8 +333,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     // `Q`, a quick note: the scratchpad lowered from anywhere a key is not
     // being typed — a letter, since a backtick is a dead key on many layouts.
     scratch: () => {
-      if (workspace.scratchOpen) return false
-      guard(() => workspace.toggleScratch())
+      if (workspace.scratch.open) return false
+      guard(() => workspace.scratch.toggle())
     },
   },
 
@@ -348,27 +348,27 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    * they walk the rows again, and `l` goes back.
    */
   tree: {
-    down: () => void (reading() ? hooks.scrollReader(1) : workspace.move(1)),
-    up: () => void (reading() ? hooks.scrollReader(-1) : workspace.move(-1)),
-    top: () => void (reading() ? hooks.scrollReader('top') : (workspace.cursor = 0)),
-    bottom: () => void (reading() ? hooks.scrollReader('bottom') : (workspace.cursor = Math.max(workspace.rows - 1, 0))),
+    down: () => void (reading() ? hooks.scrollReader(1) : workspace.tree.move(1)),
+    up: () => void (reading() ? hooks.scrollReader(-1) : workspace.tree.move(-1)),
+    top: () => void (reading() ? hooks.scrollReader('top') : (workspace.tree.cursor = 0)),
+    bottom: () => void (reading() ? hooks.scrollReader('bottom') : (workspace.tree.cursor = Math.max(workspace.tree.rows - 1, 0))),
     open: (key) => {
       const enter = key === 'Enter' || key === 'Shift-Enter'
       if (enter && reading() && hooks.fileAction()) return
       // Shift-Enter, like `L`: beside what is open, in a tile of its own.
-      if (key === 'Shift-Enter' && !reading()) return guard(() => workspace.openBeside())
-      const shown = workspace.tiles.findIndex((tile) => tile.open && tile.open.id === workspace.selected?.id)
+      if (key === 'Shift-Enter' && !reading()) return guard(() => workspace.tiles.openBeside())
+      const shown = workspace.tiles.all.findIndex((tile) => tile.open && tile.open.id === workspace.tree.selected?.id)
       if (shown >= 0) void focusTile(shown)
-      else guard(() => workspace.openSelected())
+      else guard(() => workspace.tree.openSelected())
     },
     beside: () => {
-      if (!reading()) guard(() => workspace.openBeside())
+      if (!reading()) guard(() => workspace.tiles.openBeside())
     },
     // Leftwards at every depth: from the document to the list, from the
     // list up a level.
     left: () => {
       if (workspace.open && workspace.pane === 'document') focusPane('list')
-      else guard(() => workspace.up())
+      else guard(() => workspace.tree.up())
     },
     sideways: (key) => {
       const amount = ({ zh: -1, zl: 1, zH: 'halfleft', zL: 'halfright' } as const)[key as 'zh' | 'zl' | 'zH' | 'zL']
@@ -394,13 +394,13 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       if (root) void showHints(root)
     },
     // `[d` / `]d`: the diary entry of the day before or after, by its date.
-    previousEntry: () => guard(() => workspace.stepEntry(-1)),
-    nextEntry: () => guard(() => workspace.stepEntry(1)),
+    previousEntry: () => guard(() => workspace.diary.stepEntry(-1)),
+    nextEntry: () => guard(() => workspace.diary.stepEntry(1)),
     // Pick nodes up here, walk to a folder, put them down with `p`.
-    mark: () => workspace.mark(),
-    markAll: () => workspace.markAll(),
-    files: () => guard(() => workspace.toggleFiles()),
-    drop: () => guard(() => workspace.drop()),
+    mark: () => workspace.tree.mark(),
+    markAll: () => workspace.tree.markAll(),
+    files: () => guard(() => workspace.tree.toggleFiles()),
+    drop: () => guard(() => workspace.tree.drop()),
     new: () => void runCommand('new'),
     // Capture: a thought goes on this space's inbox without leaving here.
     // Reading a document, `:card` makes it about that document.
@@ -417,20 +417,20 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
     close: () => {
       if (workspace.open) void runCommand('q')
-      else workspace.unmarkAll()
+      else workspace.tree.unmarkAll()
     },
     // Esc lets go of one thing at a time: what is carried, then the document.
     escape: () => {
-      if (workspace.marked.length) return workspace.unmarkAll()
+      if (workspace.tree.marked.length) return workspace.tree.unmarkAll()
       if (workspace.open) void runCommand('q')
     },
     delete: () => void runCommand('d'),
     // A delete goes to the trash, so it can be undone the way vim undoes.
-    undo: () => guard(() => workspace.undoDelete()),
+    undo: () => guard(() => workspace.tree.undoDelete()),
     // Through the results, as vim's `n` goes through the matches; the
     // search itself stays until `:noh`.
-    next: () => guard(() => workspace.nextResult(1)),
-    previous: () => guard(() => workspace.nextResult(-1)),
+    next: () => guard(() => workspace.tree.nextResult(1)),
+    previous: () => guard(() => workspace.tree.nextResult(-1)),
     search: () => line('/'),
   },
 
@@ -441,36 +441,36 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    * that is not on screen.
    */
   board: {
-    left: () => workspace.moveList(-1),
+    left: () => workspace.cards.moveList(-1),
     // Right of the last list is the tile beside the board.
     right: () => {
-      if (workspace.listCursor >= (workspace.board?.lists.length ?? 0) - 1) tileKey('l', false)
-      else workspace.moveList(1)
+      if (workspace.cards.listCursor >= (workspace.cards.board?.lists.length ?? 0) - 1) tileKey('l', false)
+      else workspace.cards.moveList(1)
     },
-    down: () => workspace.moveCard(1),
-    up: () => workspace.moveCard(-1),
-    top: () => void (workspace.cardCursor = 0),
-    bottom: () => void (workspace.cardCursor = Math.max((workspace.list?.cards.length ?? 0) - 1, 0)),
-    nudgeDown: () => guard(() => workspace.nudgeCard(1)),
-    nudgeUp: () => guard(() => workspace.nudgeCard(-1)),
-    sendLeft: () => guard(() => workspace.sendCard(-1)),
-    sendRight: () => guard(() => workspace.sendCard(1)),
-    done: () => guard(() => workspace.toggleDone()),
-    turn: () => guard(() => workspace.turnCard()),
+    down: () => workspace.cards.moveCard(1),
+    up: () => workspace.cards.moveCard(-1),
+    top: () => void (workspace.cards.cardCursor = 0),
+    bottom: () => void (workspace.cards.cardCursor = Math.max((workspace.cards.list?.cards.length ?? 0) - 1, 0)),
+    nudgeDown: () => guard(() => workspace.cards.nudgeCard(1)),
+    nudgeUp: () => guard(() => workspace.cards.nudgeCard(-1)),
+    sendLeft: () => guard(() => workspace.cards.sendCard(-1)),
+    sendRight: () => guard(() => workspace.cards.sendCard(1)),
+    done: () => guard(() => workspace.cards.toggleDone()),
+    turn: () => guard(() => workspace.cards.turnCard()),
     // The card's notes, without turning it over first: `gf` as on its back.
-    notes: () => guard(() => workspace.openCard()),
+    notes: () => guard(() => workspace.cards.openCard()),
     new: () => line(':card '),
     due: () => line(':due '),
     // On an empty list there is no card to rename, so it is the list. The
     // name is there to be edited, not typed again from nothing.
-    rename: () => line(workspace.card ? `:name ${workspace.card.title}` : `:list name ${workspace.list?.name ?? ''}`),
-    old: () => void (workspace.showOldDone = !workspace.showOldDone),
+    rename: () => line(workspace.cards.card ? `:name ${workspace.cards.card.title}` : `:list name ${workspace.cards.list?.name ?? ''}`),
+    old: () => void (workspace.cards.showOldDone = !workspace.cards.showOldDone),
     // A letter over every card in view: typing it puts the cursor there.
     hints: () => {
       const root = hooks.boardRoot()
       if (root) void showHints(root)
     },
-    reload: () => guard(() => workspace.reloadBoard()),
+    reload: () => guard(() => workspace.cards.reloadBoard()),
     delete: () => void runCommand('delete'),
   },
 
@@ -481,39 +481,39 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
    */
   agenda: {
     down: () => {
-      const last = Math.max(workspace.agendaCards.length + workspace.agenda.on_this_day.length - 1, 0)
-      if (workspace.agendaCursor >= last) tileKey('j', false)
-      else workspace.agendaCursor += 1
+      const last = Math.max(workspace.cards.agendaCards.length + workspace.cards.agenda.on_this_day.length - 1, 0)
+      if (workspace.cards.agendaCursor >= last) tileKey('j', false)
+      else workspace.cards.agendaCursor += 1
     },
-    up: () => void (workspace.agendaCursor = Math.max(workspace.agendaCursor - 1, 0)),
+    up: () => void (workspace.cards.agendaCursor = Math.max(workspace.cards.agendaCursor - 1, 0)),
     left: () => tileKey('h', false),
     open: () => {
-      const card = workspace.agendaCards[workspace.agendaCursor]
-      const past = workspace.agenda.on_this_day[workspace.agendaCursor - workspace.agendaCards.length]
-      if (card) guard(() => workspace.goToCard(card))
+      const card = workspace.cards.agendaCards[workspace.cards.agendaCursor]
+      const past = workspace.cards.agenda.on_this_day[workspace.cards.agendaCursor - workspace.cards.agendaCards.length]
+      if (card) guard(() => workspace.cards.goToCard(card))
       // Beside the agenda, so `q` on it comes back here.
-      else if (past) guard(() => workspace.openPath(past.path))
+      else if (past) guard(() => workspace.tree.openPath(past.path))
     },
-    finish: () => guard(() => workspace.toggleDone()),
+    finish: () => guard(() => workspace.cards.toggleDone()),
     due: () => {
-      if (workspace.agendaCards[workspace.agendaCursor]) line(':due ')
+      if (workspace.cards.agendaCards[workspace.cards.agendaCursor]) line(':due ')
     },
     line: () => line(':'),
-    sendLeft: () => guard(() => workspace.sendCard(-1)),
-    sendRight: () => guard(() => workspace.sendCard(1)),
+    sendLeft: () => guard(() => workspace.cards.sendCard(-1)),
+    sendRight: () => guard(() => workspace.cards.sendCard(1)),
     today: () => void runCommand('today'),
   },
 
   /** The calendar: h/l a day, j/k a week, H/L a month, Enter to the day. */
   calendar: {
-    day: (key) => guard(() => workspace.moveCalendar(key === 'h' || key === 'ArrowLeft' ? -1 : 1, 0)),
-    week: (key) => guard(() => workspace.moveCalendar(key === 'k' || key === 'ArrowUp' ? -7 : 7, 0)),
-    month: (key) => guard(() => workspace.moveCalendar(0, key === 'H' ? -1 : 1)),
+    day: (key) => guard(() => workspace.diary.moveCalendar(key === 'h' || key === 'ArrowLeft' ? -1 : 1, 0)),
+    week: (key) => guard(() => workspace.diary.moveCalendar(key === 'k' || key === 'ArrowUp' ? -7 : 7, 0)),
+    month: (key) => guard(() => workspace.diary.moveCalendar(0, key === 'H' ? -1 : 1)),
     today: () => {
-      workspace.calendarDay = formatDay(Math.floor(Date.now() / 1000))
-      guard(() => workspace.loadCalendar())
+      workspace.diary.calendarDay = formatDay(Math.floor(Date.now() / 1000))
+      guard(() => workspace.diary.loadCalendar())
     },
-    open: () => void workspace.guard(() => workspace.openCalendarDay()).then(() => hooks.focusEditor()),
+    open: () => void workspace.guard(() => workspace.diary.openCalendarDay()).then(() => hooks.focusEditor()),
   },
 
   /** What every view shares: `q` closes its tile, back to the one before. */
@@ -533,9 +533,9 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
      * there, Tab walks along the bar. Digits are read from `event.code`, so
      * Shift+1 means space 1 whatever symbol the layout puts on that key.
      */
-    space: (key) => guard(() => workspace.switchSpace(spaceIndex(key))),
-    send: (key) => guard(() => workspace.sendToSpace(spaceIndex(key))),
-    cycle: (key) => guard(() => workspace.cycleSpace(shifted(key) ? -1 : 1)),
+    space: (key) => guard(() => workspace.tree.switchSpace(spaceIndex(key))),
+    send: (key) => guard(() => workspace.tree.sendToSpace(spaceIndex(key))),
+    cycle: (key) => guard(() => workspace.tree.cycleSpace(shifted(key) ? -1 : 1)),
     overview: () => void openOverview(),
     fullscreen: () => void (workspace.fullscreen = !workspace.fullscreen),
     // `gt` / `gT` walk the tiles, as they walk vim's tab pages.
@@ -562,8 +562,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
 }
 
 function goToSpace(index: number) {
-  const entry = workspace.overview[index]
+  const entry = workspace.sheets.overview[index]
   if (!entry) return
-  workspace.closeSheet()
-  guard(() => workspace.enterSpace(entry.space.id))
+  workspace.sheets.close()
+  guard(() => workspace.tree.enterSpace(entry.space.id))
 }

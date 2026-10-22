@@ -30,7 +30,7 @@ real data stays out of it.
 | `migrations/` | the SQLite schema, one numbered file per change |
 | `web/src/lib/keymap.ts` | every key: where it is heard, what it is called, its help line |
 | `web/src/lib/actions.ts`, `modes.ts` | what each key does, and which contexts hear it first |
-| `web/src/lib/store.svelte.ts` | the client's state, and every call to the API |
+| `web/src/lib/store.svelte.ts`, `state/` | the client's state: the one `workspace` the keys see, made of parts that each keep one thing — `tree`, `tiles`, `drafts`, `cards`, `diary`, `scratch`, `sheets`, `vault`, `prompts` |
 | `web/src/lib/commands.ts` | the `:` commands |
 | `web/src/lib/Help.svelte` | the `?` screen |
 

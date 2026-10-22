@@ -7,18 +7,18 @@
    * Enter or r restores, x deletes for good.
    */
   export function restoreTrashed(item: TrashItem) {
-    return workspace.guard(() => workspace.restore(item.id))
+    return workspace.guard(() => workspace.tree.restore(item.id))
   }
 
   export async function purgeTrashed(item: TrashItem) {
     const inside = item.inside > 0 ? ` and the ${item.inside} inside it` : ''
-    if (!(await workspace.ask(`delete "${item.name.trim() || item.slug}"${inside} for good? this cannot be undone.`))) return
-    await workspace.guard(() => workspace.purge(item.id))
+    if (!(await workspace.prompts.ask(`delete "${item.name.trim() || item.slug}"${inside} for good? this cannot be undone.`))) return
+    await workspace.guard(() => workspace.sheets.purge(item.id))
   }
 
   export async function emptyTrash() {
-    if (!(await workspace.ask('empty the trash? everything in it is deleted for good.'))) return
-    await workspace.guard(() => workspace.emptyTrash())
+    if (!(await workspace.prompts.ask('empty the trash? everything in it is deleted for good.'))) return
+    await workspace.guard(() => workspace.sheets.emptyTrash())
   }
 </script>
 
@@ -29,17 +29,17 @@
   const days = (at: number) => Math.max(Math.ceil((at - Date.now() / 1000) / 86400), 0)
 </script>
 
-<Sheet title="trash" detail="{workspace.trash.length} deleted" cursor={workspace.trashCursor} keys={['trash', 'sheet']}>
+<Sheet title="trash" detail="{workspace.sheets.trash.length} deleted" cursor={workspace.sheets.trashCursor} keys={['trash', 'sheet']}>
   {#snippet actions()}
-    {#if workspace.trash.length > 0}
+    {#if workspace.sheets.trash.length > 0}
       <button class="danger" onclick={emptyTrash}>empty</button>
     {/if}
   {/snippet}
 
   <ul class="items">
-    {#each workspace.trash as item, index (item.id)}
+    {#each workspace.sheets.trash as item, index (item.id)}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <li class="item" class:at={index === workspace.trashCursor} data-index={index} onpointerenter={() => (workspace.trashCursor = index)}>
+      <li class="item" class:at={index === workspace.sheets.trashCursor} data-index={index} onpointerenter={() => (workspace.sheets.trashCursor = index)}>
         <span class="kind label">{item.kind}</span>
 
         <div class="info">

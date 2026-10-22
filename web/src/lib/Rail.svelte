@@ -33,7 +33,7 @@
     const settings: Door = { icon: 'settings', label: 'Settings', keys: keysOf('global', 'settings'), run: () => runCommand('settings') }
 
     const focus = workspace.focus
-    const board: Door = workspace.space?.has_board || focus === 'board'
+    const board: Door = workspace.tree.space?.has_board || focus === 'board'
       ? { icon: 'board', label: 'Board', keys: keysOf('global', 'board'), run: () => runCommand('board'), on: focus === 'board' }
       : { icon: 'board', label: 'Give this space a board', keys: [':set board'], run: () => runCommand('set board'), dim: true }
     const agenda: Door = { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: keysOf('global', 'agenda'), run: () => runCommand('agenda'), on: focus === 'agenda' }
@@ -45,7 +45,7 @@
     if (focus === 'board' || focus === 'card') {
       // The card verbs are doors too, so a phone — which has no H, L or
       // Space — can still move work along.
-      const card = !!workspace.card
+      const card = !!workspace.cards.card
       return [
         [board, agenda, calendar, ...close],
         [
@@ -53,16 +53,16 @@
           { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
         ],
         [
-          { icon: 'left', label: 'Send the card left', keys: keysOf('board', 'sendLeft'), run: () => workspace.guard(() => workspace.sendCard(-1)), dim: !card },
-          { icon: 'check', label: 'Done, or back to the inbox', keys: keysOf('board', 'done'), run: () => workspace.guard(() => workspace.toggleDone()), dim: !card },
-          { icon: 'right', label: 'Send the card right', keys: keysOf('board', 'sendRight'), run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
+          { icon: 'left', label: 'Send the card left', keys: keysOf('board', 'sendLeft'), run: () => workspace.guard(() => workspace.cards.sendCard(-1)), dim: !card },
+          { icon: 'check', label: 'Done, or back to the inbox', keys: keysOf('board', 'done'), run: () => workspace.guard(() => workspace.cards.toggleDone()), dim: !card },
+          { icon: 'right', label: 'Send the card right', keys: keysOf('board', 'sendRight'), run: () => workspace.guard(() => workspace.cards.sendCard(1)), dim: !card },
           { icon: 'calendar', label: 'Due date', keys: keysOf('board', 'due'), run: () => hooks.openCommandLine(':due '), dim: !card },
           { icon: 'repeat', label: 'Repeat once done', keys: [':repeat'], run: () => hooks.openCommandLine(':repeat '), dim: !card },
-          { icon: 'doc', label: "The card's notes", keys: keysOf('board', 'notes'), run: () => workspace.guard(() => workspace.openCard()), dim: !card },
+          { icon: 'doc', label: "The card's notes", keys: keysOf('board', 'notes'), run: () => workspace.guard(() => workspace.cards.openCard()), dim: !card },
         ],
         [
-          { icon: 'up', label: 'Card up its list', keys: keysOf('board', 'nudgeUp'), run: () => workspace.guard(() => workspace.nudgeCard(-1)), dim: !card },
-          { icon: 'down', label: 'Card down its list', keys: keysOf('board', 'nudgeDown'), run: () => workspace.guard(() => workspace.nudgeCard(1)), dim: !card },
+          { icon: 'up', label: 'Card up its list', keys: keysOf('board', 'nudgeUp'), run: () => workspace.guard(() => workspace.cards.nudgeCard(-1)), dim: !card },
+          { icon: 'down', label: 'Card down its list', keys: keysOf('board', 'nudgeDown'), run: () => workspace.guard(() => workspace.cards.nudgeCard(1)), dim: !card },
           {
             icon: 'rename',
             label: card ? 'Rename the card' : 'Rename the list',
@@ -84,7 +84,7 @@
       [
         { icon: 'doc-plus', label: 'New document', keys: keysOf('tree', 'new'), run: () => runCommand('new') },
         { icon: 'folder-plus', label: 'New folder', keys: keysOf('tree', 'mkdir'), run: () => hooks.openCommandLine(':mkdir ') },
-        ...(workspace.space ? [board] : []),
+        ...(workspace.tree.space ? [board] : []),
       ],
       [
         agenda,
@@ -96,8 +96,8 @@
       [
         { icon: 'upload', label: 'Upload files into this folder', keys: [':upload'], run: () => hooks.pickTreeFiles(false) },
         { icon: 'trash', label: 'The trash — what was deleted', keys: [':trash'], run: () => runCommand('trash') },
-        ...(workspace.marked.length
-          ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.marked)} here`, keys: keysOf('tree', 'drop'), run: () => workspace.guard(() => workspace.drop()), on: true }]
+        ...(workspace.tree.marked.length
+          ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.tree.marked)} here`, keys: keysOf('tree', 'drop'), run: () => workspace.guard(() => workspace.tree.drop()), on: true }]
           : []),
       ],
       [

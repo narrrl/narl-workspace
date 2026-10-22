@@ -1,6 +1,6 @@
 <script lang="ts">
   /*
-   * The password `workspace.askSecret` asks for, in the same place as the
+   * The password `workspace.prompts.askSecret` asks for, in the same place as the
    * `[y/N]` prompt. A masked field of its own rather than the command line, so
    * a password never shows on screen or lands in the command history.
    *
@@ -25,7 +25,7 @@
   let asking = false
 
   $effect(() => {
-    if (workspace.secret) {
+    if (workspace.prompts.secret) {
       value = ''
       if (!asking) returnTo = document.activeElement as HTMLElement | null
       asking = true
@@ -45,19 +45,19 @@
     event.stopPropagation()
     if (event.key === 'Enter') {
       event.preventDefault()
-      workspace.secret?.resolve(value)
+      workspace.prompts.secret?.resolve(value)
       value = ''
     } else if (event.key === 'Escape') {
       event.preventDefault()
-      workspace.secret?.resolve(null)
+      workspace.prompts.secret?.resolve(null)
       value = ''
     }
   }
 </script>
 
-{#if workspace.secret}
-  <div class="prompt" role="dialog" aria-label={workspace.secret.text}>
-    <label class="text" for="secret">{workspace.secret.text}</label>
+{#if workspace.prompts.secret}
+  <div class="prompt" role="dialog" aria-label={workspace.prompts.secret.text}>
+    <label class="text" for="secret">{workspace.prompts.secret.text}</label>
     <input
       id="secret"
       type="password"
@@ -73,7 +73,7 @@
     />
     <button
       onclick={() => {
-        workspace.secret?.resolve(null)
+        workspace.prompts.secret?.resolve(null)
         value = ''
       }}>esc</button
     >

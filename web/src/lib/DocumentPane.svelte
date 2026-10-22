@@ -106,15 +106,15 @@
       const element = event.target as HTMLElement
       const media = element.closest('img, video, audio') as HTMLImageElement | HTMLMediaElement | null
       if (!media || !(media.getAttribute('src') ?? media.querySelector('source')?.getAttribute('src') ?? '').includes('/api/media/')) return
-      await workspace.loadVault()
-      if (!workspace.vault?.configured || workspace.vault.unlocked || !media.isConnected) return
+      await workspace.vault.load()
+      if (!workspace.vault.status?.configured || workspace.vault.status.unlocked || !media.isConnected) return
       const button = document.createElement('button')
       button.className = 'sealed-embed'
       button.textContent = 'sealed — unlock to show'
       button.onclick = async (click) => {
         click.preventDefault()
         click.stopPropagation()
-        if (!(await workspace.ensureUnlocked())) return
+        if (!(await workspace.vault.ensureUnlocked())) return
         button.replaceWith(media)
         if (media instanceof HTMLImageElement) media.src = media.src
         else media.load()
@@ -190,7 +190,7 @@
       bind:this={title}
       placeholder="Untitled"
       bind:value={tile.draft.name}
-      oninput={() => workspace.touch(tile)}
+      oninput={() => workspace.drafts.touch(tile)}
       onkeydown={(event) => {
         // The title is the line above the text: any of these goes back down.
         if (['Enter', 'Escape', 'ArrowDown', 'Tab'].includes(event.key) && !event.shiftKey) {

@@ -12,10 +12,10 @@
   import { workspace } from './store.svelte'
   import { formatDay, labelHue, urgency } from './util'
 
-  const card = $derived(workspace.card)
-  const list = $derived(workspace.list)
-  const lists = $derived(workspace.board?.lists.length ?? 0)
-  const role = $derived(lists < 2 ? '' : workspace.listCursor === 0 ? 'inbox' : workspace.listCursor === lists - 1 ? 'done' : '')
+  const card = $derived(workspace.cards.card)
+  const list = $derived(workspace.cards.list)
+  const lists = $derived(workspace.cards.board?.lists.length ?? 0)
+  const role = $derived(lists < 2 ? '' : workspace.cards.listCursor === 0 ? 'inbox' : workspace.cards.listCursor === lists - 1 ? 'done' : '')
   const ticked = $derived(card?.checklist.filter((task) => task.done).length ?? 0)
   const html = $derived(card?.body.trim() ? renderMarkdown(card.body, { wikilinks: card.wikilinks }) : '')
 
@@ -26,12 +26,12 @@
   $effect(() => {
     if (card?.id === shown) return
     shown = card?.id
-    workspace.taskCursor = 0
+    workspace.cards.taskCursor = 0
   })
 
   // Keep the step under the cursor on screen.
   $effect(() => {
-    const index = workspace.taskCursor
+    const index = workspace.cards.taskCursor
     root?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
   })
 
@@ -45,12 +45,12 @@
   }
 
   function pick(index: number) {
-    workspace.taskCursor = index
+    workspace.cards.taskCursor = index
   }
 
   function tick(index: number) {
-    workspace.taskCursor = index
-    void workspace.guard(() => workspace.toggleTask())
+    workspace.cards.taskCursor = index
+    void workspace.guard(() => workspace.cards.toggleTask())
   }
 </script>
 
@@ -58,7 +58,7 @@
   <header>
     <span class="label rule">
       <span class="marker"></span><span class="title">card</span>
-      {#if card}{workspace.boardSpace?.slug ?? ''} / {list?.name ?? ''}{role ? ` · ${role}` : ''}{/if}
+      {#if card}{workspace.cards.boardSpace?.slug ?? ''} / {list?.name ?? ''}{role ? ` · ${role}` : ''}{/if}
     </span>
     <span class="kbd tile-key" title="the key that turns a card over, on the board">↵</span>
   </header>
@@ -73,29 +73,29 @@
           {#if card.due_at !== null}<span class={urgency(card)}>due {formatDay(card.due_at)}</span>{/if}
           {#if card.repeat !== null}<span>↻ {card.repeat}</span>{/if}
           {#if card.node_id !== null}
-            <button class="doc" onclick={() => workspace.guard(() => workspace.openCard())}>→ {card.node_name ?? `#${card.node_id}`}</button>
+            <button class="doc" onclick={() => workspace.guard(() => workspace.cards.openCard())}>→ {card.node_name ?? `#${card.node_id}`}</button>
           {/if}
         </div>
       {/if}
 
       <section>
         <div class="label head"><span class="marker"></span>description</div>
-        {#if workspace.describing && workspace.writing}
+        {#if workspace.cards.describing && workspace.drafts.writing}
           {#await import('./Editor.svelte')}
             <div class="empty label">loading editor</div>
           {:then { default: Editor }}
-            {#key workspace.writing.session}
-              <Editor writing={workspace.writing} hint="what this card is about, in short — [[ links a document" />
+            {#key workspace.drafts.writing.session}
+              <Editor writing={workspace.drafts.writing} hint="what this card is about, in short — [[ links a document" />
             {/key}
           {/await}
         {:else if html}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
-          <article class="md description" onclick={follow} ondblclick={() => workspace.describe()}>
+          <article class="md description" onclick={follow} ondblclick={() => workspace.cards.describe()}>
             <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
             {@html html}
           </article>
         {:else}
-          <button class="empty" onclick={() => workspace.describe()}>nothing written yet — <span class="kbd">e</span> writes it</button>
+          <button class="empty" onclick={() => workspace.cards.describe()}>nothing written yet — <span class="kbd">e</span> writes it</button>
         {/if}
       </section>
 
@@ -112,7 +112,7 @@
         <ul>
           {#each card.checklist as task, index (index)}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-            <li class:at={index === workspace.taskCursor && !workspace.describing} class:ticked={task.done} data-index={index} onclick={() => pick(index)}>
+            <li class:at={index === workspace.cards.taskCursor && !workspace.cards.describing} class:ticked={task.done} data-index={index} onclick={() => pick(index)}>
               <button class="tick" aria-label={task.done ? 'untick' : 'tick'} onclick={(e) => (e.stopPropagation(), tick(index))}></button>
               <span class="text">{task.text}</span>
             </li>

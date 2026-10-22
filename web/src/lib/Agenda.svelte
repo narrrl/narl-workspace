@@ -16,22 +16,22 @@
 
   const titles = { overdue: 'late', today: 'today', week: 'this week', doing: 'in hand' } as const
 
-  const groups = $derived(workspace.agendaGroups.filter((group) => group.cards.length > 0))
-  const total = $derived(workspace.agendaCards.length)
+  const groups = $derived(workspace.cards.agendaGroups.filter((group) => group.cards.length > 0))
+  const total = $derived(workspace.cards.agendaCards.length)
 
   $effect(() => {
-    const index = workspace.agendaCursor
+    const index = workspace.cards.agendaCursor
     sheet?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
   })
 
   /** An entry from an earlier year, in place in the diary. */
   function open(entry: DiaryEntry) {
-    void workspace.guard(() => workspace.openPath(entry.path))
+    void workspace.guard(() => workspace.tree.openPath(entry.path))
   }
 
   /** Where a card sits in the walked order, across the groups. */
   function indexOf(card: AgendaCard) {
-    return workspace.agendaCards.findIndex((c) => c.id === card.id)
+    return workspace.cards.agendaCards.findIndex((c) => c.id === card.id)
   }
 </script>
 
@@ -41,7 +41,7 @@
     <span class="kbd tile-key" title="the key that comes to this tile">t</span>
   </header>
 
-  {#if workspace.agenda.diary_today === false}
+  {#if workspace.cards.agenda.diary_today === false}
     <p class="diary">
       <span class="dot"></span> nothing in the diary today
       {#if isTouchDevice}
@@ -61,10 +61,10 @@
           <li>
             <button
               class="row"
-              class:at={index === workspace.agendaCursor}
+              class:at={index === workspace.cards.agendaCursor}
               data-index={index}
-              onclick={() => workspace.guard(() => workspace.goToCard(card))}
-              onpointerenter={() => (workspace.agendaCursor = index)}
+              onclick={() => workspace.guard(() => workspace.cards.goToCard(card))}
+              onpointerenter={() => (workspace.cards.agendaCursor = index)}
             >
               <span class="text">{card.title}</span>
               <span class="where">{card.space_slug}/{card.list_name}</span>
@@ -77,7 +77,7 @@
             </button>
             {#if isTouchDevice}
               <!-- Space, for a thumb. -->
-              <button class="finish" aria-label="done: {card.title}" onclick={() => workspace.guard(() => workspace.toggleDone(card))}>
+              <button class="finish" aria-label="done: {card.title}" onclick={() => workspace.guard(() => workspace.cards.toggleDone(card))}>
                 <Icon name="check" size={18} />
               </button>
             {/if}
@@ -89,19 +89,19 @@
     <p class="clear">nothing late, nothing due this week, nothing in hand. <span class="kbd">c</span> captures the next thing.</p>
   {/each}
 
-  {#if workspace.agenda.on_this_day.length}
+  {#if workspace.cards.agenda.on_this_day.length}
     <section class="past">
-      <h2>on this day <span class="n">{workspace.agenda.on_this_day.length}</span></h2>
+      <h2>on this day <span class="n">{workspace.cards.agenda.on_this_day.length}</span></h2>
       <ul>
-        {#each workspace.agenda.on_this_day as entry, at (entry.id)}
+        {#each workspace.cards.agenda.on_this_day as entry, at (entry.id)}
           {@const index = total + at}
           <li>
             <button
               class="row"
-              class:at={index === workspace.agendaCursor}
+              class:at={index === workspace.cards.agendaCursor}
               data-index={index}
               onclick={() => open(entry)}
-              onpointerenter={() => (workspace.agendaCursor = index)}
+              onpointerenter={() => (workspace.cards.agendaCursor = index)}
             >
               <span class="text">{entry.name.trim() || entry.excerpt || 'untitled'}</span>
               <span class="due">{entry.day.slice(0, 4)}</span>

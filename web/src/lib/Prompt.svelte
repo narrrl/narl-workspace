@@ -1,18 +1,18 @@
 <script lang="ts">
   /*
-   * The `[y/N]` question `workspace.ask` raises, drawn where the command line
+   * The `[y/N]` question `workspace.prompts.ask` raises, drawn where the command line
    * opens. The keys are read in App.svelte, ahead of everything else, so a
    * stray `y` can never reach the editor or the list underneath.
    */
   import { workspace } from './store.svelte'
 </script>
 
-{#if workspace.prompt}
-  <div class="prompt" role="alertdialog" aria-label={workspace.prompt.text}>
-    <span class="text">{workspace.prompt.text}</span>
+{#if workspace.prompts.prompt}
+  <div class="prompt" role="alertdialog" aria-label={workspace.prompts.prompt.text}>
+    <span class="text">{workspace.prompts.prompt.text}</span>
     <span class="choice">
-      <button class="yes" onclick={() => workspace.prompt?.resolve(true)}><span class="kbd">y</span> yes</button>
-      <button onclick={() => workspace.prompt?.resolve(false)}>no</button>
+      <button class="yes" onclick={() => workspace.prompts.prompt?.resolve(true)}><span class="kbd">y</span> yes</button>
+      <button onclick={() => workspace.prompts.prompt?.resolve(false)}>no</button>
     </span>
   </div>
 {/if}

@@ -15,7 +15,7 @@ let carried: NodeSummary[] = []
 /** `ondragstart` of a row. */
 export function carry(event: DragEvent, node: NodeSummary) {
   if (!event.dataTransfer) return
-  carried = workspace.isMarked(node.id) ? workspace.marked : [node]
+  carried = workspace.tree.isMarked(node.id) ? workspace.tree.marked : [node]
   event.dataTransfer.setData(NODES, JSON.stringify(carried.map((n) => n.id)))
   event.dataTransfer.effectAllowed = 'move'
 }
@@ -47,7 +47,7 @@ export function into(parent: number | null, where: string): Attachment<HTMLEleme
       event.stopPropagation()
       const nodes = carried
       carried = []
-      void workspace.guard(() => workspace.moveNodes(nodes, parent, where))
+      void workspace.guard(() => workspace.tree.moveNodes(nodes, parent, where))
     }
     element.addEventListener('dragover', over)
     element.addEventListener('dragleave', leave)

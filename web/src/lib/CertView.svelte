@@ -41,7 +41,7 @@
     try {
       let question = `password for ${name}`
       for (;;) {
-        const password = await workspace.askSecret(question)
+        const password = await workspace.prompts.askSecret(question)
         if (password === null) return
         try {
           return await load(password)

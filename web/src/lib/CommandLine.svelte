@@ -117,7 +117,7 @@
   $effect(() => {
     if (!isSearch) return
     const query = value.slice(1)
-    const timer = setTimeout(() => void workspace.guard(() => workspace.search(query, global)), 120)
+    const timer = setTimeout(() => void workspace.guard(() => workspace.tree.search(query, global)), 120)
     return () => clearTimeout(timer)
   })
 
@@ -146,8 +146,8 @@
       // was typed rather than for the line a keystroke ago.
       const query = line.slice(1)
       await workspace.guard(async () => {
-        if (query && workspace.query !== query) await workspace.search(query, global)
-        if (query && (workspace.selected || workspace.foundCard || workspace.foundNote)) await workspace.openSelected()
+        if (query && workspace.tree.query !== query) await workspace.tree.search(query, global)
+        if (query && (workspace.tree.selected || workspace.tree.foundCard || workspace.tree.foundNote)) await workspace.tree.openSelected()
       })
       hooks.focusList()
       return
@@ -202,14 +202,14 @@
     } else if (event.key === 'Tab' && isSearch) {
       // Nothing to complete in a search: Tab walks the results instead.
       event.preventDefault()
-      workspace.move(event.shiftKey ? -1 : 1)
+      workspace.tree.move(event.shiftKey ? -1 : 1)
     } else if (event.key === 'Tab') {
       event.preventDefault()
       if (!retarget(event.shiftKey ? -1 : 1)) complete(event.shiftKey ? -1 : 1)
     } else if (ctrl && isSearch && (event.key === 'n' || event.key === 'p')) {
       // The results, walked without leaving the line; Enter opens the one lit.
       event.preventDefault()
-      workspace.move(event.key === 'n' ? 1 : -1)
+      workspace.tree.move(event.key === 'n' ? 1 : -1)
     } else if (event.key === 'ArrowUp' || (ctrl && event.key === 'p')) {
       event.preventDefault()
       recall(1)
@@ -244,7 +244,7 @@
   {/if}
 
   <form onsubmit={submit}>
-    {#if isSearch}<span class="scope label">{global ? 'all spaces' : (workspace.space?.slug ?? '')}</span>{/if}
+    {#if isSearch}<span class="scope label">{global ? 'all spaces' : (workspace.tree.space?.slug ?? '')}</span>{/if}
     {#if capture}<span class="scope label" title="Tab: card · note · today">→ {targetNames[capture]} <span class="kbd">tab</span></span>{/if}
     <input bind:this={input} bind:value {onkeydown} {oninput} spellcheck="false" autocomplete="off" />
   </form>

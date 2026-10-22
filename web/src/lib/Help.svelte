@@ -18,12 +18,12 @@
 
   export function openHelp(all = false) {
     helpDepth.all = all
-    workspace.openSheet('help')
+    workspace.sheets.open('help')
   }
 
   /** `?` in the help: everything, and the help away once it is all on show. */
   export function deeperHelp() {
-    if (helpDepth.all) workspace.closeSheet()
+    if (helpDepth.all) workspace.sheets.close()
     else helpDepth.all = true
   }
 

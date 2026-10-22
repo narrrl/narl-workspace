@@ -12,7 +12,7 @@
 
   // The path is the file name here: work/einarbeiten/01-was-ist-eebus.
   const file = $derived(
-    workspace.open ? slugPath(workspace.open.path) : `${workspace.here || '~'}/`,
+    workspace.open ? slugPath(workspace.open.path) : `${workspace.tree.here || '~'}/`,
   )
 
   const lines = $derived(workspace.editing ? workspace.draft.body.split('\n').length : null)
@@ -32,9 +32,9 @@
   <span class="msg" class:alarm={workspace.flash?.kind === 'error'}>{workspace.flash?.text ?? ''}</span>
 
   {#if pending}<span class="pending" aria-live="polite">{pending}</span>{/if}
-  {#if workspace.tiles.length > 1}<span class="flag" title=":ls lists the tiles">tile {workspace.focused + 1}/{workspace.tiles.length}</span>{/if}
+  {#if workspace.tiles.all.length > 1}<span class="flag" title=":ls lists the tiles">tile {workspace.tiles.focused + 1}/{workspace.tiles.all.length}</span>{/if}
   {#if workspace.fullscreen}<span class="flag">full</span>{/if}
-  {#if workspace.vault?.unlocked}<span class="flag vault" title="the vault is open — :vault lock closes it">vault open</span>{/if}
+  {#if workspace.vault.status?.unlocked}<span class="flag vault" title="the vault is open — :vault lock closes it">vault open</span>{/if}
   {#if lines !== null}<span class="readout">{lines}<span class="unit">L</span></span>{/if}
   <span class="hint">
     {isTouchDevice ? 'tap : for commands' : '? help · : command · / search'}

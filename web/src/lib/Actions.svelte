@@ -10,7 +10,7 @@
   import { hooks, runCommand } from './commands'
   import { workspace } from './store.svelte'
 
-  const node = $derived(workspace.selected)
+  const node = $derived(workspace.tree.selected)
 
   type Action = { label: string; run: () => unknown; danger?: boolean }
 
@@ -19,17 +19,17 @@
     const sealed = node.file?.encrypted ?? node.sealed
     const holdsFiles = isContainer(node) || node.kind === 'file'
     const list: Action[] = [
-      { label: isContainer(node) ? 'open' : 'read', run: () => workspace.guard(() => workspace.openSelected()) },
+      { label: isContainer(node) ? 'open' : 'read', run: () => workspace.guard(() => workspace.tree.openSelected()) },
       { label: 'rename', run: () => hooks.openCommandLine(`:name ${node.name}`) },
-      workspace.isMarked(node.id)
-        ? { label: 'put it back — not moving', run: () => workspace.mark(node, false) }
-        : { label: 'move — then open a folder and drop it there', run: () => workspace.mark(node, false) },
+      workspace.tree.isMarked(node.id)
+        ? { label: 'put it back — not moving', run: () => workspace.tree.mark(node, false) }
+        : { label: 'move — then open a folder and drop it there', run: () => workspace.tree.mark(node, false) },
     ]
-    if (workspace.marked.length && workspace.parentId !== null && !workspace.isMarked(node.id)) {
-      const count = workspace.marked.length
+    if (workspace.tree.marked.length && workspace.tree.parentId !== null && !workspace.tree.isMarked(node.id)) {
+      const count = workspace.tree.marked.length
       list.push({
         label: `drop the ${count === 1 ? 'marked node' : `${count} marked nodes`} here`,
-        run: () => workspace.guard(() => workspace.drop()),
+        run: () => workspace.guard(() => workspace.tree.drop()),
       })
     }
     if (node.kind === 'document') {
@@ -41,7 +41,7 @@
       if (node.shared) list.push({ label: 'new share link — the old one stops working', run: () => runCommand('share new') })
     }
     // Inside a sealed folder only that folder opens, as a whole.
-    if (holdsFiles && node.kind !== 'space' && !(sealed && workspace.parentSealed)) {
+    if (holdsFiles && node.kind !== 'space' && !(sealed && workspace.tree.parentSealed)) {
       list.push(
         sealed
           ? { label: node.kind === 'file' ? 'take out of the vault' : 'unseal — take every file out', run: () => runCommand('decrypt') }
@@ -53,7 +53,7 @@
   })
 
   function act(action: Action) {
-    workspace.closeSheet()
+    workspace.sheets.close()
     // The list is what the commands act on while it has the focus.
     workspace.pane = 'list'
     void action.run()

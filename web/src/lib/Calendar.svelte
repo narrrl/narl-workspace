@@ -10,7 +10,7 @@
 
   const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
-  const month = $derived(workspace.calendarDay.slice(0, 7))
+  const month = $derived(workspace.diary.calendarDay.slice(0, 7))
   const title = $derived.by(() => {
     const [y, m] = month.split('-').map(Number)
     return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toLowerCase()
@@ -28,21 +28,21 @@
 
   const today = $derived(formatDay(Math.floor(Date.now() / 1000)))
   const counts = $derived(
-    workspace.calendarEntries.reduce((all, entry) => all.set(entry.day, (all.get(entry.day) ?? 0) + 1), new Map<string, number>()),
+    workspace.diary.calendarEntries.reduce((all, entry) => all.set(entry.day, (all.get(entry.day) ?? 0) + 1), new Map<string, number>()),
   )
-  const chosen = $derived(workspace.calendarEntries.filter((entry) => entry.day === workspace.calendarDay))
+  const chosen = $derived(workspace.diary.calendarEntries.filter((entry) => entry.day === workspace.diary.calendarDay))
 
   function pick(day: string) {
-    workspace.calendarDay = day
-    void workspace.guard(() => workspace.openCalendarDay())
+    workspace.diary.calendarDay = day
+    void workspace.guard(() => workspace.diary.openCalendarDay())
   }
 </script>
 
 <div class="sheet">
   <header>
-    <span class="label rule"><span class="marker"></span><span class="title">{title}</span> {workspace.calendarEntries.length} entries</span>
-    <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, -1))} aria-label="previous month">‹</button>
-    <button onclick={() => workspace.guard(() => workspace.moveCalendar(0, 1))} aria-label="next month">›</button>
+    <span class="label rule"><span class="marker"></span><span class="title">{title}</span> {workspace.diary.calendarEntries.length} entries</span>
+    <button onclick={() => workspace.guard(() => workspace.diary.moveCalendar(0, -1))} aria-label="previous month">‹</button>
+    <button onclick={() => workspace.guard(() => workspace.diary.moveCalendar(0, 1))} aria-label="next month">›</button>
     <span class="kbd tile-key" title="the key that comes to this tile">C</span>
   </header>
 
@@ -55,7 +55,7 @@
         <li>
           <button
             class="day"
-            class:at={day === workspace.calendarDay}
+            class:at={day === workspace.diary.calendarDay}
             class:today={day === today}
             class:written={counts.has(day)}
             onclick={() => pick(day)}
@@ -71,7 +71,7 @@
   </ol>
 
   <section class="chosen">
-    <h2>{workspace.calendarDay}</h2>
+    <h2>{workspace.diary.calendarDay}</h2>
     {#each chosen as entry (entry.id)}
       <p class="entry"><span class="name">{entry.name.trim() || entry.excerpt || 'untitled'}</span></p>
     {:else}

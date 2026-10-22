@@ -12,16 +12,16 @@
 
   // Keep the selected card on screen while walking the board with the keyboard.
   $effect(() => {
-    const at = `${workspace.listCursor}:${workspace.cardCursor}`
+    const at = `${workspace.cards.listCursor}:${workspace.cards.cardCursor}`
     columns?.querySelector<HTMLElement>(`[data-at="${at}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   })
 
 
-  const total = $derived(workspace.board?.lists.reduce((n, list) => n + list.cards.length, 0) ?? 0)
-  const lastIndex = $derived((workspace.board?.lists.length ?? 0) - 1)
+  const total = $derived(workspace.cards.board?.lists.reduce((n, list) => n + list.cards.length, 0) ?? 0)
+  const lastIndex = $derived((workspace.cards.board?.lists.length ?? 0) - 1)
   /** Done cards older than a week, kept off the board until `z` asks. */
   const hidden = $derived(
-    (workspace.rawBoard?.lists.at(-1)?.cards.length ?? 0) - (workspace.board?.lists.at(-1)?.cards.length ?? 0),
+    (workspace.cards.rawBoard?.lists.at(-1)?.cards.length ?? 0) - (workspace.cards.board?.lists.at(-1)?.cards.length ?? 0),
   )
 
   /** What a column is for, by where it stands — the names are yours to choose. */
@@ -32,27 +32,27 @@
 
   /** The spaces that have a board, with the digit that switches to each. */
   const boards = $derived(
-    workspace.spaces.flatMap((space, index) => (space.has_board && index < 10 ? [{ space, digit: (index + 1) % 10 }] : [])),
+    workspace.tree.spaces.flatMap((space, index) => (space.has_board && index < 10 ? [{ space, digit: (index + 1) % 10 }] : [])),
   )
 
   function pick(list: number, card: number) {
-    workspace.listCursor = list
-    workspace.cardCursor = card
+    workspace.cards.listCursor = list
+    workspace.cards.cardCursor = card
   }
 </script>
 
 <div class="board">
   <div class="head label rule">
     <span class="marker"></span>
-    <span class="name">{workspace.boardSpace?.slug ?? ''}</span>
+    <span class="name">{workspace.cards.boardSpace?.slug ?? ''}</span>
     <span>board</span>
-    {#if workspace.board}<span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>{/if}
+    {#if workspace.cards.board}<span class="count">{total} {total === 1 ? 'card' : 'cards'}</span>{/if}
     <!-- Every board is a digit away: the digit switches space, and the board
          follows the space. -->
     {#if boards.length > 1}
       <span class="boards">
         {#each boards as { space, digit } (space.id)}
-          <button class="other" class:here={space.id === workspace.boardSpaceId} onclick={() => workspace.guard(() => workspace.switchSpace(digit === 0 ? 9 : digit - 1))}>
+          <button class="other" class:here={space.id === workspace.cards.boardSpaceId} onclick={() => workspace.guard(() => workspace.tree.switchSpace(digit === 0 ? 9 : digit - 1))}>
             <span class="n">{digit}</span>{space.slug}
           </button>
         {/each}
@@ -62,9 +62,9 @@
   </div>
 
   <div class="columns" bind:this={columns}>
-    {#each workspace.board?.lists ?? [] as list, listIndex (list.id)}
+    {#each workspace.cards.board?.lists ?? [] as list, listIndex (list.id)}
       {@const kind = role(listIndex)}
-      <section class="column" class:on={listIndex === workspace.listCursor} class:finished={kind === 'done'}>
+      <section class="column" class:on={listIndex === workspace.cards.listCursor} class:finished={kind === 'done'}>
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <header class="label" onclick={() => pick(listIndex, 0)}>
           <span class="marker"></span>
@@ -78,11 +78,11 @@
             <li>
               <button
                 class="card"
-                class:active={listIndex === workspace.listCursor && cardIndex === workspace.cardCursor}
+                class:active={listIndex === workspace.cards.listCursor && cardIndex === workspace.cards.cardCursor}
                 class:done={card.done_at !== null}
                 data-at="{listIndex}:{cardIndex}"
                 onclick={() => pick(listIndex, cardIndex)}
-                ondblclick={() => workspace.guard(() => workspace.turnCard())}
+                ondblclick={() => workspace.guard(() => workspace.cards.turnCard())}
                 title="Enter turns the card over"
               >
                 {#if card.labels.length}
@@ -121,10 +121,10 @@
               {#if kind === 'done'}nothing finished this week{:else if kind === 'inbox'}empty — c captures from anywhere{:else}no cards — o adds one{/if}
             </li>
           {/each}
-          {#if kind === 'done' && (hidden > 0 || workspace.showOldDone)}
+          {#if kind === 'done' && (hidden > 0 || workspace.cards.showOldDone)}
             <li>
-              <button class="older" onclick={() => (workspace.showOldDone = !workspace.showOldDone)}>
-                {workspace.showOldDone ? 'hide older' : `+${hidden} older`} <span class="kbd">z</span>
+              <button class="older" onclick={() => (workspace.cards.showOldDone = !workspace.cards.showOldDone)}>
+                {workspace.cards.showOldDone ? 'hide older' : `+${hidden} older`} <span class="kbd">z</span>
               </button>
             </li>
           {/if}
@@ -132,7 +132,7 @@
       </section>
     {:else}
       <div class="empty muted">
-        {#if !workspace.boardSpace}
+        {#if !workspace.cards.boardSpace}
           no space has a board — :set board gives the one you are in one.
         {:else}
           no lists yet — :list &lt;name&gt; makes a column. then o adds a card to it.

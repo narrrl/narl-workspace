@@ -11,7 +11,7 @@
 
   // Keep the cursor line visible while navigating with j/k.
   $effect(() => {
-    const index = workspace.cursor
+    const index = workspace.tree.cursor
     const node = list?.querySelector<HTMLElement>(`[data-index="${index}"]`)
     node?.scrollIntoView({ block: 'nearest' })
   })
@@ -32,41 +32,41 @@
         : `${node.child_count}`
 
   /* The row a day heading compares with: the one above, past a document's files. */
-  const above = (index: number) => workspace.nodes.slice(0, index).filter((n) => !workspace.isNested(n)).at(-1)
+  const above = (index: number) => workspace.tree.nodes.slice(0, index).filter((n) => !workspace.tree.isNested(n)).at(-1)
 
   const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false
 
   function drop(event: DragEvent) {
     dropping = false
     const files = Array.from(event.dataTransfer?.files ?? [])
-    if (files.length === 0 || workspace.query) return
+    if (files.length === 0 || workspace.tree.query) return
     event.preventDefault()
-    void workspace.guard(() => workspace.putFiles(files))
+    void workspace.guard(() => workspace.tree.putFiles(files))
   }
 
   /* Ctrl or Cmd picks a row up, Shift every row from the cursor to it. */
   function click(event: MouseEvent, index: number, node: NodeSummary) {
-    if (event.ctrlKey || event.metaKey) return workspace.mark(node, false)
-    if (event.shiftKey) return workspace.markRange(index)
+    if (event.ctrlKey || event.metaKey) return workspace.tree.mark(node, false)
+    if (event.shiftKey) return workspace.tree.markRange(index)
     pick(index)
   }
 
   function pick(index: number) {
-    workspace.cursor = index
-    void workspace.guard(() => workspace.openSelected())
+    workspace.tree.cursor = index
+    void workspace.guard(() => workspace.tree.openSelected())
   }
 
   /* A tap opens a row, so on a phone the other verbs need a door of their own. */
   function actions(index: number) {
-    workspace.cursor = index
-    workspace.openSheet('actions')
+    workspace.tree.cursor = index
+    workspace.sheets.open('actions')
   }
 
   /* What is in the folder itself, not the files folded open under its documents. */
-  const items = $derived(workspace.nodes.filter((node) => !workspace.isNested(node)).length)
+  const items = $derived(workspace.tree.nodes.filter((node) => !workspace.tree.isNested(node)).length)
 
   /* Inside a folder, a phone has no h key and no crumbs on the bar: this is the way up. */
-  const nested = $derived(isTouchDevice && !workspace.query && workspace.path.length > 1)
+  const nested = $derived(isTouchDevice && !workspace.tree.query && workspace.tree.path.length > 1)
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -74,7 +74,7 @@
   class="sidebar"
   class:dropping
   ondragover={(event) => {
-    if (!carriesFiles(event) || workspace.query) return
+    if (!carriesFiles(event) || workspace.tree.query) return
     event.preventDefault()
     dropping = true
   }}
@@ -85,38 +85,38 @@
 >
   <div class="head label rule">
     <span class="marker"></span>
-    <span class="name">{workspace.space?.slug ?? 'diary'}</span>
+    <span class="name">{workspace.tree.space?.slug ?? 'diary'}</span>
     <span class="count">
-      {items} {items === 1 ? 'item' : 'items'}{#if workspace.foundCards.length > 0}
-        · {workspace.foundCards.length} {workspace.foundCards.length === 1 ? 'card' : 'cards'}{/if}{#if workspace.foundNotes.length > 0}
-        · {workspace.foundNotes.length} {workspace.foundNotes.length === 1 ? 'note' : 'notes'}{/if}
+      {items} {items === 1 ? 'item' : 'items'}{#if workspace.tree.foundCards.length > 0}
+        · {workspace.tree.foundCards.length} {workspace.tree.foundCards.length === 1 ? 'card' : 'cards'}{/if}{#if workspace.tree.foundNotes.length > 0}
+        · {workspace.tree.foundNotes.length} {workspace.tree.foundNotes.length === 1 ? 'note' : 'notes'}{/if}
     </span>
   </div>
 
-  {#if workspace.query}
+  {#if workspace.tree.query}
     <div class="filter">
-      <span class="muted">/</span><span class="query">{workspace.query}</span>
-      {#if workspace.globalSearch}<span class="muted scope">all spaces</span>{/if}
-      <button title="clear search (n)" onclick={() => workspace.guard(() => workspace.search(''))}>esc</button>
+      <span class="muted">/</span><span class="query">{workspace.tree.query}</span>
+      {#if workspace.tree.globalSearch}<span class="muted scope">all spaces</span>{/if}
+      <button title="clear search (n)" onclick={() => workspace.guard(() => workspace.tree.search(''))}>esc</button>
     </div>
   {/if}
 
   <ul bind:this={list}>
     {#if nested}
       <li>
-        <button class="row up" onclick={() => workspace.guard(() => workspace.up())}>
+        <button class="row up" onclick={() => workspace.guard(() => workspace.tree.up())}>
           <span class="dot"></span>
           <span class="title">..<span class="slash">/</span></span>
           <span class="aside">up</span>
         </button>
       </li>
     {/if}
-    {#each workspace.nodes as node, index (node.id)}
+    {#each workspace.tree.nodes as node, index (node.id)}
       {@const previous = above(index)}
-      {@const nested = workspace.isNested(node)}
+      {@const nested = workspace.tree.isNested(node)}
       <!-- Day headings only make sense in a list that is a journal: documents,
            in date order, not a search and not a folder listing. -->
-      {#if !workspace.query && !nested && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
+      {#if !workspace.tree.query && !nested && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
         <li class="daybreak label rule">
           <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>
@@ -134,9 +134,9 @@
             event.preventDefault()
             actions(index)
           }}
-          class:active={index === workspace.cursor}
-          class:open={workspace.tiles.some((tile) => tile.open?.id === node.id)}
-          class:marked={workspace.isMarked(node.id)}
+          class:active={index === workspace.tree.cursor}
+          class:open={workspace.tiles.all.some((tile) => tile.open?.id === node.id)}
+          class:marked={workspace.tree.isMarked(node.id)}
           class:nested
           data-index={index}
           onclick={(event) => click(event, index, node)}
@@ -144,10 +144,10 @@
           <span class="dot"></span>
           <span class="title">
             {label(node)}{#if isContainer(node)}<span class="slash">/</span>{/if}
-            {#if workspace.query && node.location}<span class="where">{node.location}</span>{/if}
-            {#if workspace.query && node.in_text}<span class="hit" title="found in the file's text">{#each hitParts(node.excerpt) as part, at (at)}{#if part.lit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>{/if}
+            {#if workspace.tree.query && node.location}<span class="where">{node.location}</span>{/if}
+            {#if workspace.tree.query && node.in_text}<span class="hit" title="found in the file's text">{#each hitParts(node.excerpt) as part, at (at)}{#if part.lit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>{/if}
           </span>
-          {#if workspace.isMarked(node.id)}<span class="badge" title="marked — p drops what is marked in a folder">m</span>{/if}
+          {#if workspace.tree.isMarked(node.id)}<span class="badge" title="marked — p drops what is marked in a folder">m</span>{/if}
           {#if node.shared}<span class="shared" title="shared"></span>{/if}
           {#if node.file?.encrypted}<span class="sealed" title="in the vault"><Icon name="lock" size={12} /></span>{/if}
           {#if node.sealed}<span class="sealed" title="sealed — files added here go into the vault"><Icon name="lock" size={12} /></span>{/if}
@@ -161,13 +161,13 @@
       </li>
     {/each}
     <!-- The cards a search found, after the nodes: Enter turns one over on its board. -->
-    {#if workspace.foundCards.length > 0}
+    {#if workspace.tree.foundCards.length > 0}
       <li class="daybreak label rule"><span>cards</span></li>
     {/if}
-    {#each workspace.foundCards as card, at (card.id)}
-      {@const index = workspace.nodes.length + at}
+    {#each workspace.tree.foundCards as card, at (card.id)}
+      {@const index = workspace.tree.nodes.length + at}
       <li class="item">
-        <button class="row card" class:active={index === workspace.cursor} class:done={card.done_at !== null} data-index={index} onclick={() => pick(index)}>
+        <button class="row card" class:active={index === workspace.tree.cursor} class:done={card.done_at !== null} data-index={index} onclick={() => pick(index)}>
           <span class="dot"></span>
           <span class="title">{card.title}<span class="where">{card.space_slug}/{card.list_name}</span></span>
           <span class="aside">{card.done_at !== null ? 'done' : card.due_at !== null ? formatDay(card.due_at) : 'card'}</span>
@@ -175,22 +175,22 @@
       </li>
     {/each}
     <!-- Then the notes it found on the scratchpad: Enter lowers it, at the note. -->
-    {#if workspace.foundNotes.length > 0}
+    {#if workspace.tree.foundNotes.length > 0}
       <li class="daybreak label rule"><span>notes</span></li>
     {/if}
-    {#each workspace.foundNotes as note, at (note.id)}
-      {@const index = workspace.nodes.length + workspace.foundCards.length + at}
+    {#each workspace.tree.foundNotes as note, at (note.id)}
+      {@const index = workspace.tree.nodes.length + workspace.tree.foundCards.length + at}
       <li class="item">
-        <button class="row note" class:active={index === workspace.cursor} data-index={index} onclick={() => pick(index)}>
+        <button class="row note" class:active={index === workspace.tree.cursor} data-index={index} onclick={() => pick(index)}>
           <span class="dot"></span>
           <span class="title">{headline(note.body) || '—'}<span class="where">scratch</span></span>
           <span class="aside">{relative(note.updated_at)}</span>
         </button>
       </li>
     {/each}
-    {#if workspace.rows === 0}
+    {#if workspace.tree.rows === 0}
       <li class="empty muted">
-        {#if workspace.query}
+        {#if workspace.tree.query}
           no matches
         {:else}
           nothing here yet — <span class="kbd">o</span> writes, <span class="kbd">⇧ O</span> makes a folder, files dropped here land here

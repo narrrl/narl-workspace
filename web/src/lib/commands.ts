@@ -90,8 +90,8 @@ function verb(arg: string, verbs: readonly string[]): [string, string] {
 
 /** Close the focused tile; the index of the one that has the focus after. */
 const closeFocused = () => {
-  workspace.closeTile()
-  return workspace.focused
+  workspace.tiles.close()
+  return workspace.tiles.focused
 }
 
 /**
@@ -103,18 +103,18 @@ const closeFocused = () => {
 export async function openInfo(section?: InfoSection) {
   if (!requireOpen()) return
   const { headings, current } = hooks.headings()
-  workspace.outline = headings
-  workspace.outlineCursor = current
+  workspace.sheets.outline = headings
+  workspace.sheets.outlineCursor = current
   await workspace.guard(async () => {
     // One after the other: each writes what is typed first, and two saves
     // of the same text at once would race.
-    await workspace.loadHistory()
-    await workspace.loadBacklinks()
+    await workspace.sheets.loadHistory()
+    await workspace.sheets.loadBacklinks()
     // Picked afresh each time, from the first: the open card leads.
-    workspace.cardsCursor = 0
-    workspace.filesCursor = 0
-    if (section) workspace.infoSection = section
-    workspace.openSheet('info')
+    workspace.sheets.cardsCursor = 0
+    workspace.sheets.filesCursor = 0
+    if (section) workspace.sheets.infoSection = section
+    workspace.sheets.open('info')
   })
 }
 
@@ -135,7 +135,7 @@ const requireOpen = () => {
 
 /** A card about `node`, titled after it unless named. */
 const cardAbout = (node: NodeSummary, title: string) =>
-  workspace.guard(() => workspace.createCard(title.trim() || node.name.trim() || node.slug, node.id))
+  workspace.guard(() => workspace.cards.createCard(title.trim() || node.name.trim() || node.slug, node.id))
 
 const TITLE_HREF = titleHref('')
 
@@ -153,11 +153,11 @@ export function followLink(href: string, tab = false) {
     if (tab) {
       if (!path) return workspace.say(`no document called "${title}" yet`, 'error')
       href = `/n/${path}`
-    } else return void workspace.guard(() => workspace.followTitle(title))
+    } else return void workspace.guard(() => workspace.tree.followTitle(title))
   }
   if (href.startsWith('/n/') && !tab) {
     const path = href.slice(3).split('#')[0]
-    return void workspace.guard(() => workspace.openPath(decodeURIComponent(path)))
+    return void workspace.guard(() => workspace.tree.openPath(decodeURIComponent(path)))
   }
   window.open(new URL(href, location.href).href, '_blank', 'noopener,noreferrer')
 }
@@ -167,8 +167,8 @@ export function followLink(href: string, tab = false) {
  * otherwise the shell, whose keys then act on that tile.
  */
 export async function focusTile(index: number) {
-  if (!workspace.tiles[index]) return
-  workspace.focusTile(index)
+  if (!workspace.tiles.all[index]) return
+  workspace.tiles.focusOn(index)
   // The tile's editor fills the hooks once it has seen it has the focus.
   await tick()
   if (workspace.editing && workspace.pane === 'document') hooks.focusEditor()
@@ -177,38 +177,38 @@ export async function focusTile(index: number) {
 
 /** `gt` / `gT`, `:bn` / `:bp`: the next or previous tile, round and round. */
 export function cycleTile(delta: 1 | -1) {
-  const count = workspace.tiles.length
+  const count = workspace.tiles.all.length
   if (count < 2) return workspace.say('only one tile — L on a row opens another', 'error')
-  return focusTile((workspace.focused + delta + count) % count)
+  return focusTile((workspace.tiles.focused + delta + count) % count)
 }
 
 /** `:ls`'s line for one tile: number, `%` for the focused one, `[+]` unsaved. */
 const describeTile = (index: number) => {
-  const tile = workspace.tiles[index]
+  const tile = workspace.tiles.all[index]
   const name = tile.kind !== 'node' ? tile.kind : tile.open ? tile.open.name.trim() || tile.open.slug : '(empty)'
-  return `${index + 1}${index === workspace.focused ? '%' : ''} ${name}${tile.dirty ? ' [+]' : ''}`
+  return `${index + 1}${index === workspace.tiles.focused ? '%' : ''} ${name}${tile.dirty ? ' [+]' : ''}`
 }
 
 /** `:space rm`: a space, the one you are in unless named, into the trash. */
 async function removeSpace(name: string) {
   const wanted = name.toLowerCase()
-  const space = wanted ? workspace.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted) : workspace.space
+  const space = wanted ? workspace.tree.spaces.find((s) => s.slug === wanted || s.name.toLowerCase() === wanted) : workspace.tree.space
   if (!space) return workspace.say(`no such space: ${wanted || '(none open)'}`, 'error')
-  if (!(await workspace.ask(`delete the space "${space.name}" and everything in it? it goes to the trash.`))) return
-  await workspace.guard(() => workspace.deleteSpace(space.id))
+  if (!(await workspace.prompts.ask(`delete the space "${space.name}" and everything in it? it goes to the trash.`))) return
+  await workspace.guard(() => workspace.tree.deleteSpace(space.id))
 }
 
 /** Move the cursor and follow it, so `:next` reads as well as `j` then `Enter`. */
 const jumpTo = async (index: number) => {
-  if (workspace.rows === 0) return workspace.say('nothing here', 'error')
-  workspace.cursor = Math.min(Math.max(index, 0), workspace.rows - 1)
-  await workspace.guard(() => workspace.openSelected())
+  if (workspace.tree.rows === 0) return workspace.say('nothing here', 'error')
+  workspace.tree.cursor = Math.min(Math.max(index, 0), workspace.tree.rows - 1)
+  await workspace.guard(() => workspace.tree.openSelected())
 }
 
 /** A folder among the children currently listed, by slug or by name. */
 const findFolder = (target: string) => {
   const wanted = target.toLowerCase()
-  return workspace.nodes.find(
+  return workspace.tree.nodes.find(
     (node) =>
       isContainer(node) && (node.slug === wanted || node.name.toLowerCase() === wanted),
   )
@@ -216,12 +216,12 @@ const findFolder = (target: string) => {
 
 /** The folders listed here, by slug, then the two ways out — for `:cd` and `:mv`. */
 const folderNames = () => [
-  ...workspace.nodes.filter(isContainer).map((node) => node.slug),
+  ...workspace.tree.nodes.filter(isContainer).map((node) => node.slug),
   '..',
   '/',
 ]
 
-const spaceNames = () => workspace.spaces.map((space) => space.slug)
+const spaceNames = () => workspace.tree.spaces.map((space) => space.slug)
 
 /** The capture tokens' names, for Tab after `:token rm`; null until fetched. */
 let tokenNames: string[] | null = null
@@ -250,7 +250,7 @@ function documentTitles(arg: string): string[] {
 
 /** The document in a tile, the focused one first: what a note goes to the end of unless told otherwise. */
 function documentOnScreen(): string | undefined {
-  const tile = [workspace.tile, ...workspace.tiles].find((t) => t.open?.kind === 'document')
+  const tile = [workspace.tile, ...workspace.tiles.all].find((t) => t.open?.kind === 'document')
   return tile?.open ? `/n/${tile.open.path.map((crumb) => crumb.slug).join('/')}` : undefined
 }
 
@@ -259,7 +259,7 @@ let templateCache: { space: number; names: string[] } | null = null
 
 /** Tab cannot wait for the server: the names come on the press after the first. */
 function templateNames(): string[] {
-  const here = workspace.spaceId
+  const here = workspace.tree.spaceId
   if (here === null) return []
   if (templateCache?.space !== here) {
     templateCache = { space: here, names: [] }
@@ -281,7 +281,7 @@ const sealTarget = (encrypt: boolean) =>
     if (node.file && node.file.encrypted === encrypt) {
       return workspace.say(encrypt ? 'already in the vault' : 'not in the vault')
     }
-    if (!encrypt && workspace.parentSealed) {
+    if (!encrypt && workspace.tree.parentSealed) {
       return workspace.say(`this ${node.kind} is inside a sealed folder — decrypt that folder instead`, 'error')
     }
     const name = node.name || node.slug
@@ -289,13 +289,13 @@ const sealTarget = (encrypt: boolean) =>
       const question = encrypt
         ? `seal ${node.kind} "${name}" — every file in it now, and every file added later? documents stay readable`
         : `unseal ${node.kind} "${name}" and take every file in it out of the vault?`
-      if (!(await workspace.ask(question))) return
+      if (!(await workspace.prompts.ask(question))) return
     } else if (!encrypt) {
-      if (!(await workspace.ask(`store "${name}" unencrypted again, and in the readable files/ view on proton drive?`))) return
+      if (!(await workspace.prompts.ask(`store "${name}" unencrypted again, and in the readable files/ view on proton drive?`))) return
     }
-    if (!(await workspace.ensureUnlocked())) return
+    if (!(await workspace.vault.ensureUnlocked())) return
     workspace.say(encrypt ? 'encrypting …' : 'decrypting …')
-    await workspace.seal(node.id, encrypt)
+    await workspace.vault.seal(node.id, encrypt)
   })
 
 /** `3 minutes ago`, or `never`. Backups are read at a glance, not to the second. */
@@ -346,7 +346,7 @@ export function describeBackup(status: BackupStatus): string {
 
 /** The vault in a line: open or locked, and what it is busy with. */
 export function describeVault(): string {
-  const vault = workspace.vault
+  const vault = workspace.vault.status
   if (!vault?.configured) return 'no vault yet'
   const left = vault.locks_in ? ` · locks in ${Math.ceil(vault.locks_in / 60)}m unless used` : ''
   const rekey = vault.rekey
@@ -359,27 +359,27 @@ export function describeVault(): string {
 
 /** The first time: a password for the vault, asked twice. */
 async function setupVault() {
-  const password = await workspace.askSecret('new vault password, 10+ characters — it cannot be recovered')
+  const password = await workspace.prompts.askSecret('new vault password, 10+ characters — it cannot be recovered')
   if (password === null) return
-  const again = await workspace.askSecret('the same again')
+  const again = await workspace.prompts.askSecret('the same again')
   if (again === null) return
   if (again !== password) return workspace.say('the two passwords differ — nothing was set', 'error')
-  workspace.vault = await api.setupVault(password)
+  workspace.vault.status = await api.setupVault(password)
   workspace.say('vault ready and open — :encrypt seals what is under the cursor, :upload seal seals new files')
 }
 
 async function changeVaultPassword() {
-  const current = await workspace.askSecret('current vault password')
+  const current = await workspace.prompts.askSecret('current vault password')
   if (current === null) return
-  const password = await workspace.askSecret('new vault password, 10+ characters')
+  const password = await workspace.prompts.askSecret('new vault password, 10+ characters')
   if (password === null) return
-  const again = await workspace.askSecret('the same again')
+  const again = await workspace.prompts.askSecret('the same again')
   if (again === null) return
   if (again !== password) return workspace.say('the two passwords differ — nothing was changed', 'error')
-  workspace.vault = await api.changeVaultPassword(current, password)
+  workspace.vault.status = await api.changeVaultPassword(current, password)
   workspace.say(
-    workspace.vault.rekey
-      ? `vault password changed — re-sealing ${workspace.vault.sealed} file(s) under the new key; leave the vault open, :vault shows how far`
+    workspace.vault.status.rekey
+      ? `vault password changed — re-sealing ${workspace.vault.status.sealed} file(s) under the new key; leave the vault open, :vault shows how far`
       : 'vault password changed',
   )
 }
@@ -407,15 +407,15 @@ async function protonLogin(username: string) {
   const unsealed = status.sealed_session
     ? ''
     : ' The session will be stored unsealed on the data volume — set WORKSPACE_SESSION_KEY_FILE to seal it.'
-  if (!(await workspace.ask(`${status.disclosure ?? ''}${unsealed} Log in as ${username}?`))) return
-  const password = await workspace.askSecret(`proton password for ${username}`)
+  if (!(await workspace.prompts.ask(`${status.disclosure ?? ''}${unsealed} Log in as ${username}?`))) return
+  const password = await workspace.prompts.askSecret(`proton password for ${username}`)
   if (password === null) return
   workspace.say('logging in to proton …')
   let answer: BackupLogin = await api.backupLogin(username, password)
   for (let round = 0; answer.next !== 'done'; round++) {
     if (round === 5) return workspace.say('proton keeps asking — try again later', 'error')
     if (answer.next === 'totp') {
-      const code = await workspace.askSecret('proton two-factor code')
+      const code = await workspace.prompts.askSecret('proton two-factor code')
       if (code === null) return workspace.say('proton login abandoned')
       try {
         answer = await api.backupTotp(code)
@@ -425,7 +425,7 @@ async function protonLogin(username: string) {
         workspace.say(error.message, 'error')
       }
     } else {
-      const token = await workspace.askVerification(answer.url ?? '')
+      const token = await workspace.prompts.askVerification(answer.url ?? '')
       if (token === null) return workspace.say('proton login abandoned')
       workspace.say('logging in to proton …')
       answer = await api.backupCaptcha(token)
@@ -447,9 +447,9 @@ const exportName = (title: string, at: number) => {
  * `:q!`. A document `o` made and nothing was written in is not kept.
  */
 async function leaveEditor() {
-  if (workspace.writing) return void workspace.leaveWriting()
-  if (await workspace.abandonIfBlank()) return hooks.focusList()
-  if (workspace.dirty && !(await workspace.guard(() => workspace.save()))) return
+  if (workspace.drafts.writing) return void workspace.drafts.leaveWriting()
+  if (await workspace.drafts.abandonIfBlank()) return hooks.focusList()
+  if (workspace.dirty && !(await workspace.guard(() => workspace.drafts.save()))) return
   workspace.editing = false
   hooks.focusList()
 }
@@ -461,10 +461,10 @@ export const commands: CommandSpec[] = [
     group: 'editing',
     essential: true,
     help: "save what is being written — the open document, a card's description, a note — rather than in a moment",
-    run: () => workspace.guard(() => (workspace.writing ? workspace.saveWriting() : workspace.save())),
+    run: () => workspace.guard(() => (workspace.drafts.writing ? workspace.drafts.saveWriting() : workspace.drafts.save())),
     bang: {
       help: 'save even over a newer version saved somewhere else since this one was opened',
-      run: () => workspace.guard(() => workspace.save({ force: true })),
+      run: () => workspace.guard(() => workspace.drafts.save({ force: true })),
     },
   },
   {
@@ -476,7 +476,7 @@ export const commands: CommandSpec[] = [
     bang: {
       help: 'save over a newer version, as :w! does, and leave the editor',
       run: async () => {
-        if (await workspace.guard(() => workspace.save({ force: true }))) await leaveEditor()
+        if (await workspace.guard(() => workspace.drafts.save({ force: true }))) await leaveEditor()
       },
     },
   },
@@ -487,27 +487,27 @@ export const commands: CommandSpec[] = [
     essential: true,
     help: 'leave the editor with what is waiting written first, or close the document when already reading',
     run: async () => {
-      if (workspace.writing || workspace.editing) return leaveEditor()
+      if (workspace.drafts.writing || workspace.editing) return leaveEditor()
       // A document `o` made and nothing was written in is not kept.
-      if (await workspace.abandonIfBlank()) return hooks.focusList()
+      if (await workspace.drafts.abandonIfBlank()) return hooks.focusList()
       if (workspace.dirty) {
         workspace.say('unsaved changes — :w to write, :q! to discard', 'error')
         return
       }
-      if (workspace.tiles.length > 1) return focusTile(closeFocused())
-      workspace.closeTile()
+      if (workspace.tiles.all.length > 1) return focusTile(closeFocused())
+      workspace.tiles.close()
       hooks.focusList()
     },
     bang: {
       help: 'leave the editor, letting go of what is not saved yet',
       run: async () => {
-        if (workspace.writing) return void workspace.leaveWriting(true)
+        if (workspace.drafts.writing) return void workspace.drafts.leaveWriting(true)
         const open = workspace.open
         workspace.editing = false
         workspace.dirty = false
         if (open) {
-          workspace.dropStash(open.id)
-          await workspace.guard(() => workspace.openNode(open.id))
+          workspace.drafts.dropStash(open.id)
+          await workspace.guard(() => workspace.tree.openNode(open.id))
         }
         hooks.focusList()
       },
@@ -524,24 +524,24 @@ export const commands: CommandSpec[] = [
       const [what, rest] = verb(arg, ['new', 'name', 'rm'])
       if (what === 'new') {
         if (!rest) return workspace.say('usage: :space new <name>', 'error')
-        return workspace.guard(() => workspace.createSpace(rest))
+        return workspace.guard(() => workspace.tree.createSpace(rest))
       }
       if (what === 'name') {
-        const space = workspace.space
+        const space = workspace.tree.space
         if (!space) return workspace.say('no space open', 'error')
         if (!rest) return workspace.say('usage: :space name <text>', 'error')
-        return workspace.guard(() => workspace.renameNode(space.id, rest))
+        return workspace.guard(() => workspace.tree.renameNode(space.id, rest))
       }
       if (what === 'rm') return removeSpace(rest)
       const wanted = rest.toLowerCase()
       if (!wanted) {
-        return workspace.say(workspace.spaces.map((space) => space.slug).join(' · ') || 'no spaces')
+        return workspace.say(workspace.tree.spaces.map((space) => space.slug).join(' · ') || 'no spaces')
       }
-      const space = workspace.spaces.find(
+      const space = workspace.tree.spaces.find(
         (candidate) => candidate.slug === wanted || candidate.name.toLowerCase() === wanted,
       )
       if (!space) return workspace.say(`no such space: ${wanted} — :space new ${wanted} makes it`, 'error')
-      await workspace.guard(() => workspace.enterSpace(space.id))
+      await workspace.guard(() => workspace.tree.enterSpace(space.id))
     },
   },
   {
@@ -551,7 +551,7 @@ export const commands: CommandSpec[] = [
     help: 'make a folder here',
     run: async (arg) => {
       if (!arg.trim()) return workspace.say('usage: :mkdir <name>', 'error')
-      await workspace.guard(() => workspace.createFolder(arg.trim()))
+      await workspace.guard(() => workspace.tree.createFolder(arg.trim()))
     },
   },
   {
@@ -563,14 +563,14 @@ export const commands: CommandSpec[] = [
     run: async (arg) => {
       const target = arg.trim()
       await workspace.guard(async () => {
-        if (!target || target === '..') return workspace.up()
+        if (!target || target === '..') return workspace.tree.up()
         if (target === '/') {
-          const space = workspace.spaceId
-          return space === null ? undefined : workspace.goTo(space)
+          const space = workspace.tree.spaceId
+          return space === null ? undefined : workspace.tree.goTo(space)
         }
         const folder = findFolder(target)
         if (!folder) return workspace.say(`no such folder here: ${target}`, 'error')
-        await workspace.goTo(folder.id)
+        await workspace.tree.goTo(folder.id)
       })
     },
   },
@@ -592,14 +592,14 @@ export const commands: CommandSpec[] = [
     name: 'board',
     group: 'board',
     help: "this space's board, in a tile — the last one shown when this space has none",
-    run: () => workspace.guard(() => workspace.showView('board')),
+    run: () => workspace.guard(() => workspace.tiles.show('board')),
   },
   {
     name: 'plan',
     aliases: ['special'],
     group: 'board',
     help: 'the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board',
-    run: () => workspace.guard(() => workspace.togglePlan()),
+    run: () => workspace.guard(() => workspace.tiles.togglePlan()),
   },
   {
     name: 'card',
@@ -611,7 +611,7 @@ export const commands: CommandSpec[] = [
       const open = workspace.open
       if (readingDocument() && open) return cardAbout(open, arg)
       if (!arg.trim()) return workspace.say('usage: :card <title>', 'error')
-      await workspace.guard(() => workspace.createCard(arg.trim()))
+      await workspace.guard(() => workspace.cards.createCard(arg.trim()))
     },
   },
   {
@@ -622,11 +622,11 @@ export const commands: CommandSpec[] = [
     complete: () => ['today', 'tm', 'fri', '+3d'],
     run: async (arg) => {
       const target = arg.trim()
-      if (target === '-' || target === '') return workspace.guard(() => workspace.patchCard({ due_at: null }))
+      if (target === '-' || target === '') return workspace.guard(() => workspace.cards.patchCard({ due_at: null }))
       const at = parseDue(target)
       if (at === null) return workspace.say(`not a date: ${target} — try fri, +3d or 2026-09-30`, 'error')
       await workspace.guard(async () => {
-        if (await workspace.patchCard({ due_at: at })) workspace.say(`due ${formatDay(at)}`)
+        if (await workspace.cards.patchCard({ due_at: at })) workspace.say(`due ${formatDay(at)}`)
       })
     },
   },
@@ -640,7 +640,7 @@ export const commands: CommandSpec[] = [
       const rule = arg.trim()
       const repeat = rule === '-' || rule === '' ? null : rule
       await workspace.guard(async () => {
-        const card = await workspace.patchCard({ repeat })
+        const card = await workspace.cards.patchCard({ repeat })
         // The server's spelling of the rule: `+14d` is kept as `+2w`.
         if (card) workspace.say(card.repeat === null ? 'repeats no more' : `repeats ${card.repeat} once done`)
       })
@@ -650,7 +650,7 @@ export const commands: CommandSpec[] = [
     name: 'done',
     group: 'board',
     help: 'move the card in focus into the done list, or back out to the inbox',
-    run: () => workspace.guard(() => workspace.toggleDone()),
+    run: () => workspace.guard(() => workspace.cards.toggleDone()),
   },
   {
     name: 'scratch',
@@ -659,8 +659,8 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: 'the scratchpad, lowered over whatever is on screen — Q does the same; with text, a note on it without leaving',
     run: async (arg) => {
-      if (!arg.trim()) return workspace.guard(() => workspace.toggleScratch())
-      await workspace.guard(() => workspace.scratch(arg.trim()))
+      if (!arg.trim()) return workspace.guard(() => workspace.scratch.toggle())
+      await workspace.guard(() => workspace.scratch.add(arg.trim()))
     },
   },
   {
@@ -670,10 +670,10 @@ export const commands: CommandSpec[] = [
     help: 'put the scratch note at the end of a document, by its title — Tab completes it — or the one on screen, and take it off the scratchpad',
     complete: documentTitles,
     run: async (arg) => {
-      if (!workspace.scratchOpen) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
+      if (!workspace.scratch.open) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
       const target = arg.trim() || documentOnScreen()
       if (!target) return workspace.say('usage: :append <document> — or open the one it goes to', 'error')
-      await workspace.guard(() => workspace.appendScratchNote(target))
+      await workspace.guard(() => workspace.scratch.appendNote(target))
     },
   },
   {
@@ -682,8 +682,8 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: 'make the scratch note a document in the folder being browsed — titled by its first line unless given one — and take it off the scratchpad',
     run: async (arg) => {
-      if (!workspace.scratchOpen) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
-      await workspace.guard(() => workspace.keepScratchNote(arg))
+      if (!workspace.scratch.open) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
+      await workspace.guard(() => workspace.scratch.keepNote(arg))
     },
   },
   {
@@ -696,7 +696,7 @@ export const commands: CommandSpec[] = [
       if (workspace.focus !== 'card') return workspace.say('no card turned over — Enter on the board turns one', 'error')
       const [what, text] = verb(arg, ['add', 'edit'])
       if (!text) return workspace.say(`usage: :task ${what === 'edit' ? 'edit' : '[add]'} <text>`, 'error')
-      await workspace.guard(() => (what === 'edit' ? workspace.renameTask(text) : workspace.addTask(text)))
+      await workspace.guard(() => (what === 'edit' ? workspace.cards.renameTask(text) : workspace.cards.addTask(text)))
     },
   },
   {
@@ -704,11 +704,11 @@ export const commands: CommandSpec[] = [
     args: '<name>',
     group: 'board',
     help: 'put a label on the card, or take it off when it has it — each name keeps its colour everywhere',
-    complete: () => workspace.boardLabels,
+    complete: () => workspace.cards.boardLabels,
     run: async (arg) => {
-      const card = workspace.focusedCard
+      const card = workspace.cards.focusedCard
       if (!arg.trim() && card) return workspace.say(card.labels.join(' · ') || 'no labels — :label <name> adds one')
-      await workspace.guard(() => workspace.toggleLabel(arg))
+      await workspace.guard(() => workspace.cards.toggleLabel(arg))
     },
   },
   {
@@ -718,22 +718,22 @@ export const commands: CommandSpec[] = [
     help: 'add a column to the board — name renames the one under the cursor, rm deletes it and every card on it (asks first)',
     complete: () => ['name ', 'rm'],
     run: async (arg) => {
-      if (!workspace.view('board')) return workspace.say('no board open — :board', 'error')
+      if (!workspace.tiles.view('board')) return workspace.say('no board open — :board', 'error')
       const [what, rest] = verb(arg, ['name', 'rm'])
-      const list = workspace.list
+      const list = workspace.cards.list
       if (what === 'name') {
         if (!list) return workspace.say('no list selected', 'error')
         if (!rest) return workspace.say('usage: :list name <text>', 'error')
-        return workspace.guard(() => workspace.renameList(rest))
+        return workspace.guard(() => workspace.cards.renameList(rest))
       }
       if (what === 'rm') {
         if (!list) return workspace.say('no list selected', 'error')
         const cards = list.cards.length
-        if (!(await workspace.ask(`delete the list "${list.name}" and its ${cards} card${cards === 1 ? '' : 's'}?`))) return
-        return workspace.guard(() => workspace.deleteList())
+        if (!(await workspace.prompts.ask(`delete the list "${list.name}" and its ${cards} card${cards === 1 ? '' : 's'}?`))) return
+        return workspace.guard(() => workspace.cards.deleteList())
       }
       if (!rest) return workspace.say('usage: :list <name>', 'error')
-      await workspace.guard(() => workspace.createList(rest))
+      await workspace.guard(() => workspace.cards.createList(rest))
     },
   },
   {
@@ -745,7 +745,7 @@ export const commands: CommandSpec[] = [
     help: 'move the marked nodes, or else the selected one, into a folder here, up one level, or to the root of the space',
     complete: folderNames,
     run: async (arg) => {
-      const node = workspace.marked[0] ?? workspace.target
+      const node = workspace.tree.marked[0] ?? workspace.target
       if (!node) return workspace.say('nothing selected', 'error')
       const target = arg.trim()
       if (!target) return workspace.say('usage: :mv <folder|..|/>', 'error')
@@ -758,11 +758,11 @@ export const commands: CommandSpec[] = [
         return parent.kind === 'space' ? undefined : (parent.parent_id ?? undefined)
       }
       const destination =
-        target === '..' ? await up() : target === '/' ? (workspace.spaceId ?? undefined) : findFolder(target)?.id
+        target === '..' ? await up() : target === '/' ? (workspace.tree.spaceId ?? undefined) : findFolder(target)?.id
       if (destination === undefined) return workspace.say(`no such folder: ${target}`, 'error')
       if (destination === node.id) return workspace.say('a folder cannot hold itself', 'error')
-      if (workspace.marked.length) return workspace.guard(() => workspace.moveNodes(workspace.marked, destination))
-      await workspace.guard(() => workspace.moveNode(node.id, destination))
+      if (workspace.tree.marked.length) return workspace.guard(() => workspace.tree.moveNodes(workspace.tree.marked, destination))
+      await workspace.guard(() => workspace.tree.moveNode(node.id, destination))
     },
   },
   {
@@ -776,7 +776,7 @@ export const commands: CommandSpec[] = [
     run: async (arg) => {
       await workspace.guard(async () => {
         const words = arg.trim().split(/\s+/).filter(Boolean)
-        const here = workspace.spaceId
+        const here = workspace.tree.spaceId
         const templates = words.length && here !== null ? await api.templates(here) : []
         if (words.length && here !== null) templateCache = { space: here, names: templates.map((t) => t.slug) }
         const wanted = words[0]?.toLowerCase()
@@ -789,7 +789,7 @@ export const commands: CommandSpec[] = [
           created_at = at
           words.shift()
         }
-        await workspace.createDocument(words.join(' '), { created_at, template_id: template?.id })
+        await workspace.tree.createDocument(words.join(' '), { created_at, template_id: template?.id })
       })
       hooks.focusEditor()
     },
@@ -801,8 +801,8 @@ export const commands: CommandSpec[] = [
     help: 'the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it',
     run: () =>
       workspace.guard(async () => {
-        if (workspace.view('calendar')) return workspace.showView('calendar')
-        await workspace.openCalendar()
+        if (workspace.tiles.view('calendar')) return workspace.tiles.show('calendar')
+        await workspace.diary.openCalendar()
       }),
   },
   {
@@ -812,8 +812,8 @@ export const commands: CommandSpec[] = [
     help: 'what is late, due this week, or in hand — across every board',
     run: () =>
       workspace.guard(async () => {
-        if (!workspace.view('agenda')) workspace.agendaCursor = 0
-        await workspace.showView('agenda')
+        if (!workspace.tiles.view('agenda')) workspace.cards.agendaCursor = 0
+        await workspace.tiles.show('agenda')
       }),
   },
   {
@@ -822,8 +822,8 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: "open today's diary entry, starting one if there is none yet; with text, a timed line at its end without going there",
     run: async (arg) => {
-      if (arg.trim()) return workspace.guard(() => workspace.logToday(arg.trim()))
-      await workspace.guard(() => workspace.openDay())
+      if (arg.trim()) return workspace.guard(() => workspace.diary.logToday(arg.trim()))
+      await workspace.guard(() => workspace.diary.openDay())
       hooks.focusEditor()
     },
   },
@@ -843,7 +843,7 @@ export const commands: CommandSpec[] = [
       }
       const id = arg ? Number(arg) : node?.id
       if (!id || Number.isNaN(id)) return workspace.say('usage: :e <id>', 'error')
-      await workspace.guard(() => workspace.openNode(id, true))
+      await workspace.guard(() => workspace.tree.openNode(id, true))
       hooks.focusEditor()
     },
     bang: {
@@ -852,8 +852,8 @@ export const commands: CommandSpec[] = [
         const open = requireOpen()
         if (!open) return
         workspace.dirty = false
-        workspace.dropStash(open.id)
-        await workspace.guard(() => workspace.openNode(open.id, workspace.editing))
+        workspace.drafts.dropStash(open.id)
+        await workspace.guard(() => workspace.tree.openNode(open.id, workspace.editing))
         workspace.say(`${open.slug} reloaded`)
       },
     },
@@ -862,13 +862,13 @@ export const commands: CommandSpec[] = [
     name: 'next',
     group: 'documents',
     help: 'open the next node down the list',
-    run: () => jumpTo(workspace.cursor + 1),
+    run: () => jumpTo(workspace.tree.cursor + 1),
   },
   {
     name: 'prev',
     group: 'documents',
     help: 'open the previous node',
-    run: () => jumpTo(workspace.cursor - 1),
+    run: () => jumpTo(workspace.tree.cursor - 1),
   },
   {
     name: 'close',
@@ -877,10 +877,10 @@ export const commands: CommandSpec[] = [
     help: 'close the focused tile — Alt-q; asks when its draft could not be written',
     run: () =>
       workspace.guard(async () => {
-        await workspace.flushTile()
+        await workspace.drafts.flushTile()
         if (workspace.dirty) {
           const name = workspace.open?.slug ?? 'the draft'
-          if (!(await workspace.ask(`${name} could not be written — close anyway? the draft stays in this browser`))) return
+          if (!(await workspace.prompts.ask(`${name} could not be written — close anyway? the draft stays in this browser`))) return
         }
         await focusTile(closeFocused())
       }),
@@ -890,14 +890,14 @@ export const commands: CommandSpec[] = [
     aliases: ['on'],
     group: 'tiles',
     help: 'close every tile but the focused one',
-    run: () => workspace.guard(() => workspace.onlyTile()),
+    run: () => workspace.guard(() => workspace.tiles.only()),
   },
   {
     name: 'ls',
     aliases: ['buffers', 'files'],
     group: 'tiles',
     help: 'list the open tiles, % on the focused one',
-    run: () => workspace.say(workspace.tiles.map((_, index) => describeTile(index)).join(' · ')),
+    run: () => workspace.say(workspace.tiles.all.map((_, index) => describeTile(index)).join(' · ')),
   },
   {
     name: 'buffer',
@@ -905,18 +905,18 @@ export const commands: CommandSpec[] = [
     args: '<n|name>',
     group: 'tiles',
     help: 'focus a tile by its number in :ls, or by the start of its name',
-    complete: () => workspace.tiles.flatMap((tile) => (tile.kind !== 'node' ? [tile.kind] : tile.open ? [tile.open.slug] : [])),
+    complete: () => workspace.tiles.all.flatMap((tile) => (tile.kind !== 'node' ? [tile.kind] : tile.open ? [tile.open.slug] : [])),
     run: (arg) => {
       const wanted = arg.trim().toLowerCase()
-      if (!wanted) return workspace.say(describeTile(workspace.focused))
+      if (!wanted) return workspace.say(describeTile(workspace.tiles.focused))
       const index = /^\d+$/.test(wanted)
         ? Number(wanted) - 1
-        : workspace.tiles.findIndex((tile) =>
+        : workspace.tiles.all.findIndex((tile) =>
             tile.kind !== 'node'
               ? tile.kind.startsWith(wanted)
               : tile.open && (tile.open.slug.startsWith(wanted) || tile.open.name.toLowerCase().startsWith(wanted)),
           )
-      if (!workspace.tiles[index]) return workspace.say(`E86: no tile ${arg.trim()} — :ls lists them`, 'error')
+      if (!workspace.tiles.all[index]) return workspace.say(`E86: no tile ${arg.trim()} — :ls lists them`, 'error')
       return focusTile(index)
     },
   },
@@ -944,13 +944,13 @@ export const commands: CommandSpec[] = [
     name: 'last',
     group: 'documents',
     help: 'open the last node in the list',
-    run: () => jumpTo(workspace.rows - 1),
+    run: () => jumpTo(workspace.tree.rows - 1),
   },
   {
     name: 'random',
     group: 'documents',
     help: 'open something here at random — good for re-reading',
-    run: () => jumpTo(Math.floor(Math.random() * workspace.nodes.length)),
+    run: () => jumpTo(Math.floor(Math.random() * workspace.tree.nodes.length)),
   },
   {
     name: 'delete',
@@ -961,23 +961,23 @@ export const commands: CommandSpec[] = [
     run: async (arg) => {
       // On the board the thing under the cursor is a card, not a node.
       if (onBoard() && !arg) {
-        const card = workspace.card
+        const card = workspace.cards.card
         if (!card) return workspace.say('no card selected', 'error')
-        if (!(await workspace.ask(`delete the card "${card.title}"?`))) return
-        return workspace.guard(() => workspace.deleteCard())
+        if (!(await workspace.prompts.ask(`delete the card "${card.title}"?`))) return
+        return workspace.guard(() => workspace.cards.deleteCard())
       }
       // Whatever has focus: the row under the cursor in the list, the open
       // document only while the document pane is the one being looked at.
       const id = arg ? Number(arg) : workspace.target?.id
       if (!id || Number.isNaN(id)) return workspace.say('nothing to delete', 'error')
-      const node = workspace.open?.id === id ? workspace.open : workspace.nodes.find((n) => n.id === id)
+      const node = workspace.open?.id === id ? workspace.open : workspace.tree.nodes.find((n) => n.id === id)
       const name = node ? `"${node.name.trim() || node.slug}"` : `#${id}`
       const what =
         node && isContainer(node)
           ? `delete the ${node.kind} ${name} and everything in it?`
           : `delete ${name}?`
-      if (!(await workspace.ask(`${what} it goes to the trash.`))) return
-      await workspace.guard(() => workspace.deleteNode(id))
+      if (!(await workspace.prompts.ask(`${what} it goes to the trash.`))) return
+      await workspace.guard(() => workspace.tree.deleteNode(id))
     },
   },
   {
@@ -989,9 +989,9 @@ export const commands: CommandSpec[] = [
     run: async (arg) => {
       if (!arg.trim() && workspace.editing && workspace.pane === 'document') return hooks.focusTitle()
       if (onBoard()) {
-        if (!workspace.card) return workspace.say('no card here — :list name renames the list', 'error')
+        if (!workspace.cards.card) return workspace.say('no card here — :list name renames the list', 'error')
         if (!arg.trim()) return workspace.say('usage: :name <text>', 'error')
-        return workspace.guard(() => workspace.patchCard({ title: arg.trim() }))
+        return workspace.guard(() => workspace.cards.patchCard({ title: arg.trim() }))
       }
       if (!arg.trim()) return workspace.say('usage: :name <text>', 'error')
 
@@ -1001,11 +1001,11 @@ export const commands: CommandSpec[] = [
       if (node && node.id === workspace.open?.id) {
         workspace.draft.name = arg
         workspace.dirty = true
-        return workspace.guard(() => workspace.save())
+        return workspace.guard(() => workspace.drafts.save())
       }
 
       if (!node) return workspace.say('nothing selected — :space name renames the space', 'error')
-      await workspace.guard(() => workspace.renameNode(node.id, arg))
+      await workspace.guard(() => workspace.tree.renameNode(node.id, arg))
     },
   },
   {
@@ -1043,9 +1043,9 @@ export const commands: CommandSpec[] = [
       if (arg.trim() === 'purge') return emptyTrash()
       if (arg.trim()) return workspace.say('usage: :trash [purge]', 'error')
       await workspace.guard(async () => {
-        await workspace.loadTrash()
-        workspace.trashCursor = 0
-        workspace.openSheet('trash')
+        await workspace.sheets.loadTrash()
+        workspace.sheets.trashCursor = 0
+        workspace.sheets.open('trash')
       })
     },
   },
@@ -1060,7 +1060,7 @@ export const commands: CommandSpec[] = [
       if (at === null) return workspace.say('usage: :date 2026-09-05', 'error')
       workspace.draft.created_at = at
       workspace.dirty = true
-      await workspace.guard(() => workspace.save())
+      await workspace.guard(() => workspace.drafts.save())
     },
   },
   {
@@ -1078,7 +1078,7 @@ export const commands: CommandSpec[] = [
       if (what === 'new') return renewLink(node)
       if (what) return workspace.say('usage: :share [off|new]', 'error')
       if (node.shared) return workspace.say('already shared — :share new for a fresh link, :share off to take it back')
-      await workspace.guard(() => workspace.toggleShare(node.id))
+      await workspace.guard(() => workspace.tree.toggleShare(node.id))
     },
   },
   {
@@ -1105,7 +1105,7 @@ export const commands: CommandSpec[] = [
         if (!node) return workspace.say('nothing selected — :export! downloads everything', 'error')
         if (node.kind === 'document') return exportDocument(node)
         if (!node.file) return workspace.say(`a ${node.kind} goes with :export!, the whole workspace`, 'error')
-        if (node.file.encrypted && !(await workspace.ensureUnlocked())) return
+        if (node.file.encrypted && !(await workspace.vault.ensureUnlocked())) return
         const anchor = document.createElement('a')
         anchor.href = node.file.url
         anchor.download = node.name
@@ -1117,12 +1117,12 @@ export const commands: CommandSpec[] = [
       run: async () => {
         // A plain navigation, so the browser streams the archive straight to
         // disk instead of the tab holding all of it in memory first.
-        await workspace.flush()
+        await workspace.drafts.flush()
         // Sealed files go into the archive opened, which needs the vault:
         // asked here, because a refusal after the navigation would replace
         // the whole app with an error page.
-        await workspace.loadVault()
-        if ((workspace.vault?.sealed ?? 0) > 0 && !(await workspace.ensureUnlocked())) {
+        await workspace.vault.load()
+        if ((workspace.vault.status?.sealed ?? 0) > 0 && !(await workspace.vault.ensureUnlocked())) {
           return workspace.say('the export holds sealed files — it needs the vault open', 'error')
         }
         workspace.say('building the archive — the download starts on its own')
@@ -1150,7 +1150,7 @@ export const commands: CommandSpec[] = [
       const what = arg.trim()
       if (what === 'seal') {
         return workspace.guard(async () => {
-          if (await workspace.ensureUnlocked()) hooks.pickTreeFiles(true)
+          if (await workspace.vault.ensureUnlocked()) hooks.pickTreeFiles(true)
         })
       }
       if (what) return workspace.say('usage: :upload [seal]', 'error')
@@ -1182,10 +1182,10 @@ export const commands: CommandSpec[] = [
     args: '[text]',
     group: 'documents',
     help: 'full-text search in this space (empty clears)',
-    run: (arg) => workspace.guard(() => workspace.search(arg, false)),
+    run: (arg) => workspace.guard(() => workspace.tree.search(arg, false)),
     bang: {
       help: 'full-text search across every space — Ctrl-P',
-      run: (arg) => workspace.guard(() => workspace.search(arg, true)),
+      run: (arg) => workspace.guard(() => workspace.tree.search(arg, true)),
     },
   },
   {
@@ -1193,7 +1193,7 @@ export const commands: CommandSpec[] = [
     aliases: ['nohlsearch'],
     group: 'documents',
     help: 'clear the search filter',
-    run: () => workspace.guard(() => workspace.search('')),
+    run: () => workspace.guard(() => workspace.tree.search('')),
   },
   {
     name: 'reload',
@@ -1202,8 +1202,8 @@ export const commands: CommandSpec[] = [
     help: 're-read the current folder from the server',
     run: () =>
       workspace.guard(async () => {
-        await workspace.refresh()
-        workspace.say(`${workspace.nodes.length} here`)
+        await workspace.tree.refresh()
+        workspace.say(`${workspace.tree.nodes.length} here`)
       }),
   },
   {
@@ -1215,8 +1215,8 @@ export const commands: CommandSpec[] = [
       const words = body.split(/\s+/).filter(Boolean).length
       const open = workspace.open ? `${workspace.open.slug} ${words}w ${body.split('\n').length}L · ` : ''
       workspace.say(
-        `${open}${workspace.here || '/'} · ${workspace.nodes.length} node${workspace.nodes.length === 1 ? '' : 's'}${
-          workspace.query ? ` matching "${workspace.query}"` : ''
+        `${open}${workspace.tree.here || '/'} · ${workspace.tree.nodes.length} node${workspace.tree.nodes.length === 1 ? '' : 's'}${
+          workspace.tree.query ? ` matching "${workspace.tree.query}"` : ''
         }`,
       )
     },
@@ -1238,8 +1238,8 @@ export const commands: CommandSpec[] = [
         return workspace.setClipboard(false), workspace.say('yanks stay in vim registers')
       // A board is a property of the space, not of this browser, so unlike the
       // options above this one goes to the server.
-      if (option === 'board') return workspace.guard(() => workspace.setBoard(true))
-      if (option === 'noboard') return workspace.guard(() => workspace.setBoard(false))
+      if (option === 'board') return workspace.guard(() => workspace.cards.setBoard(true))
+      if (option === 'noboard') return workspace.guard(() => workspace.cards.setBoard(false))
       workspace.say(`unknown option: ${option}`, 'error')
     },
   },
@@ -1256,7 +1256,7 @@ export const commands: CommandSpec[] = [
         const loginMatch = /^login\s+(\S+)$/.exec(trimmed)
         if (loginMatch) return protonLogin(loginMatch[1])
         if (trimmed === 'logout') {
-          if (!(await workspace.ask('Forget the Proton Drive session? What is mirrored stays on Drive.'))) return
+          if (!(await workspace.prompts.ask('Forget the Proton Drive session? What is mirrored stays on Drive.'))) return
           await api.backupLogout()
           return workspace.say('proton drive session forgotten — backups are off')
         }
@@ -1268,7 +1268,7 @@ export const commands: CommandSpec[] = [
         workspace.guard(async () => {
           // Whatever is in the editor belongs in the backup that was just
           // asked for, so it goes to the server before the mirror runs.
-          await workspace.flush()
+          await workspace.drafts.flush()
           workspace.say('backing up …')
           const status = await api.backupNow()
           if (status.last_error) return workspace.say(`backup failed: ${status.last_error}`, 'error')
@@ -1298,7 +1298,7 @@ export const commands: CommandSpec[] = [
         if (!target) return workspace.say(`no session ${rmMatch[1]} — :sessions lists them`, 'error')
         if (target.current) return workspace.say('that is this browser — :logout ends it', 'error')
         await api.revokeSession(target.id)
-        await workspace.loadVault()
+        await workspace.vault.load()
         workspace.say(`signed out ${browserOf(target.user_agent)}, seen ${relative(target.last_seen)} — the vault is locked`)
       }),
   },
@@ -1393,19 +1393,19 @@ export const commands: CommandSpec[] = [
     run: (arg) =>
       workspace.guard(async () => {
         const what = arg.trim()
-        await workspace.loadVault()
+        await workspace.vault.load()
         if (what === 'unlock') {
-          if (workspace.vault?.unlocked) return workspace.say('the vault is already open')
-          return workspace.ensureUnlocked()
+          if (workspace.vault.status?.unlocked) return workspace.say('the vault is already open')
+          return workspace.vault.ensureUnlocked()
         }
         if (what === 'lock') {
-          workspace.vault = await api.lockVault()
+          workspace.vault.status = await api.lockVault()
           if (workspace.open?.file?.encrypted) workspace.open = await api.getNode(workspace.open.id)
           return workspace.say('vault locked')
         }
         if (what === 'passwd') return changeVaultPassword()
         if (what) return workspace.say('usage: :vault [unlock|lock|passwd]', 'error')
-        if (!workspace.vault?.configured) return setupVault()
+        if (!workspace.vault.status?.configured) return setupVault()
         await openSettings('vault')
       }),
   },
@@ -1433,7 +1433,7 @@ export const commands: CommandSpec[] = [
     complete: () => ['all'],
     run: (arg) => {
       const all = arg.trim() === 'all'
-      if (workspace.overlay === 'help' && !all) return workspace.closeSheet()
+      if (workspace.sheets.shown === 'help' && !all) return workspace.sheets.close()
       openHelp(all)
     },
   },
@@ -1493,7 +1493,7 @@ const renamed: Record<string, string | ((arg: string) => unknown)> = {
     if (node?.kind !== 'document') return workspace.say('no document to link — open one first', 'error')
     return cardAbout(node, arg)
   },
-  unmark: () => workspace.unmarkAll(),
+  unmark: () => workspace.tree.unmarkAll(),
 }
 
 const lookup = new Map<string, CommandSpec>()
@@ -1508,7 +1508,7 @@ export async function runCommand(line: string): Promise<void> {
   if (!input) return
 
   if (input.startsWith('/')) {
-    await workspace.guard(() => workspace.search(input.slice(1)))
+    await workspace.guard(() => workspace.tree.search(input.slice(1)))
     return
   }
 
@@ -1523,7 +1523,7 @@ export async function runCommand(line: string): Promise<void> {
 
   // `:12` jumps to a node by id, the way `:12` jumps to a line in vim.
   if (/^\d+$/.test(head)) {
-    await workspace.guard(() => workspace.openNode(Number(head)))
+    await workspace.guard(() => workspace.tree.openNode(Number(head)))
     return
   }
 
@@ -1539,7 +1539,7 @@ export async function runCommand(line: string): Promise<void> {
     await spec.bang.run(arg)
   } else await spec.run(arg)
   // What a line changed shows in the settings sheet it was typed over.
-  if (workspace.overlay === 'settings') await workspace.guard(() => loadSettings())
+  if (workspace.sheets.shown === 'settings') await workspace.guard(() => loadSettings())
 }
 
 /**

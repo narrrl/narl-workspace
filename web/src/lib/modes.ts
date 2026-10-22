@@ -26,14 +26,14 @@ const sheets = new Set<string>(['help', 'overview', 'trash', 'settings'])
 /** The stack, the topmost first. */
 export function stack(): Context[] {
   const modes: Context[] = ['always']
-  const overlay = workspace.overlay
+  const overlay = workspace.sheets.shown
   if (overlay !== 'none') {
     // The info sheet hears the keys of the part on show, then its own Tab.
-    if (overlay === 'info') modes.push(workspace.infoSection, 'info')
+    if (overlay === 'info') modes.push(workspace.sheets.infoSection, 'info')
     else if (sheets.has(overlay)) modes.push(overlay as Context)
     return [...modes, 'sheet']
   }
-  if (workspace.scratchOpen && !workspace.scratchEditing) modes.push('drawer')
+  if (workspace.scratch.open && !workspace.scratch.editing) modes.push('drawer')
   modes.push('workspace')
   const focus = workspace.focus
   if (focus === 'list' || focus === 'node') {
@@ -41,7 +41,7 @@ export function stack(): Context[] {
     modes.push('tree')
   } else {
     // While the description is written, the card's back has no keys of its own.
-    if (!(focus === 'card' && workspace.describing)) modes.push(focus)
+    if (!(focus === 'card' && workspace.cards.describing)) modes.push(focus)
     modes.push('views')
   }
   modes.push('global')

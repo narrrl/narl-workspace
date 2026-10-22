@@ -248,7 +248,7 @@
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return
     await workspace.guard(async () => {
-      const created = await workspace.attach(files, tile)
+      const created = await workspace.tree.attach(files, tile)
       if (created.length > 0) insertAtCursor(created.map(embedSnippet).join('\n\n'))
     })
   }
@@ -257,9 +257,9 @@
   const changed = (text: string) => {
     if (writing) return writing.change(text)
     tile!.draft.body = text
-    workspace.touch(tile)
+    workspace.drafts.touch(tile)
   }
-  const save = () => void workspace.guard(() => (writing ? workspace.saveWriting() : workspace.save({ tile })))
+  const save = () => void workspace.guard(() => (writing ? workspace.drafts.saveWriting() : workspace.drafts.save({ tile })))
 
   onMount(() => {
     bindVim()

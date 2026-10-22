@@ -57,7 +57,7 @@
   <header>
     <span class="label rule"><span class="marker"></span><span class="title">{title}</span> {detail}</span>
     {@render actions?.()}
-    <button onclick={() => workspace.closeSheet()}>esc</button>
+    <button onclick={() => workspace.sheets.close()}>esc</button>
   </header>
 
   {@render children()}

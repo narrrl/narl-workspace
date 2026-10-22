@@ -72,14 +72,14 @@
 
   if (!shareToken) void workspace.boot()
 
-  /* Where each tile sits, in the order of `workspace.tiles`. */
-  const layout = $derived(dwindle(workspace.tiles.length))
+  /* Where each tile sits, in the order of `workspace.tiles.all`. */
+  const layout = $derived(dwindle(workspace.tiles.all.length))
   /*
    * The tiles are drawn in the order they were made, whatever order they are
    * in now, so moving one never moves its element — which would cost it its
    * scroll position, and a PDF its page.
    */
-  const drawn = $derived([...workspace.tiles].sort((a, b) => a.id - b.id))
+  const drawn = $derived([...workspace.tiles.all].sort((a, b) => a.id - b.id))
 
   $effect(() => {
     folderInput?.setAttribute('webkitdirectory', '')
@@ -121,7 +121,7 @@
    * window handler instead of being swallowed by the editor underneath.
    */
   $effect(() => {
-    if (workspace.overlay !== 'none') {
+    if (workspace.sheets.shown !== 'none') {
       overlayEl?.focus()
       return () => (workspace.editing ? hooks.focusEditor() : shell?.focus())
     }
@@ -134,7 +134,7 @@
    */
   $effect(() => {
     const answer = (event: KeyboardEvent) => {
-      const prompt = workspace.prompt
+      const prompt = workspace.prompts.prompt
       if (!prompt || ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(event.key)) return
       event.preventDefault()
       event.stopPropagation()
@@ -153,9 +153,9 @@
     if (!workspace.user) return
     const refresh = () => {
       if (document.visibilityState !== 'visible') return
-      void workspace.loadAgenda().then(() => workspace.openAgendaIfDue())
+      void workspace.cards.loadAgenda().then(() => workspace.cards.openAgendaIfDue())
       // The vault locks itself when left alone; the bar should say so.
-      void workspace.loadVault()
+      void workspace.vault.load()
     }
     const timer = setInterval(refresh, 5 * 60 * 1000)
     document.addEventListener('visibilitychange', refresh)
@@ -168,9 +168,9 @@
   // The vault closes itself after a quiet spell; look again just after it
   // would have, so the bar does not go on saying it is open.
   $effect(() => {
-    const vault = workspace.vault
+    const vault = workspace.vault.status
     if (!vault?.unlocked || vault.locks_in === null) return
-    const timer = setTimeout(() => void workspace.loadVault(), (vault.locks_in + 2) * 1000)
+    const timer = setTimeout(() => void workspace.vault.load(), (vault.locks_in + 2) * 1000)
     return () => clearTimeout(timer)
   })
 
@@ -183,7 +183,7 @@
 
   // Guard against losing a half-written entry to a stray refresh.
   $effect(() => {
-    if (!workspace.tiles.some((tile) => tile.dirty)) return
+    if (!workspace.tiles.all.some((tile) => tile.dirty)) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
@@ -198,7 +198,7 @@
       // While writing, they go in at the cursor too; while reading, the
       // document only holds them.
       const writing = workspace.editing
-      const created = await workspace.attach(files)
+      const created = await workspace.tree.attach(files)
       if (writing && created.length > 0) hooks.insertText(created.map(embedSnippet).join('\n\n'))
     })
   }
@@ -208,7 +208,7 @@
     const files = Array.from(input.files ?? [])
     input.value = ''
     if (files.length === 0) return
-    await workspace.guard(() => workspace.putFiles(files, sealUpload))
+    await workspace.guard(() => workspace.tree.putFiles(files, sealUpload))
   }
 
   /*
@@ -223,7 +223,7 @@
     const root = importRoot
     importRoot = false
     if (files.length === 0) return
-    await workspace.guard(() => workspace.importFolder(files, root))
+    await workspace.guard(() => workspace.tree.importFolder(files, root))
   }
 
   /*
@@ -288,10 +288,10 @@
     <main class="porthole">
       <!-- Keyed on the space, so a switch slides the new one in, as the desktop
            does between workspaces: from below when moving right, above when left. -->
-      {#key workspace.spaceId}
+      {#key workspace.tree.spaceId}
         <div
           class="panes switch"
-          class:reading={workspace.tiles.some((tile) => !tile.empty)}
+          class:reading={workspace.tiles.all.some((tile) => !tile.empty)}
           class:full={workspace.fullscreen}
           class:focus-doc={workspace.focus !== 'list'}
           style="--dir: {workspace.switchDirection}"
@@ -302,20 +302,20 @@
             class:focused={workspace.focus === 'list'}
             onpointerdown={() => (workspace.pane = 'list')}
           ><Sidebar /></div>
-          <div class="tiles" class:only={workspace.tiles.length === 1}>
+          <div class="tiles" class:only={workspace.tiles.all.length === 1}>
             {#each drawn as tile (tile.id)}
-              {@const index = workspace.tiles.indexOf(tile)}
+              {@const index = workspace.tiles.all.indexOf(tile)}
               {@const rect = layout[index]}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="window entry"
                 class:view={tile.kind !== 'node'}
                 data-kind={tile.kind}
-                class:current={index === workspace.focused}
-                class:focused={!tile.empty && index === workspace.focused && workspace.pane === 'document'}
+                class:current={index === workspace.tiles.focused}
+                class:focused={!tile.empty && index === workspace.tiles.focused && workspace.pane === 'document'}
                 style="--x: {rect.x}; --y: {rect.y}; --w: {rect.w}; --h: {rect.h}"
-                onpointerdown={() => !tile.empty && workspace.focusTile(index)}
-                onfocusin={() => !tile.empty && index !== workspace.focused && workspace.focusTile(index)}
+                onpointerdown={() => !tile.empty && workspace.tiles.focusOn(index)}
+                onfocusin={() => !tile.empty && index !== workspace.tiles.focused && workspace.tiles.focusOn(index)}
               >
                 {#if tile.kind === 'board'}
                   <div class="fill" bind:this={boardEl}><Board /></div>
@@ -357,7 +357,7 @@
       <CommandLine initial={cmdline} global={cmdGlobal} close={() => ((cmdline = null), (cmdGlobal = false))} />
     {/if}
 
-    {#if workspace.scratchOpen}
+    {#if workspace.scratch.open}
       <Scratch />
     {/if}
 
@@ -368,10 +368,10 @@
       <Hints root={hintRoot} close={() => (hintRoot = null)} />
     {/if}
 
-    {#if workspace.overlay !== 'none'}
-      {@const Shown = sheets[workspace.overlay]}
+    {#if workspace.sheets.shown !== 'none'}
+      {@const Shown = sheets[workspace.sheets.shown]}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
-      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && workspace.closeSheet()}>
+      <div class="overlay" tabindex="-1" bind:this={overlayEl} onclick={(e) => e.target === e.currentTarget && workspace.sheets.close()}>
         <Shown />
       </div>
     {/if}
