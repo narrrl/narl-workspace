@@ -43,6 +43,12 @@ export const hooks = {
   openCommandLine: (_initial: string) => {},
   /** Ctrl-P: a search across every space. */
   openGlobalSearch: () => {},
+  /** Esc with the line open but the keyboard elsewhere: the line away; false when it is not open. */
+  closeCommandLine: (): boolean => false,
+  /** `F`: letters over the links and buttons inside `root`. */
+  showHints: (_root: HTMLElement) => {},
+  /** The board on screen, for `F` over its cards. */
+  boardRoot: (): HTMLElement | null => null,
 }
 
 /** Help groups the command list under these headings, in this order. */

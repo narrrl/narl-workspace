@@ -4,6 +4,7 @@
    * idiom as the list. The keys live in App.svelte with every other key, so
    * this file only draws and — for a pointer — moves the two cursors.
    */
+  import Keys from './Keys.svelte'
   import { workspace } from './store.svelte'
   import { formatDay, labelHue, urgency } from './util'
 
@@ -141,20 +142,9 @@
   </div>
 
   <!-- The board's keys are not the list's, so they are spelled out where they apply. -->
-  <footer class="label keys">
-    <span><span class="kbd">h</span><span class="kbd">j</span><span class="kbd">k</span><span class="kbd">l</span> move</span>
-    <span><span class="kbd">H</span><span class="kbd">L</span> send</span>
-    <span><span class="kbd">␣</span> done</span>
-    <span><span class="kbd">↵</span> open</span>
-    <span><span class="kbd">o</span> new</span>
-    <span><span class="kbd">D</span> due</span>
-    <span><span class="kbd">R</span> rename</span>
-    <span><span class="kbd">dd</span> delete</span>
-    <span><span class="kbd">1</span>…<span class="kbd">9</span> board</span>
-    <span><span class="kbd">tab</span> tile</span>
-    <span><span class="kbd">esc</span> leave</span>
-    <span class="rule-hint">first list is the inbox · last list is done</span>
-  </footer>
+  <div class="keys">
+    <Keys contexts={['board', 'special']}><span class="rule-hint">first list is the inbox · last list is done</span></Keys>
+  </div>
 </div>
 
 <style>
@@ -243,17 +233,8 @@
   }
   .older:hover { color: var(--light); background: transparent; }
 
-  .keys {
-    flex: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 16px;
-    align-items: center;
-    padding: 8px 22px 12px;
-    font-size: 11px;
-  }
-  .keys > span { display: flex; gap: 4px; align-items: center; }
-  .keys .rule-hint { margin-left: auto; color: var(--muted); text-transform: none; letter-spacing: 0.04em; }
+  .keys { flex: none; padding: 8px 22px 12px; }
+  .rule-hint { margin-left: auto; color: var(--muted); text-transform: none; letter-spacing: 0.04em; }
 
   ul {
     list-style: none;
@@ -314,7 +295,6 @@
     .card { padding: 10px; }
   }
   @media (max-width: 767px) {
-    .keys > span:not(.rule-hint) { display: none; }
-    .keys .rule-hint { margin-left: 0; }
+    .rule-hint { margin-left: 0; }
   }
 </style>

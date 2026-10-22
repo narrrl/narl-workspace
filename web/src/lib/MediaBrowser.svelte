@@ -33,6 +33,7 @@
 </script>
 
 <script lang="ts">
+  import Keys from './Keys.svelte'
   import { formatBytes, formatStamp } from './util'
 
   let sheet = $state<HTMLDivElement>()
@@ -92,19 +93,7 @@
     {/each}
   </ul>
 
-  <footer class="label">
-    <span class="kbd">j</span><span class="kbd">k</span> move
-    <span class="gap"></span>
-    {#if workspace.editing}
-      <span class="kbd">i</span> insert
-      <span class="gap"></span>
-    {/if}
-    <span class="kbd">y</span> copy url
-    <span class="gap"></span>
-    <span class="kbd">x</span> delete
-    <span class="gap"></span>
-    <span class="kbd">q</span><span class="kbd">esc</span> close
-  </footer>
+  <Keys contexts={['media', 'sheet']} hide={workspace.editing ? [] : ['insert']} />
 </div>
 
 <style>
@@ -140,12 +129,6 @@
   li:hover { background: var(--surface); }
   li.at { background: var(--surface-alt); box-shadow: inset 2px 0 0 var(--light); }
 
-  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
 
   .thumb {
     width: 52px;

@@ -10,6 +10,7 @@
   import type { NodeSummary } from './api'
   import { hooks, runCommand } from './commands'
   import Icon, { type IconName } from './Icon.svelte'
+  import { keysOf } from './keymap'
   import { workspace } from './store.svelte'
 
   const { dock = false }: { dock?: boolean } = $props()
@@ -27,17 +28,17 @@
   }
 
   const groups = $derived.by((): Door[][] => {
-    const cmd: Door = { icon: 'prompt', label: 'Command line', keys: [':'], run: () => hooks.openCommandLine(':') }
-    const help: Door = { icon: 'help', label: 'Help', keys: ['?'], run: () => runCommand('help') }
+    const cmd: Door = { icon: 'prompt', label: 'Command line', keys: keysOf('global', 'line'), run: () => hooks.openCommandLine(':') }
+    const help: Door = { icon: 'help', label: 'Help', keys: keysOf('global', 'help'), run: () => runCommand('help') }
 
     if (workspace.view === 'special') {
       // The tiles of the special workspace are doors, so a phone — which
       // shows one at a time — can walk between them.
       const tiles: Door[] = [
-        { icon: 'board', label: 'Board', keys: ['b'], run: () => (workspace.specialFocus = 'board'), on: workspace.specialFocus === 'board' },
-        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => (workspace.specialFocus = 'agenda'), on: workspace.specialFocus === 'agenda' },
-        { icon: 'calendar', label: 'Calendar', keys: ['C'], run: () => (workspace.specialFocus = 'calendar'), on: workspace.specialFocus === 'calendar' },
-        { icon: 'list', label: 'Back to the tree', keys: ['Esc', 'S'], run: () => workspace.closeSpecial() },
+        { icon: 'board', label: 'Board', keys: keysOf('special', 'board'), run: () => (workspace.specialFocus = 'board'), on: workspace.specialFocus === 'board' },
+        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: keysOf('global', 'agenda'), run: () => (workspace.specialFocus = 'agenda'), on: workspace.specialFocus === 'agenda' },
+        { icon: 'calendar', label: 'Calendar', keys: keysOf('global', 'calendar'), run: () => (workspace.specialFocus = 'calendar'), on: workspace.specialFocus === 'calendar' },
+        { icon: 'list', label: 'Back to the tree', keys: [...keysOf('special', 'leave'), ...keysOf('global', 'special')], run: () => workspace.closeSpecial() },
       ]
       if (workspace.specialFocus !== 'board') return [tiles, [cmd, help]]
       // The card verbs are doors too, so a phone — which has no H, L or
@@ -46,30 +47,30 @@
       return [
         tiles,
         [
-          { icon: 'doc-plus', label: 'New card on this list', keys: ['o'], run: () => hooks.openCommandLine(':card ') },
+          { icon: 'doc-plus', label: 'New card on this list', keys: keysOf('board', 'new'), run: () => hooks.openCommandLine(':card ') },
           { icon: 'column-plus', label: 'New list', keys: [':list'], run: () => hooks.openCommandLine(':list ') },
         ],
         [
-          { icon: 'left', label: 'Send the card left', keys: ['H'], run: () => workspace.guard(() => workspace.sendCard(-1)), dim: !card },
-          { icon: 'check', label: 'Done, or back to the inbox', keys: ['Space'], run: () => workspace.guard(() => workspace.toggleDone()), dim: !card },
-          { icon: 'right', label: 'Send the card right', keys: ['L'], run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
-          { icon: 'calendar', label: 'Due date', keys: ['D'], run: () => hooks.openCommandLine(':due '), dim: !card },
+          { icon: 'left', label: 'Send the card left', keys: keysOf('board', 'sendLeft'), run: () => workspace.guard(() => workspace.sendCard(-1)), dim: !card },
+          { icon: 'check', label: 'Done, or back to the inbox', keys: keysOf('board', 'done'), run: () => workspace.guard(() => workspace.toggleDone()), dim: !card },
+          { icon: 'right', label: 'Send the card right', keys: keysOf('board', 'sendRight'), run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
+          { icon: 'calendar', label: 'Due date', keys: keysOf('board', 'due'), run: () => hooks.openCommandLine(':due '), dim: !card },
           { icon: 'repeat', label: 'Repeat once done', keys: [':repeat'], run: () => hooks.openCommandLine(':repeat '), dim: !card },
-          { icon: 'doc', label: "The card's notes", keys: ['gf'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
+          { icon: 'doc', label: "The card's notes", keys: keysOf('board', 'notes'), run: () => workspace.guard(() => workspace.openCard()), dim: !card },
         ],
         [
-          { icon: 'up', label: 'Card up its list', keys: ['K'], run: () => workspace.guard(() => workspace.nudgeCard(-1)), dim: !card },
-          { icon: 'down', label: 'Card down its list', keys: ['J'], run: () => workspace.guard(() => workspace.nudgeCard(1)), dim: !card },
+          { icon: 'up', label: 'Card up its list', keys: keysOf('board', 'nudgeUp'), run: () => workspace.guard(() => workspace.nudgeCard(-1)), dim: !card },
+          { icon: 'down', label: 'Card down its list', keys: keysOf('board', 'nudgeDown'), run: () => workspace.guard(() => workspace.nudgeCard(1)), dim: !card },
           {
             icon: 'rename',
             label: card ? 'Rename the card' : 'Rename the list',
-            keys: ['R'],
+            keys: keysOf('board', 'rename'),
             run: () => hooks.openCommandLine(card ? ':name ' : ':name! '),
           },
           {
             icon: 'trash',
             label: card ? 'Delete the card' : 'Delete the list',
-            keys: card ? ['x'] : [':list!'],
+            keys: card ? keysOf('board', 'delete') : [':list!'],
             run: () => runCommand(card ? 'delete' : 'list!'),
           },
         ],
@@ -78,39 +79,39 @@
     }
 
     const board: Door = workspace.space?.has_board
-      ? { icon: 'board', label: 'Board', keys: ['b'], run: () => runCommand('board') }
+      ? { icon: 'board', label: 'Board', keys: keysOf('tree', 'board'), run: () => runCommand('board') }
       : { icon: 'board', label: 'Give this space a board', keys: [':set board'], run: () => runCommand('set board'), dim: true }
     return [
       [
-        { icon: 'doc-plus', label: 'New document', keys: ['o'], run: () => runCommand('new') },
-        { icon: 'folder-plus', label: 'New folder', keys: ['⇧ O'], run: () => hooks.openCommandLine(':mkdir ') },
+        { icon: 'doc-plus', label: 'New document', keys: keysOf('tree', 'new'), run: () => runCommand('new') },
+        { icon: 'folder-plus', label: 'New folder', keys: keysOf('tree', 'mkdir'), run: () => hooks.openCommandLine(':mkdir ') },
         ...(workspace.space ? [board] : []),
       ],
       [
-        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: ['t'], run: () => runCommand('agenda') },
-        { icon: 'calendar', label: 'Calendar — the diary by month', keys: ['C'], run: () => runCommand('cal') },
-        { icon: 'today', label: "Today's diary entry", keys: ['T'], run: () => runCommand('today') },
-        { icon: 'capture', label: 'Capture a card to the inbox', keys: ['c'], run: () => hooks.openCommandLine(':card ') },
+        { icon: 'agenda', label: 'Agenda — late, due, in hand', keys: keysOf('global', 'agenda'), run: () => runCommand('agenda') },
+        { icon: 'calendar', label: 'Calendar — the diary by month', keys: keysOf('global', 'calendar'), run: () => runCommand('cal') },
+        { icon: 'today', label: "Today's diary entry", keys: keysOf('global', 'today'), run: () => runCommand('today') },
+        { icon: 'capture', label: 'Capture a card to the inbox', keys: keysOf('tree', 'capture'), run: () => hooks.openCommandLine(':card ') },
       ],
       [
         { icon: 'upload', label: 'Upload files into this folder', keys: [':upload'], run: () => hooks.pickTreeFiles(false) },
         { icon: 'trash', label: 'The trash — what was deleted', keys: [':trash'], run: () => runCommand('trash') },
         ...(workspace.marked.length
-          ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.marked)} here`, keys: ['p'], run: () => workspace.guard(() => workspace.drop()), on: true }]
+          ? [{ icon: 'drop' as const, label: `Drop ${dropping(workspace.marked)} here`, keys: keysOf('tree', 'drop'), run: () => workspace.guard(() => workspace.drop()), on: true }]
           : []),
       ],
       [
-        { icon: 'grid', label: 'Every space', keys: ['w'], run: () => hooks.openOverview() },
+        { icon: 'grid', label: 'Every space', keys: keysOf('global', 'overview'), run: () => hooks.openOverview() },
         {
           icon: workspace.fullscreen ? 'shrink' : 'expand',
           label: workspace.fullscreen ? 'Leave fullscreen' : 'Fullscreen the focused pane',
-          keys: ['f'],
+          keys: keysOf('global', 'fullscreen'),
           run: () => (workspace.fullscreen = !workspace.fullscreen),
           on: workspace.fullscreen,
           desk: true,
         },
-        { icon: 'search', label: 'Search this space', keys: ['/'], run: () => hooks.openCommandLine('/') },
-        { icon: 'search-all', label: 'Search every space', keys: ['Ctrl-P'], run: () => hooks.openGlobalSearch() },
+        { icon: 'search', label: 'Search this space', keys: keysOf('tree', 'search'), run: () => hooks.openCommandLine('/') },
+        { icon: 'search-all', label: 'Search every space', keys: keysOf('global', 'find'), run: () => hooks.openGlobalSearch() },
       ],
       [cmd, help],
     ]

@@ -4,6 +4,7 @@
    * written in marked, the day under the cursor shown below. The keys live in
    * App.svelte with the others; this draws and lets a pointer do the same.
    */
+  import Keys from './Keys.svelte'
   import { workspace } from './store.svelte'
   import { formatDay } from './util'
 
@@ -78,21 +79,7 @@
     {/each}
   </section>
 
-  <footer class="label">
-    <span class="kbd">h</span><span class="kbd">l</span> day
-    <span class="gap"></span>
-    <span class="kbd">j</span><span class="kbd">k</span> week
-    <span class="gap"></span>
-    <span class="kbd">H</span><span class="kbd">L</span> month
-    <span class="gap"></span>
-    <span class="kbd">.</span> today
-    <span class="gap"></span>
-    <span class="kbd">↵</span> open
-    <span class="gap"></span>
-    <span class="kbd">tab</span> tile
-    <span class="gap"></span>
-    <span class="kbd">esc</span> leave
-  </footer>
+  <Keys contexts={['calendar', 'special']} />
 </div>
 
 <style>
@@ -163,11 +150,5 @@
   .entry .name { font-family: var(--font-sans); font-size: 14px; color: var(--fg); }
   .none { color: var(--subtle); }
 
-  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
 
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
 </style>

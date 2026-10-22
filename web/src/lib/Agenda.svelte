@@ -5,6 +5,7 @@
    * had today yet. The keys live in App.svelte with the others; this draws
    * and lets a pointer do the same.
    */
+  import Keys from './Keys.svelte'
   import type { AgendaCard, DiaryEntry } from './api'
   import { workspace } from './store.svelte'
   import { runCommand } from './commands'
@@ -111,23 +112,7 @@
     </section>
   {/if}
 
-  <footer class="label">
-    <span class="kbd">j</span><span class="kbd">k</span> move
-    <span class="gap"></span>
-    <span class="kbd">↵</span> open
-    <span class="gap"></span>
-    <span class="kbd">␣</span> done
-    <span class="gap"></span>
-    <span class="kbd">D</span> due
-    <span class="gap"></span>
-    <span class="kbd">H</span><span class="kbd">L</span> list
-    <span class="gap"></span>
-    <span class="kbd">T</span> diary
-    <span class="gap"></span>
-    <span class="kbd">tab</span> tile
-    <span class="gap"></span>
-    <span class="kbd">esc</span> leave
-  </footer>
+  <Keys contexts={['agenda', 'special']} />
 </div>
 
 <style>
@@ -218,13 +203,7 @@
 
   .clear { margin: 0; font-size: 13px; color: var(--subtle); }
 
-  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
 
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
   @media (max-width: 767px) {
     .sheet { padding: 14px; gap: 14px; }
     .where { display: none; }

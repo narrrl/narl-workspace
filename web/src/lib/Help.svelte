@@ -2,7 +2,7 @@
   /*
    * The help is a sheet the size of the porthole, laid out in newspaper
    * columns that run on to the right, so all of it is in view at once on a
-   * wide screen and a key away on a narrow one. Its keys live in App.svelte
+   * wide screen and a key away on a narrow one. Its keys live in keymap.ts
    * with the others; these are what they move.
    */
   let pages: HTMLElement | undefined = $state()
@@ -40,121 +40,9 @@
 
 <script lang="ts">
   import { commands, groups, type CommandSpec, type Group } from './commands'
+  import Keys from './Keys.svelte'
+  import { rows, sections as keySections } from './keymap'
   import { workspace } from './store.svelte'
-  import { isTouchDevice } from './util'
-
-  const keys: [string, string][] = [
-    ['1 … 9 · 0', 'switch to that space, like a workspace'],
-    ['Shift 1 … 9', 'send the marked nodes, or the selected one, to that space'],
-    ['Tab · Shift-Tab', 'next / previous space'],
-    ['w', 'overview of every space — hjkl, then Enter'],
-    ['f', 'fullscreen the focused pane or tile; again or Esc to leave'],
-    ['Alt-h/j/k/l', 'focus the tile that way, from the editor too — left of the leftmost is the list'],
-    ['Alt-Shift-h/j/k/l', 'move the focused tile that way'],
-    ['L · Shift-Enter', 'open the row in a new tile beside the others'],
-    ['gt / gT', 'next / previous tile — in the editor too'],
-    ['Alt-q', 'close the focused tile — :close; :only closes the others'],
-    ['j / k · ↓ ↑', 'move down / up the list — scroll the document when it has focus'],
-    ['gg / G', 'first / last row, or top / bottom of the document — a first g, d, ] or [ waits a second in the status line'],
-    ['Ctrl-D / Ctrl-U', 'half a page down / up the open document'],
-    ['zl / zh · zL / zH', 'the wide table or code block at the top of the view, sideways — a little, or half its width'],
-    [']] / [[', 'next / previous heading of the document — in the editor too'],
-    ['gO', 'the headings as a list: j/k, Enter jumps there'],
-    ['F', 'hints over the links and buttons in view — type one to follow it'],
-    ['gf / gx', 'in the editor: follow the link under the cursor / open it in a tab'],
-    ['gx', 'open the file under the cursor in a tab of its own'],
-    ['Enter · l', 'open a document, or enter a folder — on an open keystore or sealed file, Enter asks for its password'],
-    ['h', 'from the document to the list, from the list up a level'],
-    ['o', 'new document here, straight into insert mode'],
-    ['O', 'new folder here'],
-    ['i · a', 'edit the open document'],
-    ['R', 'rename what is under the cursor — document, folder or card — starting from its name'],
-    ['m / p', 'pick nodes up, then drop them all into the folder you walk to'],
-    ['M', 'pick up the whole folder — again puts it all back'],
-    ['Ctrl / Shift-click', 'pick a row up · every row up to it — drag them onto a folder'],
-    ['S', 'the special workspace: the board, the agenda and the calendar side by side — S again, q or Esc leave it'],
-    ['Tab · Alt-h/j/k/l', 'in the special workspace: the next tile, or the one that way — l past the last list and j past the agenda go on too'],
-    ['t', 'agenda — late, due this week, in hand, on every board — in the special workspace'],
-    ['T', "today's diary entry, started if there is none — from templates/day when the diary has one"],
-    ['C', 'the diary by month, in the special workspace: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day'],
-    ['[d / ]d', 'the diary entry before / after the one open, by date'],
-    ['Ctrl-P', 'find anything, in every space — Enter opens the result lit beside them, n goes on'],
-    ['b', "the board, in the special workspace: this space's, or the last one shown — 1 … 9 there shows another's"],
-    ['c', "capture a card into this space's inbox, without leaving here"],
-    ['Esc · q', 'close the document, and its tile when there are several'],
-    ['/', 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one'],
-    ['n / N', 'next / previous search result, opened beside the results — :noh clears the search'],
-    ['s', 'toggle sharing for the document — asks before taking it back'],
-    ['y', 'mint a new share link and copy it — asks, the old one stops working'],
-    ['x · dd', 'delete what has focus — the row in the list, the document in its pane — into the trash (asks y/N)'],
-    ['u', 'undo the last delete: it comes back out of the trash — :trash has the rest'],
-    ['gh', "the open document's earlier versions, as diffs — Enter brings one back"],
-
-    ['gb', 'the documents that link to the open one — [[title]] links by title, [[ completes one while writing'],
-    [':', 'command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before'],
-    ['Ctrl-S', 'save, from anywhere'],
-    ['?', 'this screen, from the editor too — h/l a column, / filters it down'],
-  ]
-
-  /* The board rebinds most keys, so it gets its own column rather than
-     footnotes on the list keys. */
-  const boardKeys: [string, string][] = [
-    ['rule', 'the first list is the inbox, the last list is done'],
-    ['h / l', 'to the list left / right — right of the last is the agenda'],
-    ['j / k', 'down / up the cards'],
-    ['gg / G', 'first / last card of the list'],
-    ['J / K', 'move the card down / up its list'],
-    ['H / L', 'move the card to the list left / right'],
-    ['Space', 'into the done list, or back out to the inbox'],
-    ['Enter', 'turn the card over: its labels, description and checklist'],
-    ['gf', "the card's notes — a document, made on first use; q comes back"],
-    ['o · c', 'new card on this list'],
-    ['D', 'due date: fri, tm, +3d, 10-31 …'],
-    ['R', 'rename the card, or the list when it is empty'],
-    ['z', 'show done cards older than a week'],
-    ['F', 'a letter over every card in view — type it to put the cursor there'],
-    ['r', 'read the board again, for changes made elsewhere'],
-    ['x · dd', 'delete the card (asks y/N)'],
-    ['q · Esc', 'leave the special workspace'],
-  ]
-
-  const scratchKeys: [string, string][] = [
-    ['Q', 'lower the scratchpad over whatever is on screen, or raise it again — :scratch <text> takes a note without it'],
-    ['j / k', 'down / up the notes, the one touched last on top'],
-    ['o', 'a new note, written straight away — it saves itself'],
-    ['Enter · e · i', 'write the note — Esc in normal mode, or :q, comes back to the notes'],
-    ['K', 'keep the note: a document in the folder being browsed, titled by its first line — :keep <title> names it'],
-    ['dd', 'drop the note (asks y/N)'],
-    ['q · Esc · Q', 'raise the scratchpad'],
-  ]
-
-  const cardKeys: [string, string][] = [
-    ['j / k', 'down / up the checklist'],
-    ['gg / G', 'first / last step'],
-    ['Space · x', 'tick the step, or untick it'],
-    ['o', 'a new step below the cursor — :task on the line'],
-    ['r', 'reword the step'],
-    ['J / K', 'move the step down / up'],
-    ['dd', 'drop the step'],
-    ['e · i · Enter', 'write the description, in the editor — :w writes it, :q or Esc in normal mode leaves'],
-    ['a', 'put on a label, or take it off — :label on the line, Tab offers the board\'s'],
-    ['R · D', 'rename the card, its due date'],
-    ['H / L', 'send the card to the list left / right'],
-    ['gf', "the card's notes — a document, made on first use; q comes back"],
-    ['q · Esc', 'back to the board'],
-  ]
-
-  const agendaKeys: [string, string][] = [
-    ['j / k', 'down / up the cards, then what was written on this day in earlier years, then into the calendar'],
-    ['h', 'to the board'],
-    ['Enter', 'to the card, on its own board beside — or to the entry'],
-    ['Space', 'done, where it stands'],
-    ['D', 'due date: fri, tm, +3d … — :due on the line'],
-    [':', 'the line, with the agenda kept up — :repeat weekly acts on the card'],
-    ['H / L', 'to the list left / right on its board'],
-    ['T', "today's diary entry"],
-    ['q · Esc', 'leave the special workspace — a document opened from it comes back here on q'],
-  ]
 
   const titles: Record<Group, string> = {
     tree: 'spaces & folders',
@@ -169,9 +57,6 @@
 
   type Row = { key: string; args?: string; description: string }
 
-  const fromPairs = (pairs: [string, string][]): Row[] =>
-    pairs.map(([key, description]) => ({ key, description }))
-
   /** `:write(w)` — the name first, then whatever else reaches it. */
   const signature = (spec: CommandSpec) =>
     `:${spec.name}${spec.aliases?.length ? `(${spec.aliases.join(' ')})` : ''}`
@@ -182,24 +67,10 @@
       ...(spec.bang ? [{ key: `:${spec.name}!`, description: spec.bang.help }] : []),
     ])
 
-  const editorKeys: [string, string][] = [
-    ['vim', 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros; :w writes'],
-    ['drop · paste', 'an image, video or audio file attaches it'],
-    ['$x^2$ · $$…$$', 'set as math'],
-    ['```rust', 'a fenced block in a language is coloured as nvim colours it, written and read'],
-    ['```typst', 'a block typst sets, shown as an image — math, tables, figures; no packages or files'],
-    [':12', 'jumps straight to entry 12'],
-    ['y · d', 'copied to the system clipboard — :set noclipboard keeps them in the registers'],
-    ['files', 'open in place — pdf, text and code, markdown, csv, certificates and keystores'],
-  ]
-
+  /* The keys come out of the keymap that dispatches them, so the help
+     cannot describe a key that does something else. */
   const sections: [string, Row[]][] = [
-    ['keys', fromPairs(keys)],
-    ['board keys', fromPairs(boardKeys)],
-    ['card keys', fromPairs(cardKeys)],
-    ['scratchpad keys', fromPairs(scratchKeys)],
-    ['agenda keys', fromPairs(agendaKeys)],
-    ['in the editor', fromPairs(editorKeys)],
+    ...keySections.map(({ section, title, rule }) => [title, [...(rule ? [{ key: 'rule', description: rule }] : []), ...rows(section)]] as [string, Row[]]),
     ...groups.map((group: Group) => [titles[group], fromSpecs(commands.filter((spec) => spec.group === group))] as [string, Row[]]),
   ]
 
@@ -272,19 +143,7 @@
     {/each}
   </div>
 
-  {#if !isTouchDevice}
-    <footer class="label">
-      <span class="kbd">h</span><span class="kbd">l</span> column
-      <span class="gap"></span>
-      <span class="kbd">⌃d</span><span class="kbd">⌃u</span> page
-      <span class="gap"></span>
-      <span class="kbd">g</span><span class="kbd">G</span> start · end
-      <span class="gap"></span>
-      <span class="kbd">/</span> filter, and read the lines whole
-      <span class="gap"></span>
-      <span class="kbd">?</span><span class="kbd">esc</span> close
-    </footer>
-  {/if}
+  <Keys contexts={['help', 'sheet']} />
 </div>
 
 <style>
@@ -381,10 +240,6 @@
   .more { color: var(--outline); }
 
   .none { margin: 0; color: var(--subtle); font-size: 12px; }
-
-  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
 
   /* A phone stacks the columns and scrolls the sheet down. */
   @media (max-width: 767px) {

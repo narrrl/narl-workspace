@@ -4,8 +4,8 @@
  * docs/wiki holds the pages. Three of them are not written by hand but read
  * out of the code, so they cannot drift from it:
  *
- * - Commands.md, from the keys in Help.svelte and the commands in commands.ts,
- *   the same lists `:help` draws;
+ * - Commands.md, from the keymap in keymap.ts and the commands in
+ *   commands.ts, the same lists `:help` draws;
  * - Configuration.md, from the comments and values in .env.example;
  * - API.md, from the API section of README.md.
  *
@@ -17,6 +17,7 @@
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { rows, sections, type Section } from '../web/src/lib/keymap'
 
 const root = resolve(import.meta.dir, '..')
 const pages = join(root, 'docs/wiki')
@@ -45,17 +46,11 @@ const code = (text: string) => (text.includes('`') ? `<code>${cell(text).replace
 
 // --- Commands.md ---------------------------------------------------------------
 
-function keyTable(source: string, name: string): string {
-  const start = source.indexOf(`const ${name}: [string, string][] = [`)
-  if (start < 0) throw new Error(`Help.svelte has no ${name}`)
-  const body = source.slice(start, source.indexOf('\n  ]', start))
-  const pairs = [...body.matchAll(new RegExp(`\\[${STRING}, ${STRING}\\]`, 'g'))].map(([, key, description]) => [unquote(key), unquote(description)])
-  if (pairs.length === 0) throw new Error(`Help.svelte: ${name} is empty`)
-  // `rule` is not a key but the sentence the help column starts with.
-  const rule = pairs.find(([key]) => key === 'rule')
-  const rows = pairs.filter(([key]) => key !== 'rule').map(([key, description]) => `| ${code(key)} | ${cell(description)} |`)
-  const table = ['| key | what it does |', '| --- | --- |', ...rows].join('\n')
-  return rule ? `${rule[1][0].toUpperCase()}${rule[1].slice(1)}.\n\n${table}` : table
+function keyTable(section: Section): string {
+  const entry = sections.find((candidate) => candidate.section === section)!
+  const table = ['| key | what it does |', '| --- | --- |', ...rows(section).map(({ key, description }) => `| ${code(key)} | ${cell(description)} |`)].join('\n')
+  // A rule is not a key but the sentence the help column starts with.
+  return entry.rule ? `${entry.rule[0].toUpperCase()}${entry.rule.slice(1)}.\n\n${table}` : table
 }
 
 interface Spec {
@@ -116,7 +111,7 @@ function commandsPage(): string {
   })
 
   return (
-    generated('web/src/lib/Help.svelte and web/src/lib/commands.ts') +
+    generated('web/src/lib/keymap.ts and web/src/lib/commands.ts') +
     `# Keys and commands
 
 Everything here is also on \`?\` (\`:help\`) inside the app, which draws the same
@@ -129,15 +124,23 @@ arguments and \`↑\` / \`↓\` recall earlier lines.
 
 ### Browsing and reading
 
-${keyTable(help, 'keys')}
+${keyTable('keys')}
 
 ### On a board
 
-${keyTable(help, 'boardKeys')}
+${keyTable('board')}
+
+### On the back of a card
+
+${keyTable('card')}
 
 ### In the agenda
 
-${keyTable(help, 'agendaKeys')}
+${keyTable('agenda')}
+
+### In the scratchpad
+
+${keyTable('scratch')}
 
 ## Commands
 

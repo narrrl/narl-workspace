@@ -14,6 +14,7 @@ on:
       - .env.example
       - web/src/lib/commands.ts
       - web/src/lib/Help.svelte
+      - web/src/lib/keymap.ts
       - scripts/wiki.ts
       - .github/workflows/wiki.yml
   workflow_dispatch:

@@ -4,6 +4,7 @@
    * in the margin, for when there is no margin, or no pointer to click it
    * with. The keys live in App.svelte with the other overlays'.
    */
+  import Keys from './Keys.svelte'
   import { workspace } from './store.svelte'
 
   let sheet = $state<HTMLDivElement>()
@@ -44,13 +45,7 @@
     {/each}
   </ol>
 
-  <footer class="label">
-    <span class="kbd">j</span><span class="kbd">k</span> move
-    <span class="gap"></span>
-    <span class="kbd">↵</span> jump there
-    <span class="gap"></span>
-    <span class="kbd">q</span><span class="kbd">esc</span> close
-  </footer>
+  <Keys contexts={['outline', 'sheet']} />
 </div>
 
 <style>
@@ -96,13 +91,7 @@
   .row:active { transform: none; }
   .row.at { background: var(--light); color: var(--ink); }
 
-  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
 
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
   @media (max-width: 767px) {
     .sheet { padding: 14px; gap: 14px; }
   }

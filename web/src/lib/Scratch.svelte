@@ -6,6 +6,7 @@
    * The keys live in App.svelte with the others; this draws and lets a
    * pointer do the same.
    */
+  import Keys from './Keys.svelte'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
   import { relative } from './util'
@@ -89,20 +90,15 @@
     </div>
   </div>
 
-  <footer class="label">
-    {#if workspace.scratchEditing}
+  {#if workspace.scratchEditing}
+    <footer class="label">
       <span>writing — it saves itself</span>
       <span><span class="kbd">esc</span> back to the notes</span>
       <span><span class="kbd">:keep</span> make it a document</span>
-    {:else}
-      <span><span class="kbd">j</span><span class="kbd">k</span> note</span>
-      <span><span class="kbd">o</span> new</span>
-      <span><span class="kbd">↵</span> write</span>
-      <span><span class="kbd">K</span> keep as document</span>
-      <span><span class="kbd">dd</span> drop</span>
-      <span><span class="kbd">Q</span><span class="kbd">q</span> raise</span>
-    {/if}
-  </footer>
+    </footer>
+  {:else}
+    <Keys contexts={['drawer']} />
+  {/if}
 </div>
 
 <style>

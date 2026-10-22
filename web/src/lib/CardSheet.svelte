@@ -5,6 +5,7 @@
    * description, the checklist. The keys live in App.svelte with the others;
    * this draws and lets a pointer do the same.
    */
+  import Keys from './Keys.svelte'
   import { followLink } from './commands'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
@@ -126,20 +127,7 @@
       </section>
     </div>
 
-    <footer class="label">
-      <span><span class="kbd">j</span><span class="kbd">k</span> step</span>
-      <span><span class="kbd">␣</span> tick</span>
-      <span><span class="kbd">o</span> add</span>
-      <span><span class="kbd">r</span> reword</span>
-      <span><span class="kbd">J</span><span class="kbd">K</span> order</span>
-      <span><span class="kbd">dd</span> drop</span>
-      <span><span class="kbd">e</span> describe</span>
-      <span><span class="kbd">a</span> label</span>
-      <span><span class="kbd">D</span> due</span>
-      <span><span class="kbd">H</span><span class="kbd">L</span> send</span>
-      <span><span class="kbd">gf</span> notes</span>
-      <span><span class="kbd">q</span> close</span>
-    </footer>
+    <Keys contexts={['card']} />
   </div>
 {/if}
 
@@ -217,9 +205,4 @@
   li.at .tick { border-color: var(--ink); }
   li.at.ticked .tick { background: var(--ink); }
 
-  footer { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 10px; }
-  footer > span { display: flex; gap: 3px; align-items: center; }
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
 </style>

@@ -26,6 +26,7 @@
 </script>
 
 <script lang="ts">
+  import Keys from './Keys.svelte'
   import { diffLines, folded } from './diff'
   import { formatStamp, relative } from './util'
 
@@ -86,15 +87,7 @@
     </div>
   </div>
 
-  <footer class="label">
-    <span class="kbd">j</span><span class="kbd">k</span> earlier / later
-    <span class="gap"></span>
-    <span class="kbd">enter</span> restore
-    <span class="gap"></span>
-    <span class="muted">- goes, + comes back</span>
-    <span class="gap"></span>
-    <span class="kbd">q</span><span class="kbd">esc</span> close
-  </footer>
+  <Keys contexts={['history', 'sheet']}><span class="muted">- goes, + comes back</span></Keys>
 </div>
 
 <style>
@@ -149,16 +142,9 @@
   .row.added { background: color-mix(in oklab, var(--light) 14%, transparent); }
   .row.fold { color: var(--muted); }
 
-  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
 
   @media (max-width: 767px) {
     .split { flex-direction: column; }
     ul { width: auto; max-height: 30%; }
-    footer { display: none; }
-  }
-  @media (pointer: coarse) {
-    footer { display: none; }
   }
 </style>

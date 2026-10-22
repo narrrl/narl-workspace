@@ -10,6 +10,7 @@
 </script>
 
 <script lang="ts">
+  import Keys from './Keys.svelte'
   let sheet = $state<HTMLDivElement>()
 
   $effect(() => {
@@ -45,13 +46,7 @@
     {/each}
   </ul>
 
-  <footer class="label">
-    <span class="kbd">j</span><span class="kbd">k</span> move
-    <span class="gap"></span>
-    <span class="kbd">enter</span> open
-    <span class="gap"></span>
-    <span class="kbd">q</span><span class="kbd">esc</span> close
-  </footer>
+  <Keys contexts={['backlinks', 'sheet']} />
 </div>
 
 <style>
@@ -92,10 +87,4 @@
   .muted { font-size: 11px; }
   .context { font-size: 12px; color: var(--subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  footer { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-  footer .kbd { margin-right: 2px; }
-  footer .gap { width: 14px; }
-  @media (max-width: 767px), (pointer: coarse) {
-    footer { display: none; }
-  }
 </style>
