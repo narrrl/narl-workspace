@@ -58,6 +58,7 @@ a week fold away until `z` shows them.
 | `Space` | into the done list, or back out to the inbox |
 | `o`, `c` | a new card on this list |
 | `Enter` | turn the card over: labels, description, checklist |
+| `gf` | the card's notes, without turning it over |
 | `D` | due date |
 | `R` | rename the card |
 | `z` | show done cards older than a week |
@@ -106,7 +107,7 @@ you stay where you were. From outside the browser, see [Capture](Capture.md).
 
 ### Notes
 
-`gf` on the back of a card opens its notes: a document named after the card, made in the
+`gf` on a card, or on its back, opens its notes: a document named after the card, made in the
 root of the space the first time. Closing it goes back to the board, on the
 same card. `:card!` while reading a document makes a card that points at it.
 

@@ -432,6 +432,17 @@ pub async fn wikilinks(
     from: i64,
     body: &str,
 ) -> AppResult<BTreeMap<String, String>> {
+    let space = space_of(db, from).await?;
+    wikilinks_in(db, space, body).await
+}
+
+/// Where the `[[titles]]` in `body` lead, read from the space `space`: a
+/// card's description, which is in a space without being a node in it.
+pub async fn wikilinks_in(
+    db: &mut SqliteConnection,
+    space: Option<i64>,
+    body: &str,
+) -> AppResult<BTreeMap<String, String>> {
     let mut found = BTreeMap::new();
     let titles: Vec<String> = written(body)
         .into_iter()
@@ -441,7 +452,6 @@ pub async fn wikilinks(
     if titles.is_empty() {
         return Ok(found);
     }
-    let space = space_of(db, from).await?;
     for title in titles {
         if let Some(to) = resolve_title(db, &title, space).await? {
             found.insert(title, path_text(db, to).await?);

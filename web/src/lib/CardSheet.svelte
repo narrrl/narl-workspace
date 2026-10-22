@@ -5,6 +5,7 @@
    * description, the checklist. The keys live in App.svelte with the others;
    * this draws and lets a pointer do the same.
    */
+  import { followLink } from './commands'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
   import { formatDay, labelHue, urgency } from './util'
@@ -16,7 +17,7 @@
   const lists = $derived(workspace.board?.lists.length ?? 0)
   const role = $derived(lists < 2 ? '' : workspace.listCursor === 0 ? 'inbox' : workspace.listCursor === lists - 1 ? 'done' : '')
   const ticked = $derived(card?.checklist.filter((task) => task.done).length ?? 0)
-  const html = $derived(card?.body.trim() ? renderMarkdown(card.body) : '')
+  const html = $derived(card?.body.trim() ? renderMarkdown(card.body, { wikilinks: card.wikilinks }) : '')
 
   // A card deleted or moved out of sight under the sheet takes the sheet with it.
   $effect(() => {
@@ -27,6 +28,16 @@
     const at = workspace.taskCursor
     steps?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
   })
+
+  /** A link in the description leaves the card for what it leads to, as one in a document does. */
+  function follow(event: MouseEvent) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+    const href = (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href') ?? ''
+    if (!href.startsWith('/n/')) return
+    event.preventDefault()
+    workspace.closeCardSheet()
+    followLink(href)
+  }
 
   function pick(index: number) {
     workspace.taskCursor = index
@@ -81,8 +92,8 @@
             />
           {/await}
         {:else if html}
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <article class="md description" ondblclick={() => workspace.describe()}>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+          <article class="md description" onclick={follow} ondblclick={() => workspace.describe()}>
             <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMarkdown -->
             {@html html}
           </article>

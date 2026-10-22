@@ -55,7 +55,7 @@
           { icon: 'right', label: 'Send the card right', keys: ['L'], run: () => workspace.guard(() => workspace.sendCard(1)), dim: !card },
           { icon: 'calendar', label: 'Due date', keys: ['D'], run: () => hooks.openCommandLine(':due '), dim: !card },
           { icon: 'repeat', label: 'Repeat once done', keys: [':repeat'], run: () => hooks.openCommandLine(':repeat '), dim: !card },
-          { icon: 'doc', label: "The card's notes", keys: ['Enter'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
+          { icon: 'doc', label: "The card's notes", keys: ['gf'], run: () => workspace.guard(() => workspace.openCard()), dim: !card },
         ],
         [
           { icon: 'up', label: 'Card up its list', keys: ['K'], run: () => workspace.guard(() => workspace.nudgeCard(-1)), dim: !card },

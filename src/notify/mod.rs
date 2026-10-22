@@ -490,7 +490,7 @@ pub(crate) fn local_day(tz: Tz, at: i64) -> NaiveDate {
 /// DST makes this a question with two awkward answers: the hour that occurs
 /// twice, where the earlier one is meant, and the hour that does not occur at
 /// all, where the clock skipping past it counts as the time having passed.
-fn local_instant(tz: Tz, day: NaiveDate, hour: u32, minute: u32) -> i64 {
+pub(crate) fn local_instant(tz: Tz, day: NaiveDate, hour: u32, minute: u32) -> i64 {
     let Some(naive) = day.and_hms_opt(hour, minute, 0) else {
         return i64::MAX;
     };

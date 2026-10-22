@@ -20,7 +20,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,7 @@ use crate::{
     auth::Session,
     error::{AppError, AppResult},
     routes::{
+        links,
         manifest::ListMeta,
         nodes::{DOCUMENT, SPACE},
         repeat::Repeat,
@@ -75,6 +76,8 @@ pub struct Card {
     pub position: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Where each `[[title]]` in the description leads, as a document's do.
+    pub wikilinks: BTreeMap<String, String>,
 }
 
 /// A step on a card's checklist.
@@ -385,6 +388,7 @@ fn row_to_card(row: &sqlx::sqlite::SqliteRow) -> Card {
         position: row.get("position"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        wikilinks: BTreeMap::new(),
     }
 }
 
@@ -633,6 +637,11 @@ async fn load(state: &AppState, space_id: i64, space_name: String) -> AppResult<
     .fetch_all(&state.db)
     .await?;
 
+    let mut cards: Vec<Card> = card_rows.iter().map(row_to_card).collect();
+    let mut conn = state.db.acquire().await?;
+    for card in cards.iter_mut().filter(|card| card.body.contains("[[")) {
+        card.wikilinks = links::wikilinks_in(&mut conn, Some(space_id), &card.body).await?;
+    }
     let lists = list_rows
         .iter()
         .map(|row| {
@@ -641,11 +650,7 @@ async fn load(state: &AppState, space_id: i64, space_name: String) -> AppResult<
                 id,
                 name: row.get("name"),
                 position: row.get("position"),
-                cards: card_rows
-                    .iter()
-                    .filter(|card| card.get::<i64, _>("list_id") == id)
-                    .map(row_to_card)
-                    .collect(),
+                cards: cards.extract_if(.., |card| card.list_id == id).collect(),
             }
         })
         .collect();
@@ -1187,11 +1192,57 @@ async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
 #[cfg(test)]
 mod tests {
     use super::{
-        agenda_cards, card, done_after_move, relocate, reordered, restore, settle, tidy_checklist,
-        tidy_labels, Task,
+        agenda_cards, card, done_after_move, load, relocate, reordered, restore, settle,
+        tidy_checklist, tidy_labels, Task,
     };
     use crate::routes::manifest::{CardMeta, ListMeta};
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn a_description_links_by_title_as_a_document_does() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let db = &state.db;
+        let work: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE slug = 'work'")
+            .fetch_one(db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
+             VALUES (?1, 'document', 'Runbook', 'runbook', '', 0, 0)",
+        )
+        .bind(work)
+        .execute(db)
+        .await
+        .unwrap();
+        let list: i64 = sqlx::query_scalar(
+            "INSERT INTO board_lists (space_id, name, position, created_at)
+             VALUES (?1, 'inbox', 0, 0) RETURNING id",
+        )
+        .bind(work)
+        .fetch_one(db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO cards (list_id, title, body, position, created_at, updated_at)
+             VALUES (?1, 'rotate', 'see [[Runbook]], then [[Nowhere]]', 0, 0, 0)",
+        )
+        .bind(list)
+        .execute(db)
+        .await
+        .unwrap();
+
+        let board = load(&state, work, "work".into()).await.unwrap();
+        let card = board
+            .lists
+            .iter()
+            .flat_map(|list| &list.cards)
+            .find(|card| card.list_id == list)
+            .unwrap();
+        assert_eq!(
+            card.wikilinks.iter().collect::<Vec<_>>(),
+            [(&"Runbook".to_string(), &"work/runbook".to_string())]
+        );
+    }
 
     /// A space with a board of `inbox`, `doing`, `done` on a fresh database.
     async fn board() -> (sqlx::SqlitePool, i64, Vec<i64>) {

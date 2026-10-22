@@ -14,6 +14,7 @@
     relative,
     scrollPage,
     scrollWide,
+    slugPath,
   } from './util'
 
   /** The tile this pane draws; the keys only reach it while it has focus. */
@@ -143,13 +144,13 @@
 
 <section class="pane">
   <header>
-    <div class="crumb label rule" title="{workspace.here}/{doc.slug}">
+    <div class="crumb label rule" title="{slugPath(doc.path)}">
       <!-- A phone has no crumbs on the bar and no h key: this is the way back. -->
       <button class="back" aria-label="back to the list" onclick={() => runCommand('q')}>
         <Icon name="back" size={16} />
       </button>
       <span class="marker" class:live={tile.editing}></span>
-      <span class="path">{workspace.here}/{doc.slug}</span>
+      <span class="path">{slugPath(doc.path)}</span>
       {#if tile.dirty}<span class="dirty">modified</span>{/if}
     </div>
 

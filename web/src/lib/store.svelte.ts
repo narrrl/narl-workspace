@@ -981,11 +981,8 @@ class Workspace {
   async openSelected(edit = false) {
     const selected = this.selected
     if (!selected) return
-    // A match from anywhere is gone to, not opened beside a list it is not in.
-    if (this.globalSearch) {
-      const node = await api.getNode(selected.id)
-      return this.openPath(node.path.map((crumb) => crumb.slug).join('/'))
-    }
+    // A match from anywhere opens beside the results, as one from this space
+    // does, so `n` goes on from it; only a folder ends the search, by going in.
     if (isContainer(selected)) await this.goTo(selected.id)
     else await this.openNode(selected.id, edit)
   }
@@ -1383,10 +1380,27 @@ class Workspace {
     const entry = this.calendarEntries.find((e) => e.day === day)
     // Opened from the special workspace, so `q` on the entry comes back here.
     if (entry) return this.openPath(entry.path)
+    await this.openDay(day)
+  }
+
+  /**
+   * `T`, and a day in the calendar without an entry: the server finds the
+   * day's entry or starts it, by its own clock and at the root of the diary,
+   * as a capture does, so the three never write two entries for one day.
+   */
+  async openDay(day?: string) {
     const home = this.spaces.find((space) => space.role === 'diary')
     if (!home) return this.say('there is no diary to write in', 'error')
-    if (this.parentId !== home.id) await this.enterSpace(home.id)
-    await this.createDocument('', { created_at: parseDay(day) ?? undefined })
+    const entry = await api.diaryDay(day)
+    if (this.spaceId !== home.id) await this.enterSpace(home.id)
+    else if (this.query) await this.search('')
+    if (entry.created) await this.refresh()
+    await this.openNode(entry.id, true)
+    if (entry.created) {
+      // Left as it was started, it goes again, as a new document from `o` does.
+      this.tile.fresh = entry.id
+      this.enterInsert = true
+    }
   }
 
   /** `[d` / `]d`: the diary entry before or after the one being read. */

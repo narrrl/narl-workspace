@@ -48,7 +48,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
 | `C` | the diary by month, in the special workspace: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day |
 | `[d / ]d` | the diary entry before / after the one open, by date |
-| `Ctrl-P` | find anything, in every space — Enter goes to the result lit |
+| `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
 | `b` | the board, in the special workspace: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here |
 | `Esc · q` | close the document, and its tile when there are several |
@@ -77,6 +77,7 @@ The first list is the inbox, the last list is done.
 | `H / L` | move the card to the list left / right |
 | `Space` | into the done list, or back out to the inbox |
 | `Enter` | turn the card over: its labels, description and checklist |
+| `gf` | the card's notes — a document, made on first use; q comes back |
 | `o · c` | new card on this list |
 | `D` | due date: fri, tm, +3d, 10-31 … |
 | `R` | rename the card, or the list when it is empty |
@@ -127,7 +128,7 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:board` | this space's board, in the special workspace |
 | `:special` | the special workspace: the board, the agenda and the calendar side by side — S puts it up and away, Tab walks its tiles, 1 … 9 picks the board |
 | `:card, :c <title>` | add a card — on the board to the list under the cursor, elsewhere to this space's inbox |
-| `:card!` | add a card linked to the open document — Enter on it opens the document |
+| `:card!` | add a card linked to the open document — gf on it opens the document |
 | `:due <when\|->` | due date of the card — on the board, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
 | `:done` | move the selected card into the done list, or back out to the inbox |

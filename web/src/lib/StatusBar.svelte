@@ -1,7 +1,7 @@
 <script lang="ts">
   import Rail from './Rail.svelte'
   import { workspace } from './store.svelte'
-  import { isTouchDevice } from './util'
+  import { isTouchDevice, slugPath } from './util'
 
   /** A key waiting for its second half, like vim's `showcmd`. */
   const { pending = '' }: { pending?: string } = $props()
@@ -12,7 +12,7 @@
 
   // The path is the file name here: work/einarbeiten/01-was-ist-eebus.
   const file = $derived(
-    workspace.open ? `${workspace.here}/${workspace.open.slug}` : `${workspace.here || '~'}/`,
+    workspace.open ? slugPath(workspace.open.path) : `${workspace.here || '~'}/`,
   )
 
   const lines = $derived(workspace.editing ? workspace.draft.body.split('\n').length : null)

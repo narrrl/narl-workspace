@@ -14,9 +14,7 @@ use crate::{
     error::{AppError, AppResult},
     routes::{
         boards::{self, CardInput},
-        diary, links, media,
-        nodes::{self, slugify, unique_slug},
-        revisions,
+        diary, links, media, nodes, revisions,
     },
     state::AppState,
 };
@@ -94,65 +92,28 @@ async fn card(db: &SqlitePool, text: &str, space: Option<&str>) -> AppResult<Cap
     })
 }
 
-/// `- 14:05 text`, at the end of today's entry: the first document written
-/// today at the top of the diary, the one `:today` opens. With none yet, the
-/// line starts one the way `:today` would, from `templates/day` if there is one.
+/// `- 14:05 text`, at the end of today's entry: the one `T` opens. With none
+/// yet, the line starts it the way `T` would, from `templates/day` if there
+/// is one.
 async fn diary(db: &SqlitePool, tz: Tz, text: &str, now: i64) -> AppResult<Captured> {
     let line = format!("- {} {}", clock(tz, now), item(text));
 
     let mut tx = crate::db::begin_write(db).await?;
-    let diary: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE role = ?1")
-        .bind(nodes::DIARY)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("there is no diary to write in".into()))?;
-    let (start, end) = crate::notify::day_bounds(tz, crate::notify::local_day(tz, now));
-    let today: Option<(i64, String)> = sqlx::query_as(
-        "SELECT id, body FROM nodes
-         WHERE parent_id = ?1 AND kind = 'document' AND created_at >= ?2 AND created_at < ?3
-         ORDER BY created_at, id
-         LIMIT 1",
-    )
-    .bind(diary)
-    .bind(start)
-    .bind(end)
-    .fetch_optional(&mut *tx)
-    .await?;
-
-    let id = match today {
-        Some((id, body)) => {
-            let body = appended(&body, &line);
-            revisions::keep(&mut tx, id, &body, revisions::Reason::Edit).await?;
-            sqlx::query("UPDATE nodes SET body = ?1, updated_at = ?2 WHERE id = ?3")
-                .bind(&body)
-                .bind(now)
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            media::link_to_node(&mut tx, id, &body).await?;
-            links::index(&mut tx, id, &body).await?;
-            id
-        }
-        None => {
-            let start = diary::day_template(&mut tx, tz, diary, now).await?;
-            let body = appended(start.as_deref().unwrap_or_default(), &line);
-            let slug = unique_slug(&mut tx, Some(diary), &slugify(""), None).await?;
-            let id: i64 = sqlx::query_scalar(
-                "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
-                 VALUES (?1, 'document', '', ?2, ?3, ?4, ?4)
-                 RETURNING id",
-            )
-            .bind(diary)
-            .bind(&slug)
-            .bind(&body)
-            .bind(now)
-            .fetch_one(&mut *tx)
-            .await?;
-            media::link_to_node(&mut tx, id, &body).await?;
-            links::index(&mut tx, id, &body).await?;
-            id
-        }
-    };
+    let today = diary::entry_of(&mut tx, tz, crate::notify::local_day(tz, now), now).await?;
+    let id = today.id;
+    let body = appended(&today.body, &line);
+    // What an entry just started replaces is its template, not worth keeping.
+    if !today.created {
+        revisions::keep(&mut tx, id, &body, revisions::Reason::Edit).await?;
+    }
+    sqlx::query("UPDATE nodes SET body = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&body)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    media::link_to_node(&mut tx, id, &body).await?;
+    links::index(&mut tx, id, &body).await?;
     tx.commit().await?;
 
     let place = nodes::path_of(db, id)

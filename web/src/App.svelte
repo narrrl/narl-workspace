@@ -1106,6 +1106,12 @@
         workspace.cardCursor = 0
         return
       }
+      // The card's notes, without turning it over first: `gf` as on its back.
+      if (previous === 'g' && key === 'f') {
+        event.preventDefault()
+        void workspace.guard(() => workspace.openCard())
+        return
+      }
       if (previous === 'd' && key === 'd') {
         event.preventDefault()
         void runCommand('delete')

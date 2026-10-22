@@ -62,6 +62,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/spaces/overview", get(nodes::overview))
         .route("/agenda", get(boards::agenda))
         .route("/diary/days", get(diary::days))
+        .route("/diary/day", post(diary::day))
         .route("/diary/around/{id}", get(diary::around_entry))
         .route("/capture", post(capture::capture))
         .route("/scratch", get(scratch::list).post(scratch::create))

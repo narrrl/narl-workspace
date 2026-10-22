@@ -93,8 +93,9 @@ shows the board of another space.
 
 The first list is the inbox and the last is done; the ones between are work in
 hand. `h`/`l` move between lists and `j`/`k` between cards. `H`/`L` move a
-card across, `Space` finishes it, `D` sets its due date, and `Enter` opens its
-notes: a document made for the card the first time you ask. `:repeat weekly`
+card across, `Space` finishes it, and `D` sets its due date. `Enter` turns a
+card over to its labels, description and checklist, and `gf` opens its notes:
+a document made for the card the first time you ask. `:repeat weekly`
 makes a card come back in the inbox each time it is finished. `q` goes back to
 the tree.
 

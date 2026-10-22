@@ -5,7 +5,7 @@
   import { renderMarkdown } from './markdown'
   import { looksLikeText, parseTable, previewKind, separatorOf } from './preview'
   import { workspace, type Tile } from './store.svelte'
-  import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage, scrollWide } from './util'
+  import { formatBytes, formatStamp, headingsIn, jumpHeading, readerHeadings, relative, scrollPage, scrollWide, slugPath } from './util'
 
   /** The tile this pane draws; the keys only reach it while it has focus. */
   const { tile }: { tile: Tile } = $props()
@@ -158,12 +158,12 @@
 
 <section class="pane">
   <header>
-    <div class="crumb label rule" title="{workspace.here}/{node.slug}">
+    <div class="crumb label rule" title="{slugPath(node.path)}">
       <button class="back" aria-label="back to the list" onclick={() => runCommand('q')}>
         <Icon name="back" size={16} />
       </button>
       <span class="marker"></span>
-      <span class="path">{workspace.here}/{node.slug}</span>
+      <span class="path">{slugPath(node.path)}</span>
     </div>
 
     <div class="row">

@@ -258,6 +258,9 @@ export function linkAt(line: string, column: number): string | null {
  * Where a `[[title]]` points when the page cannot say where it leads: the
  * title itself, for following it to look it up, or to offer to write it.
  */
+/** `work/notes/plan`: where a node is, by its crumbs. */
+export const slugPath = (path: { slug: string }[]) => path.map((crumb) => crumb.slug).join('/')
+
 export const titleHref = (title: string) => `/n/?title=${encodeURIComponent(title)}`
 
 /** What a share link's reader will miss: a share never serves a sealed file. */

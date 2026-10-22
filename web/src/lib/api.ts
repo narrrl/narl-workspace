@@ -176,6 +176,8 @@ export interface Card {
   position: number
   created_at: number
   updated_at: number
+  /** Where each `[[title]]` in the description leads, as a document's do. */
+  wikilinks: Record<string, string>
 }
 
 /** A step on a card's checklist. */
@@ -491,6 +493,13 @@ export const api = {
 
   /** A month's diary entries: `2026-10`. */
   diaryDays: (month: string) => request<DiaryEntry[]>(`/diary/days?month=${encodeURIComponent(month)}`),
+
+  /**
+   * The entry of a day, `2026-10-22`, or of today on the server's clock;
+   * started when there is none, which `created` says.
+   */
+  diaryDay: (day?: string) =>
+    request<{ id: number; created: boolean }>('/diary/day', { method: 'POST', body: body({ day }) }),
 
   /** The entries before and after a diary entry, by date. */
   diaryAround: (id: number) =>

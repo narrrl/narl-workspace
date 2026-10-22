@@ -22,6 +22,7 @@ sealed or not.
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
 | `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, its entries `on_this_day` in earlier years, and `today` in `WORKSPACE_TIMEZONE`, with its bounds |
 | `GET` | `/api/diary/days?month=2026-10` | the diary's entries in a month, each with its local `day` |
+| `POST` | `/api/diary/day` | `{ day? }`: the entry of `2026-10-22`, or of today in `WORKSPACE_TIMEZONE`, started from `templates/day` when there is none; answers `{ id, created }` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
 | `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |

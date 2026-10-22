@@ -151,7 +151,7 @@ it; in the document pane it is that document. In the browse pane:
 | `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
 | `/` | full-text search in this space (`:noh` clears it); `Tab` or `Ctrl-N`/`Ctrl-P` walk the results without leaving the line, `Enter` opens the one lit |
-| `Ctrl-P` | full-text search across every space; `Enter` goes to the match |
+| `Ctrl-P` | full-text search across every space; `Enter` opens the match beside the results |
 | `n` / `N` | the next / previous search result, opened beside the results; past the last it starts again at the first |
 | `s` / `y` | toggle sharing / mint a new share link — either asks first when it would cut readers off |
 | `x`, `dd` | delete the entry under the cursor into the trash (asks `y`/`N`) |
@@ -271,6 +271,7 @@ you were. On the board, `o` or `c` puts a card on the column under the cursor.
 | `J` / `K` | move the card down / up its list |
 | `H` / `L` | move the card to the list on the left / right |
 | `Enter` | turn the card over: labels, a markdown description, a checklist |
+| `gf` | the card's notes, a document made on first use; `q` comes back |
 | `Space` | into the done column, or back out to the inbox |
 | `o`, `c` | a new card on this list |
 | `D` | due date — `fri`, `tm`, `+3d`, `+2w`, `10-31`, `2026-10-31` |
@@ -869,6 +870,7 @@ sealed or not.
 | `GET` | `/api/spaces/{id}/board` | the lists and cards of one space |
 | `GET` | `/api/agenda` | open cards due within a week or in hand, on every board, whether the diary has today, its entries `on_this_day` in earlier years, and `today` in `WORKSPACE_TIMEZONE`, with its bounds |
 | `GET` | `/api/diary/days?month=2026-10` | the diary's entries in a month, each with its local `day` |
+| `POST` | `/api/diary/day` | `{ day? }`: the entry of `2026-10-22`, or of today in `WORKSPACE_TIMEZONE`, started from `templates/day` when there is none; answers `{ id, created }` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
 | `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |

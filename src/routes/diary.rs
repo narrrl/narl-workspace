@@ -18,8 +18,11 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    notify::{day_bounds, local_day, weekday_name},
-    routes::nodes::{excerpt, path_of, HEAD_CHARS},
+    notify::{day_bounds, local_day, local_instant, weekday_name},
+    routes::{
+        links, media,
+        nodes::{excerpt, path_of, slugify, unique_slug, HEAD_CHARS},
+    },
     state::AppState,
 };
 
@@ -321,6 +324,109 @@ pub(crate) async fn is_diary(conn: &mut SqliteConnection, id: i64) -> AppResult<
     Ok(role.flatten().as_deref() == Some(crate::routes::nodes::DIARY))
 }
 
+/// The entry about the local day `day`: the first written, wherever in the
+/// diary it was filed. With none, a new one at the root of the diary, from
+/// `templates/day` when there is one, dated `at` — or, for another day than
+/// the one `at` falls on, noon of it. `T`, the calendar and a capture all ask
+/// this, so they find and start the same entry, by the server's clock.
+pub(crate) async fn entry_of(
+    conn: &mut SqliteConnection,
+    tz: Tz,
+    day: NaiveDate,
+    at: i64,
+) -> AppResult<Day> {
+    let diary: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE role = ?1")
+        .bind(crate::routes::nodes::DIARY)
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("there is no diary to write in".into()))?;
+    let (start, end) = day_bounds(tz, day);
+    let found: Option<(i64, String)> = sqlx::query_as(&format!(
+        "WITH RECURSIVE {ENTRIES}
+         SELECT id, body FROM nodes
+         WHERE kind = 'document' AND id IN (SELECT id FROM entries)
+           AND created_at >= ?1 AND created_at < ?2
+         ORDER BY created_at, id
+         LIMIT 1"
+    ))
+    .bind(start)
+    .bind(end)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some((id, body)) = found {
+        return Ok(Day {
+            id,
+            body,
+            created: false,
+        });
+    }
+
+    let at = if local_day(tz, at) == day {
+        at
+    } else {
+        local_instant(tz, day, 12, 0)
+    };
+    let body = day_template(conn, tz, diary, at).await?.unwrap_or_default();
+    let slug = unique_slug(&mut *conn, Some(diary), &slugify(""), None).await?;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
+         VALUES (?1, 'document', '', ?2, ?3, ?4, ?5)
+         RETURNING id",
+    )
+    .bind(diary)
+    .bind(&slug)
+    .bind(&body)
+    .bind(at)
+    .bind(crate::now())
+    .fetch_one(&mut *conn)
+    .await?;
+    media::link_to_node(conn, id, &body).await?;
+    links::index(conn, id, &body).await?;
+    Ok(Day {
+        id,
+        body,
+        created: true,
+    })
+}
+
+/// A day's entry, and whether asking for it is what started it.
+#[derive(Serialize, Debug)]
+pub struct Day {
+    pub id: i64,
+    #[serde(skip)]
+    pub body: String,
+    pub created: bool,
+}
+
+#[derive(Deserialize)]
+pub struct DayInput {
+    /// `2026-10-22`; today, in `WORKSPACE_TIMEZONE`, without it.
+    #[serde(default)]
+    pub day: Option<String>,
+}
+
+/// `POST /api/diary/day`: the entry of a day, started when there is none.
+pub async fn day(
+    _: Session,
+    State(state): State<AppState>,
+    Json(input): Json<DayInput>,
+) -> AppResult<Json<Day>> {
+    let tz = state.config.mail.timezone;
+    let now = crate::now();
+    let day = match input.day.as_deref() {
+        Some(day) => NaiveDate::parse_from_str(day, "%Y-%m-%d")
+            .map_err(|_| AppError::BadRequest(format!("not a day: {day}, but 2026-10-22 is")))?,
+        None => local_day(tz, now),
+    };
+    let mut tx = crate::db::begin_write(&state.db).await?;
+    let entry = entry_of(&mut tx, tz, day, now).await?;
+    tx.commit().await?;
+    if entry.created {
+        state.backup.signal();
+    }
+    Ok(Json(entry))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{extract::State, Json};
@@ -328,7 +434,7 @@ mod tests {
     use chrono_tz::Europe::Berlin;
     use sqlx::SqlitePool;
 
-    use super::{around, fill, month_entries, on_this_day};
+    use super::{around, entry_of, fill, month_entries, on_this_day};
     use crate::{auth::Session, routes::nodes::CreateInput, state::AppState};
 
     fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
@@ -457,6 +563,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body, "## Thursday\n\n- 07:00 rain\n");
+    }
+
+    #[tokio::test]
+    async fn a_day_has_one_entry_found_by_the_servers_clock() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let db = &state.db;
+        let diary = diary(db).await;
+        // 23:30 in UTC on the 21st is already the 22nd here.
+        let now = at(2026, 10, 22, 1, 30);
+        let day = |d| chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+
+        // An entry filed in a folder is still the day's.
+        let folder = add(db, diary, "folder", "october", "", 0).await;
+        let filed = add(db, folder, "document", "", "", at(2026, 10, 22, 0, 10)).await;
+        let templates = add(db, diary, "folder", "templates", "", 0).await;
+        add(db, templates, "document", "day", "{{weekday}}\n", 0).await;
+        let mut conn = db.acquire().await.unwrap();
+        let found = entry_of(&mut conn, Berlin, day(22), now).await.unwrap();
+        assert_eq!((found.id, found.created), (filed, false));
+
+        // A day without one gets one at the root, at noon, from the template.
+        let started = entry_of(&mut conn, Berlin, day(20), now).await.unwrap();
+        assert!(started.created);
+        assert_eq!(started.body, "Tuesday\n");
+        let (parent, created_at): (i64, i64) =
+            sqlx::query_as("SELECT parent_id, created_at FROM nodes WHERE id = ?1")
+                .bind(started.id)
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap();
+        assert_eq!((parent, created_at), (diary, at(2026, 10, 20, 12, 0)));
+        // Asked again, it is found rather than started twice.
+        let again = entry_of(&mut conn, Berlin, day(20), now).await.unwrap();
+        assert_eq!((again.id, again.created), (started.id, false));
+
+        // Today's is dated now, and a capture writes into the same one.
+        let today = entry_of(&mut conn, Berlin, day(21), at(2026, 10, 21, 9, 0))
+            .await
+            .unwrap();
+        drop(conn);
+        let captured =
+            crate::routes::capture::tests::diary_at(db, "rain", at(2026, 10, 21, 18, 0)).await;
+        assert_eq!(captured, today.id);
     }
 
     #[tokio::test]

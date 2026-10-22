@@ -465,7 +465,7 @@ export const commands: CommandSpec[] = [
       await workspace.guard(() => workspace.createCard(arg.trim()))
     },
     bang: {
-      help: 'add a card linked to the open document — Enter on it opens the document',
+      help: 'add a card linked to the open document — gf on it opens the document',
       run: async (arg) => {
         // On the board the tree is not on screen, so only the open document
         // can be meant; elsewhere it is whatever has focus.
@@ -688,23 +688,7 @@ export const commands: CommandSpec[] = [
     group: 'documents',
     help: "open today's diary entry, starting one if there is none yet",
     run: async () => {
-      await workspace.guard(async () => {
-        // The diary is one space among several now, so :today goes there first
-        // rather than writing the day into whatever folder was being browsed.
-        const home = workspace.spaces.find((space) => space.role === 'diary')
-        if (home && workspace.parentId !== home.id) await workspace.enterSpace(home.id)
-        else if (workspace.query) await workspace.search('')
-
-        const midnight = new Date()
-        midnight.setHours(0, 0, 0, 0)
-        const from = Math.floor(midnight.getTime() / 1000)
-        const today = workspace.nodes.find(
-          (node) =>
-            node.kind === 'document' && node.created_at >= from && node.created_at < from + 86400,
-        )
-        if (today) await workspace.openNode(today.id, true)
-        else await workspace.createDocument()
-      })
+      await workspace.guard(() => workspace.openDay())
       hooks.focusEditor()
     },
   },
