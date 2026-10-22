@@ -4,7 +4,15 @@
 
 `i` or `a` on an open document edits it. The editor is CodeMirror 6 with the
 vim keymap: motions, operators, text objects, visual mode, registers, macros
-and `.` all work, and `:w`, `:wq` and `:q!` do what they do in vim.
+and `.` all work. It is the one editor in the app: a card's description and a
+note in the scratchpad are written in it too, and behave the same way.
+
+- What is written saves itself (see [Saving](#saving)); `:w` saves sooner.
+- `:q`, or `Esc` in normal mode, leaves the editor with what is still waiting
+  written first. Where that fails, the text stays on screen. `:wq` is the same.
+- `:q!` leaves and lets go of what is not saved yet.
+- `[[` offers the titles of documents as you type, in a description or a note
+  as well as a document.
 
 ![The editor](../images/editor.png)
 
@@ -27,7 +35,9 @@ copies its address.
 ## Saving
 
 There is nothing to remember. Each change goes to the browser's storage as it is
-typed, and to the server a couple of seconds after typing stops.
+typed, and to the server a couple of seconds after typing stops. A card's
+description and a note are kept the same way, and the first three cases below
+hold for them too.
 
 - When the server cannot be reached, the draft stays in the browser and the
   save is tried again, less often the longer it fails, and at once when the
@@ -60,9 +70,9 @@ a body and the time it was last touched, newest on top.
 | `dd` | drop the note (asks y/N) |
 | `Q`, `q`, `Esc` | raise the scratchpad |
 
-A note is written in the same editor as a document, and saves itself a moment
-after each change: there is nothing to `:w`, though it does no harm. `Esc` in
-normal mode, or `:q`, goes back to the notes; a note left empty is not kept.
+A note is written in the same editor as a document, and saves itself the same
+way. `Esc` in normal mode, or `:q`, goes back to the notes; a note left empty is
+not kept.
 `:scratch <text>` takes a note from the command line without lowering the
 drawer.
 

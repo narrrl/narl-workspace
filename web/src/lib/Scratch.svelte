@@ -42,7 +42,7 @@
   <div class="body">
     <ul class="notes" bind:this={list}>
       {#if workspace.scratchEditing && workspace.scratchNew}
-        <li class="at new"><span class="line">{headline(workspace.scratchDraft) || 'new note'}</span><span class="when">now</span></li>
+        <li class="at new"><span class="line">{headline(workspace.writing?.text ?? '') || 'new note'}</span><span class="when">now</span></li>
       {/if}
       {#each workspace.scratchNotes as entry, index (entry.id)}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -64,20 +64,14 @@
     </ul>
 
     <div class="page">
-      {#if workspace.scratchEditing}
-        {#key workspace.scratchSession}
-          {#await import('./TextEditor.svelte')}
-            <div class="muted label">loading editor</div>
-          {:then { default: TextEditor }}
-            <TextEditor
-              doc={workspace.scratchDraft}
-              placeholder="anything — it saves itself; :keep makes it a document"
-              onchange={(text) => workspace.scratchChanged(text)}
-              onsave={() => workspace.guard(() => workspace.saveScratchNote())}
-              onleave={() => workspace.leaveScratchNote()}
-            />
-          {/await}
-        {/key}
+      {#if workspace.scratchEditing && workspace.writing}
+        {#await import('./Editor.svelte')}
+          <div class="muted label">loading editor</div>
+        {:then { default: Editor }}
+          {#key workspace.writing.session}
+            <Editor writing={workspace.writing} fill hint="anything — it saves itself; :keep makes it a document" />
+          {/key}
+        {/await}
       {:else if html}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <article class="md" ondblclick={() => workspace.editScratchNote()}>
@@ -156,8 +150,6 @@
   .none { font-size: 12px; }
 
   .page { min-height: 0; overflow-y: auto; border-left: 1px solid var(--rim); padding-left: 16px; }
-  .page :global(.writing) { height: 100%; }
-  .page :global(.writing .editor) { flex: 1; max-height: none; }
   .page .md { font-size: 14px; }
   .hint { font-size: 12px; margin: 6px 0; }
 

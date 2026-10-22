@@ -64,8 +64,8 @@ its tiles, so switching away and back finds them as they were. More in
 ### Writing
 
 `i` edits the open document. The editor is CodeMirror with real vim keys:
-`ciw`, `dd`, visual mode, macros, `.` and the rest. `Esc` leaves insert mode,
-and `:q` leaves the editor.
+`ciw`, `dd`, visual mode, macros, `.` and the rest. What you write saves itself.
+`Esc` leaves insert mode, and `Esc` again or `:q` leaves the editor.
 
 ![The editor](../images/editor.png)
 

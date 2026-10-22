@@ -106,8 +106,7 @@ function tileKey(direction: Direction, shift: boolean) {
 export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   always: {
     save: () => {
-      if (workspace.scratchEditing) guard(() => workspace.saveScratchNote())
-      else if (workspace.describing) guard(() => workspace.saveDescription())
+      if (workspace.writing) guard(() => workspace.saveWriting())
       else if (workspace.open) guard(() => workspace.save())
     },
     close: () => void runCommand('close'),
@@ -308,7 +307,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
   workspace: {
     /** Esc leaves one thing: the line, or fullscreen. */
     escape: () => {
-      if (workspace.describing || workspace.scratchEditing) return
+      if (workspace.writing) return
       if (hooks.closeCommandLine()) return
       if (workspace.fullscreen && !workspace.editing) return void (workspace.fullscreen = false)
       return false

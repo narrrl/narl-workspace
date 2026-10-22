@@ -133,7 +133,14 @@
 </script>
 
 <script lang="ts">
-  import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
+  /*
+   * One editor for everything written: a document's draft in its tile, and
+   * the short texts written in place — a card's description, a note. Vim,
+   * markdown, `[[` completion, the colours, the autosave behind it and the
+   * keys out of it are the same in each: `:w` writes sooner, `:q` or Esc in
+   * normal mode leaves with what is waiting written, `:q!` lets it go.
+   */
+  import { autocompletion, completionStatus, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
   import { indentOnInput } from '@codemirror/language'
@@ -151,13 +158,37 @@
   import { editorTheme, highlighting, languages } from './editorTheme'
   import { embedSnippet } from './markdown'
   import { workspace, type Tile } from './store.svelte'
+  import type { Writing } from './writing.svelte'
 
-  /** The tile this editor writes in, which need not be the one with focus. */
-  const { tile }: { tile: Tile } = $props()
+  /**
+   * What is written: the draft of the document in `tile`, which need not be
+   * the one with focus, or the short text in `writing`, framed with a mode
+   * line of its own since no status line speaks for it — as tall as it needs,
+   * or filling what it is put in.
+   */
+  const {
+    tile,
+    writing,
+    hint = 'write…',
+    fill = false,
+  }: { tile?: Tile; writing?: Writing; hint?: string; fill?: boolean } = $props()
 
   let host = $state<HTMLDivElement>()
   let view: EditorView | undefined
+  let mode = $state('normal')
   const focus = () => view?.focus()
+
+  /*
+   * Esc, before vim sees it: in normal mode, or with no vim, it leaves, as
+   * `:q` does — unless it is closing the completions.
+   */
+  function onkeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || (workspace.vimEnabled && mode !== 'normal')) return
+    if (view && completionStatus(view.state) !== null) return
+    event.preventDefault()
+    event.stopPropagation()
+    void runCommand('quit')
+  }
 
   /*
    * `[[` offers the titles of documents as the search finds them, each with
@@ -172,7 +203,7 @@
     if (context.aborted) return null
     const options = found
       .filter((node) => node.kind === 'document' || node.kind === 'file')
-      .filter((node) => node.id !== tile.open?.id)
+      .filter((node) => node.id !== tile?.open?.id)
       .map((node) => {
         // What a `[[link]]` can hold: a name with no bracket or bar in it, or else the slug.
         const name = node.name.trim()
@@ -222,6 +253,14 @@
     })
   }
 
+  /** What a change, `Ctrl-S` and the starting text mean for what is written. */
+  const changed = (text: string) => {
+    if (writing) return writing.change(text)
+    tile!.draft.body = text
+    workspace.touch(tile)
+  }
+  const save = () => void workspace.guard(() => (writing ? workspace.saveWriting() : workspace.save({ tile })))
+
   onMount(() => {
     bindVim()
 
@@ -237,66 +276,68 @@
       autocompletion({ override: [titleCompletions], icons: false }),
       highlighting,
       EditorView.lineWrapping,
-      placeholder('write…'),
+      placeholder(hint),
       editorTheme,
+      ...(writing ? [EditorView.theme({ '.cm-content': { padding: '10px 14px', maxWidth: 'none' } })] : []),
       keymap.of([
-        {
-          key: 'Mod-s',
-          preventDefault: true,
-          run: () => (void workspace.guard(() => workspace.save({ tile })), true),
-        },
+        { key: 'Mod-s', preventDefault: true, run: () => (save(), true) },
         ...defaultKeymap,
         ...historyKeymap,
         indentWithTab,
       ]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          tile.draft.body = update.state.doc.toString()
-          workspace.touch(tile)
-        }
+        if (update.docChanged) changed(update.state.doc.toString())
       }),
-      EditorView.domEventHandlers({
-        paste: (event) => {
-          const files = Array.from(event.clipboardData?.files ?? [])
-          if (files.length === 0) return false
-          event.preventDefault()
-          void uploadFiles(files)
-          return true
-        },
-        drop: (event) => {
-          const files = Array.from(event.dataTransfer?.files ?? [])
-          if (files.length === 0) return false
-          event.preventDefault()
-          void uploadFiles(files)
-          return true
-        },
-      }),
+      // A file goes into a document; a card or a note has nowhere to keep one.
+      ...(tile
+        ? [
+            EditorView.domEventHandlers({
+              paste: (event) => {
+                const files = Array.from(event.clipboardData?.files ?? [])
+                if (files.length === 0) return false
+                event.preventDefault()
+                void uploadFiles(files)
+                return true
+              },
+              drop: (event) => {
+                const files = Array.from(event.dataTransfer?.files ?? [])
+                if (files.length === 0) return false
+                event.preventDefault()
+                void uploadFiles(files)
+                return true
+              },
+            }),
+          ]
+        : []),
     ]
 
+    const text = writing ? writing.text : tile!.draft.body
     view = new EditorView({
-      state: EditorState.create({ doc: tile.draft.body, extensions }),
+      state: EditorState.create({ doc: text, extensions }),
       parent: host!,
     })
 
-    if (workspace.tile === tile) view.focus()
+    if (writing || workspace.tile === tile) view.focus()
 
     const cm = workspace.vimEnabled ? getCM(view) : null
     if (cm) {
-      // Keep the status line's mode indicator in step with the editor.
+      // Keep the mode line in step with the editor.
       const emitter = cm as unknown as {
         on?: (event: string, handler: (e: { mode: string }) => void) => void
       }
       emitter.on?.('vim-mode-change', (event) => {
-        tile.vimMode = event.mode
+        mode = event.mode
+        if (tile) tile.vimMode = event.mode
       })
 
-      // A fresh entry starts in insert mode; an existing one starts in normal
-      // mode, the way opening a file in vim does.
-      if (tile.enterInsert) {
-        tile.enterInsert = false
+      // A fresh entry starts in insert mode, and so does an empty short text,
+      // which is there to be written; anything else starts in normal mode,
+      // the way opening a file in vim does.
+      if (tile?.enterInsert || (writing && !text.trim())) {
+        if (tile) tile.enterInsert = false
         Vim.handleKey(cm, 'i', 'workspace')
       }
-    }
+    } else mode = 'insert'
   })
 
   /*
@@ -304,7 +345,7 @@
    * the hooks, and the rest stand by until their tile is focused.
    */
   $effect(() => {
-    if (workspace.tile !== tile) return
+    if (!tile || workspace.tile !== tile) return
     hooks.focusEditor = focus
     hooks.insertText = insertAtCursor
     hooks.headings = editorHeadings
@@ -319,15 +360,56 @@
   onDestroy(() => {
     view?.destroy()
     view = undefined
-    tile.vimMode = 'normal'
+    if (tile) tile.vimMode = 'normal'
   })
 </script>
 
-<div class="editor" bind:this={host}></div>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="writing" class:framed={writing} class:fill onkeydowncapture={onkeydown}>
+  <div class="editor" bind:this={host}></div>
+  {#if writing}
+    <div class="modeline label">
+      <span class="mode" class:insert={mode !== 'normal'}>{mode}</span>
+      {#if writing.dirty}<span class="dirty">+</span>{/if}
+      <span class="hint">saves itself · <span class="kbd">:q</span> leave · <span class="kbd">:q!</span> drop what is unsaved</span>
+    </div>
+  {/if}
+</div>
 
 <style>
-  .editor {
+  .writing {
     height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor {
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
+
+  /* A short text, written in place among other things. */
+  .framed {
+    height: auto;
+    border: 1px solid var(--light-dim);
+    border-radius: var(--radius-m);
+    background: var(--base);
+    overflow: hidden;
+  }
+  .framed .editor { flex: none; min-height: 10em; max-height: 50vh; overflow: auto; }
+  .framed.fill { height: 100%; }
+  .framed.fill .editor { flex: 1; max-height: none; }
+  .modeline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 12px;
+    border-top: 1px solid var(--rim);
+    background: var(--hull);
+    font-size: 10px;
+  }
+  .mode { padding: 0 8px; border-radius: var(--radius-s); background: var(--light-soft); color: var(--ink); }
+  .mode.insert { background: var(--light); }
+  .dirty { color: var(--light); }
+  .hint { margin-left: auto; color: var(--muted); text-transform: none; letter-spacing: 0.04em; }
 </style>

@@ -99,7 +99,7 @@ The first list is the inbox, the last list is done.
 | `r` | reword the step |
 | `J / K` | move the step down / up |
 | `dd` | drop the step |
-| `e · i · Enter` | write the description, in the editor — :w writes it, :q or Esc in normal mode leaves |
+| `e · i · Enter` | write the description, in the editor — it saves itself, :q or Esc in normal mode leaves |
 | `a` | put on a label, or take it off — :label on the line, Tab offers the board's |
 | `R · D` | rename the card, its due date |
 | `H / L` | send the card to the list left / right |
@@ -209,12 +209,12 @@ do: `:w!`, `:space! <name>`, `:import!`.
 
 | command | what it does |
 | --- | --- |
-| `:write, :w` | save the open document — or the card's description being written |
+| `:write, :w` | save what is being written — the open document, a card's description, a note — rather than in a moment |
 | `:write!` | save even over a newer version saved somewhere else since this one was opened |
-| `:wq, :x` | save and leave insert/editor mode |
+| `:wq, :x` | leave the editor with everything written, as :q does |
 | `:wq!` | save over a newer version, as :w! does, and leave the editor |
-| `:quit, :q` | close the editor, or the document when already reading |
-| `:quit!` | discard changes and close the editor |
+| `:quit, :q` | leave the editor with what is waiting written first, or close the document when already reading |
+| `:quit!` | leave the editor, letting go of what is not saved yet |
 | `:edit, :e [id]` | edit the open document, or open a node by id |
 | `:edit!` | throw away the draft and re-read the document from the server |
 | `:name, :title, :rename <text>` | rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title |

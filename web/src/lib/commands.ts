@@ -62,11 +62,11 @@ export interface CommandSpec {
   args?: string
   group: Group
   help: string
-  run: (arg: string) => void | Promise<void>
+  run: (arg: string) => unknown
   /** What the argument can be, for Tab on the command line. */
   complete?: (arg: string) => string[]
   /** The forcing variant, `:name!` — vim hands the bang over as an argument. */
-  bang?: { help: string; run: (arg: string) => void | Promise<void> }
+  bang?: { help: string; run: (arg: string) => unknown }
 }
 
 /** Close the focused tile; the index of the one that has the focus after. */
@@ -326,20 +326,26 @@ const exportName = (title: string, at: number) => {
   return `${formatDay(at)}${slug ? `-${slug}` : ''}.md`
 }
 
+/*
+ * Out of the editor, one level down: what is waiting is written first, and
+ * where that fails the text stays on screen to be tried again or let go with
+ * `:q!`. A document `o` made and nothing was written in is not kept.
+ */
+async function leaveEditor() {
+  if (workspace.writing) return void workspace.leaveWriting()
+  if (await workspace.abandonIfBlank()) return hooks.focusList()
+  if (workspace.dirty && !(await workspace.guard(() => workspace.save()))) return
+  workspace.editing = false
+  hooks.focusList()
+}
+
 export const commands: CommandSpec[] = [
   {
     name: 'write',
     aliases: ['w'],
     group: 'editing',
-    help: "save the open document — or the card's description being written",
-    run: () =>
-      workspace.guard(() =>
-        workspace.scratchEditing
-          ? workspace.saveScratchNote()
-          : workspace.describing
-            ? workspace.saveDescription()
-            : workspace.save(),
-      ),
+    help: "save what is being written — the open document, a card's description, a note — rather than in a moment",
+    run: () => workspace.guard(() => (workspace.writing ? workspace.saveWriting() : workspace.save())),
     bang: {
       help: 'save even over a newer version saved somewhere else since this one was opened',
       run: () => workspace.guard(() => workspace.save({ force: true })),
@@ -349,24 +355,12 @@ export const commands: CommandSpec[] = [
     name: 'wq',
     aliases: ['x'],
     group: 'editing',
-    help: 'save and leave insert/editor mode',
-    run: async () => {
-      if (workspace.scratchEditing) return workspace.leaveScratchNote()
-      if (workspace.describing) {
-        await workspace.guard(() => workspace.saveDescription())
-        workspace.stopDescribing()
-        return
-      }
-      await workspace.guard(() => workspace.save())
-      workspace.editing = false
-      hooks.focusList()
-    },
+    help: 'leave the editor with everything written, as :q does',
+    run: () => leaveEditor(),
     bang: {
       help: 'save over a newer version, as :w! does, and leave the editor',
       run: async () => {
-        await workspace.guard(() => workspace.save({ force: true }))
-        workspace.editing = false
-        hooks.focusList()
+        if (await workspace.guard(() => workspace.save({ force: true }))) await leaveEditor()
       },
     },
   },
@@ -374,25 +368,23 @@ export const commands: CommandSpec[] = [
     name: 'quit',
     aliases: ['q'],
     group: 'editing',
-    help: 'close the editor, or the document when already reading',
+    help: 'leave the editor with what is waiting written first, or close the document when already reading',
     run: async () => {
-      if (workspace.scratchEditing) return workspace.leaveScratchNote()
-      if (workspace.describing) return void workspace.stopDescribing()
+      if (workspace.writing || workspace.editing) return leaveEditor()
       // A document `o` made and nothing was written in is not kept.
       if (await workspace.abandonIfBlank()) return hooks.focusList()
       if (workspace.dirty) {
         workspace.say('unsaved changes — :w to write, :q! to discard', 'error')
         return
       }
-      if (workspace.editing) workspace.editing = false
-      else if (workspace.tiles.length > 1) return focusTile(closeFocused())
-      else workspace.closeTile()
+      if (workspace.tiles.length > 1) return focusTile(closeFocused())
+      workspace.closeTile()
       hooks.focusList()
     },
     bang: {
-      help: 'discard changes and close the editor',
+      help: 'leave the editor, letting go of what is not saved yet',
       run: async () => {
-        if (workspace.describing) return void workspace.stopDescribing(true)
+        if (workspace.writing) return void workspace.leaveWriting(true)
         const open = workspace.open
         workspace.editing = false
         workspace.dirty = false

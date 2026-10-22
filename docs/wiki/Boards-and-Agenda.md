@@ -93,9 +93,10 @@ as they do on the board.
 | `q`, `Esc` | close the back, back to the board |
 
 The description is markdown, written in the same editor as a document, vim
-and all: `:w` writes it to the card, `:q` or `Esc` in normal mode leaves, and
-`:q!` throws away what was not written. Leaving the tile while writing keeps
-what is written. A fenced block in a language is
+and all. It saves itself as the typing stops, as a document does; `:q` or `Esc`
+in normal mode leaves, and `:q!` lets go of what is not saved yet. Leaving the
+tile while writing keeps what is written. `[[` links a document by its title,
+and the card then shows among that document's cards. A fenced block in a language is
 coloured the way nvim colours it, written and read.
 
 Labels are lower case, and each name keeps its colour on every card and every

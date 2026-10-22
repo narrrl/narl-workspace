@@ -80,21 +80,13 @@
 
       <section>
         <div class="label head"><span class="marker"></span>description</div>
-        {#if workspace.describing}
-          {#await import('./TextEditor.svelte')}
+        {#if workspace.describing && workspace.writing}
+          {#await import('./Editor.svelte')}
             <div class="empty label">loading editor</div>
-          {:then { default: TextEditor }}
-            <TextEditor
-              doc={workspace.description}
-              placeholder="what this card is about…"
-              dirty={workspace.descriptionDirty}
-              onchange={(text) => {
-                workspace.description = text
-                workspace.descriptionDirty = true
-              }}
-              onsave={() => workspace.guard(() => workspace.saveDescription())}
-              onleave={() => workspace.stopDescribing()}
-            />
+          {:then { default: Editor }}
+            {#key workspace.writing.session}
+              <Editor writing={workspace.writing} hint="what this card is about, in short — [[ links a document" />
+            {/key}
           {/await}
         {:else if html}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->

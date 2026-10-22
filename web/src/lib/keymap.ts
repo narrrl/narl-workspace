@@ -173,7 +173,7 @@ export const bindings = [
   { context: 'card', keys: ['J'], action: 'nudgeDown', label: 'J / K', caps: ['J', 'K'], hint: 'order', help: 'move the step down / up' },
   { context: 'card', keys: ['K'], action: 'nudgeUp' },
   { context: 'card', keys: ['dd'], action: 'drop', hint: 'drop', help: 'drop the step' },
-  { context: 'card', keys: ['e', 'i', 'Enter'], action: 'describe', caps: ['e'], hint: 'describe', help: 'write the description, in the editor — :w writes it, :q or Esc in normal mode leaves' },
+  { context: 'card', keys: ['e', 'i', 'Enter'], action: 'describe', caps: ['e'], hint: 'describe', help: 'write the description, in the editor — it saves itself, :q or Esc in normal mode leaves' },
   { context: 'card', keys: ['a'], action: 'label', hint: 'label', help: "put on a label, or take it off — :label on the line, Tab offers the board's" },
   { context: 'card', keys: ['R'], action: 'rename', label: 'R · D', help: 'rename the card, its due date' },
   { context: 'card', keys: ['D'], action: 'due', hint: 'due' },
@@ -283,7 +283,10 @@ export const bindings = [
   { context: 'share', keys: ['y'], action: 'link', hint: 'new link' },
 
   // --- the editor's own keymap, described only ---------------------------------------
-  { context: 'editor', label: 'vim', help: 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros; :w writes' },
+  { context: 'editor', label: 'vim', help: 'the full keymap — hjkl, w/b, dd, ciw, visual mode, macros' },
+  { context: 'editor', label: 'autosave', help: 'a document, a description or a note saves itself as the typing stops; :w saves sooner' },
+  { context: 'editor', label: ':q · Esc', help: 'leave the editor, what is waiting written first — Esc in normal mode; :q! lets it go' },
+  { context: 'editor', label: '[[', help: 'link a document by its title, offered as you type' },
   { context: 'editor', label: 'drop · paste', help: 'an image, video or audio file attaches it' },
   { context: 'editor', label: '$x^2$ · $$…$$', help: 'set as math' },
   { context: 'editor', label: '```rust', help: 'a fenced block in a language is coloured as nvim colours it, written and read' },

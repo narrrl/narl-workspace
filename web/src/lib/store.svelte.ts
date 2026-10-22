@@ -24,6 +24,7 @@ import {
   type VaultStatus,
 } from './api'
 import { formatBytes, formatDay, formatStamp, formatWeekday, isTouchDevice, parseDay, sealedNote, type Heading } from './util'
+import { AUTOSAVE_MS, Writing, type WritingKind } from './writing.svelte'
 
 export type Pane = 'list' | 'document'
 /**
@@ -259,7 +260,7 @@ class Workspace {
 
   /** `:close`: the focused tile goes, or with only one, what it shows. */
   closeTile() {
-    if (this.tile.kind === 'card' && this.describing && !this.stopDescribing()) return
+    this.#leaveCard()
     this.tile.clear()
     this.prune()
     if (!this.tile.empty) this.focusTile(this.focused)
@@ -324,25 +325,31 @@ class Workspace {
   /*
    * The scratchpad: a drawer that comes down from under the bar over whatever
    * is on screen, as the desktop's scratchpad does, with the notes taken in
-   * passing. `scratchEditing` is the note under the cursor being written;
-   * `scratchNew` a note not yet saved, which is only kept once it says
-   * something.
+   * passing.
    */
   scratchOpen = $state(false)
   scratchNotes = $state<ScratchNote[]>([])
   scratchCursor = $state(0)
-  scratchEditing = $state(false)
-  scratchNew = $state(false)
-  scratchDraft = $state('')
-  /** Counts the times a note was opened to write, so the editor is made anew only then. */
-  scratchSession = $state(0)
 
   /** The step of the open card's checklist under the cursor. */
   taskCursor = $state(0)
-  /** The open card's description is being written, and what it says so far. */
-  describing = $state(false)
-  description = $state('')
-  descriptionDirty = $state(false)
+  /*
+   * The short text being written in place, if one is: the description of the
+   * card turned over, or the note under the drawer's cursor. One at a time,
+   * as there is one place on screen each is written in.
+   */
+  writing = $state<Writing | null>(null)
+
+  get describing() {
+    return this.writing?.kind === 'description'
+  }
+  get scratchEditing() {
+    return this.writing?.kind === 'note'
+  }
+  /** The note being written has not been saved yet, so it is in no row. */
+  get scratchNew() {
+    return this.scratchEditing && this.writing?.id === null
+  }
 
   /** `z` on the board: show done cards older than a week too. */
   showOldDone = $state(false)
@@ -653,7 +660,6 @@ class Workspace {
    * server a couple of seconds after typing stops.
    */
 
-  static readonly AUTOSAVE_MS = 2500
   static readonly RECENT_DONE_DAYS = 7
 
   #stashKey(id: number) {
@@ -665,7 +671,7 @@ class Workspace {
     tile.dirty = true
     this.stash(tile)
     tile.stopAutosave()
-    tile.autosave = setTimeout(() => void this.#writeBack(tile), Workspace.AUTOSAVE_MS)
+    tile.autosave = setTimeout(() => void this.#writeBack(tile), AUTOSAVE_MS)
   }
 
   stash(tile = this.tile) {
@@ -722,6 +728,7 @@ class Workspace {
         tile.stopAutosave()
         void this.#writeBack(tile)
       }
+      if (this.writing?.dirty) void this.guard(() => this.saveWriting())
     })
     window.addEventListener('offline', () => {
       this.say('offline — what is typed is kept here, and saved once the server answers', 'error')
@@ -802,6 +809,7 @@ class Workspace {
       for (const tile of this.tiles) {
         if (tile.open && tile.dirty) await this.guard(() => this.save({ quiet: true, tile }))
       }
+      if (this.writing?.dirty) await this.guard(() => this.saveWriting())
       return
     }
     await this.loadSpaces(Workspace.addressedPath())
@@ -1884,15 +1892,54 @@ class Workspace {
   }
 
   /*
-   * Leaving a card's back while its description is being written: what is
-   * written is kept, as leaving a document's tile keeps its draft.
+   * Writing in place. A card's description and a note are written the way a
+   * document is: saved by themselves a moment after the typing stops, `:w`
+   * sooner, and `:q` or Esc leaves with what is still waiting written first.
    */
+
+  /** Begin writing `kind`: what it says on the server, unless this browser kept newer. */
+  #write(kind: WritingKind, id: number | null, text: string, write: (text: string, writing: Writing) => Promise<void>) {
+    const writing: Writing = new Writing(
+      kind,
+      id,
+      text,
+      (text) => write(text, writing),
+      (error, retry) =>
+        unreachable(error)
+          ? this.say(`not saved: the server cannot be reached — kept here, trying again in ${retry / 1000}s`, 'error')
+          : void this.guard(() => Promise.reject(error)),
+    )
+    this.writing = writing
+    if (writing.recovered) this.say(`recovered unsaved ${kind} — :w keeps it, :q! drops it`, 'error')
+  }
+
+  /** `:w`, Ctrl-S: what is written goes now rather than in a moment. */
+  async saveWriting() {
+    const writing = this.writing
+    if (!writing) return
+    await writing.save()
+    if (writing.kind === 'description') this.say('description written')
+  }
+
+  /**
+   * `:q`, Esc in normal mode: leave, with what is still waiting written
+   * first; `:q!` lets that go instead. False, and a word why, when writing
+   * failed, so the text stays on screen. A note left empty is not kept.
+   */
+  async leaveWriting(discard = false): Promise<boolean> {
+    const writing = this.writing
+    if (!writing) return true
+    if (discard) writing.discard()
+    else if (!(await this.guard(() => writing.save()))) return false
+    if (this.writing === writing) this.writing = null
+    const note = this.scratchNotes.find((n) => n.id === writing.id)
+    if (writing.kind === 'note' && note && !note.body.trim()) await this.guard(() => this.dropScratchNote(false, note))
+    return true
+  }
+
+  /** Leaving a card's back, or the drawer, while something is written there keeps it, as leaving a document's tile does. */
   #leaveCard() {
-    if (this.tile.kind !== 'card' || !this.describing) return
-    void this.guard(async () => {
-      if (this.descriptionDirty) await this.saveDescription()
-      this.stopDescribing(true)
-    })
+    if (this.tile.kind === 'card' && this.describing) void this.leaveWriting()
   }
 
   get scratchNote(): ScratchNote | undefined {
@@ -1904,83 +1951,46 @@ class Workspace {
     if (this.scratchOpen) return this.closeScratch()
     this.scratchNotes = await api.scratch()
     this.scratchCursor = Math.min(this.scratchCursor, Math.max(this.scratchNotes.length - 1, 0))
-    this.scratchEditing = false
     this.scratchOpen = true
   }
 
   async closeScratch() {
-    if (this.scratchEditing) await this.leaveScratchNote()
+    if (this.scratchEditing && !(await this.leaveWriting())) return
     this.scratchOpen = false
   }
 
   /** `o`: a new note at the top, written straight away. */
   newScratchNote() {
-    this.scratchNew = true
-    this.scratchDraft = ''
-    this.scratchSession++
-    this.scratchEditing = true
+    this.#writeNote(null, '')
   }
 
   /** `e`, `i`, Enter: write the note under the cursor. */
   editScratchNote() {
     const note = this.scratchNote
     if (!note) return this.newScratchNote()
-    this.scratchNew = false
-    this.scratchDraft = note.body
-    this.scratchSession++
-    this.scratchEditing = true
+    this.#writeNote(note.id, note.body)
   }
-
-  #scratchTimer: ReturnType<typeof setTimeout> | undefined
-  #scratchSaving: Promise<unknown> = Promise.resolve()
 
   /*
-   * A scratch note saves itself: nothing is asked of a note taken in passing,
-   * not even `:w`. Each change waits a moment for the next before it is
-   * written, and saves run one after another, so the first save of a new note
-   * has made it before the second looks for its id.
+   * A new note is only made once it says something. The note touched last
+   * goes to the top of the list, and the cursor with it.
    */
-  scratchChanged(text: string) {
-    this.scratchDraft = text
-    clearTimeout(this.#scratchTimer)
-    this.#scratchTimer = setTimeout(() => void this.guard(() => this.saveScratchNote()), 800)
-  }
-
-  saveScratchNote(): Promise<void> {
-    clearTimeout(this.#scratchTimer)
-    const run = this.#scratchSaving.then(async () => {
-      if (!this.scratchEditing) return
-      const text = this.scratchDraft
-      if (this.scratchNew) {
+  #writeNote(id: number | null, body: string) {
+    this.#write('note', id, body, async (text, writing) => {
+      if (writing.id === null) {
         if (!text.trim()) return
         const note = await api.createScratch(text)
+        writing.id = note.id
         this.scratchNotes = [note, ...this.scratchNotes]
-        this.scratchCursor = 0
-        this.scratchNew = false
-        return
+      } else {
+        const saved = await api.updateScratch(writing.id, text)
+        this.scratchNotes = [saved, ...this.scratchNotes.filter((n) => n.id !== saved.id)]
       }
-      const note = this.scratchNote
-      if (!note || note.body === text) return
-      const saved = await api.updateScratch(note.id, text)
-      // The note touched last goes to the top, and the cursor with it.
-      this.scratchNotes = [saved, ...this.scratchNotes.filter((n) => n.id !== saved.id)]
       this.scratchCursor = 0
     })
-    this.#scratchSaving = run.catch(() => {})
-    return run
   }
 
-  /** Esc, `:q`: back to the list, saved — and a note left empty is not kept. */
-  async leaveScratchNote() {
-    await this.guard(() => this.saveScratchNote())
-    const note = this.scratchNote
-    if (!this.scratchNew && note && !this.scratchDraft.trim()) await this.guard(() => this.dropScratchNote(false))
-    this.scratchEditing = false
-    this.scratchNew = false
-  }
-
-  async dropScratchNote(say = true) {
-    const note = this.scratchNote
+  async dropScratchNote(say = true, note = this.scratchNote) {
     if (!note) return
     await api.deleteScratch(note.id)
     this.scratchNotes = this.scratchNotes.filter((n) => n.id !== note.id)
@@ -2001,7 +2011,7 @@ class Workspace {
    * line is the title — a `# heading` or not — and the rest the body.
    */
   async keepScratchNote(title = '') {
-    if (this.scratchEditing) await this.saveScratchNote()
+    if (this.scratchEditing && !(await this.leaveWriting())) return
     const note = this.scratchNote
     if (!note) return this.say('no scratch note to keep', 'error')
     const parent = this.parentId ?? this.spaceId ?? this.spaces.find((space) => space.role !== 'diary')?.id
@@ -2016,8 +2026,7 @@ class Workspace {
     }
     const node = await api.createNode({ parent_id: parent, name, body })
     // Made first, dropped after: a failure in between leaves two copies, never none.
-    await this.dropScratchNote(false)
-    this.scratchEditing = false
+    await this.dropScratchNote(false, note)
     this.scratchOpen = false
     await this.refresh(node.id)
     await this.openNode(node.id)
@@ -2033,33 +2042,12 @@ class Workspace {
     this.overlay = 'none'
   }
 
-  /** `e`: write the description, from what it says now. */
+  /** `e`: write the description of the card turned over, from what it says now. */
   describe() {
     const card = this.card
     if (!card) return
-    this.description = card.body
-    this.descriptionDirty = false
-    this.describing = true
-  }
-
-  async saveDescription() {
-    const card = this.card
-    if (!card || !this.describing) return
-    // Named, as this also runs when the focus has just left the card.
-    await this.patchCard({ body: this.description }, card)
-    this.descriptionDirty = false
-    this.say(`"${card.title}" described`)
-  }
-
-  /** Stop writing; false, and a word why, while something is unsaved. */
-  stopDescribing(discard = false): boolean {
-    if (this.descriptionDirty && !discard) {
-      this.say('unsaved description — :w to write, :q! to discard', 'error')
-      return false
-    }
-    this.describing = false
-    this.descriptionDirty = false
-    return true
+    // Named, as the board's cursor may be on another card by the time it saves.
+    this.#write('description', card.id, card.body, (body) => this.patchCard({ body }, card).then(() => {}))
   }
 
   /*
@@ -2356,10 +2344,11 @@ class Workspace {
     localStorage.setItem('diary:clipboard', enabled ? 'on' : 'off')
   }
 
-  /** Surface a failed API call in the status line instead of the console. */
-  async guard(action: () => Promise<unknown>) {
+  /** Surface a failed API call in the status line instead of the console. True when it went through. */
+  async guard(action: () => Promise<unknown>): Promise<boolean> {
     try {
       await action()
+      return true
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         this.user = null
@@ -2372,6 +2361,7 @@ class Workspace {
       } else {
         this.say(error instanceof Error ? error.message : String(error), 'error')
       }
+      return false
     }
   }
 }
