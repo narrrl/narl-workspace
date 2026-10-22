@@ -20,13 +20,19 @@
     return node.name.trim() || node.excerpt.trim() || node.slug
   }
 
-  /* A folder is listed by what is in it, a document by when it was written, a file by its size. */
+  /*
+   * A folder is listed by what is in it, a document by when it was written —
+   * and how many files it has, folded or not — a file by its size.
+   */
   const aside = (node: NodeSummary) =>
     node.file
       ? formatBytes(node.file.size)
       : node.kind === 'document'
-        ? formatTime(node.created_at)
+        ? `${node.child_count > 0 ? `+${node.child_count} · ` : ''}${formatTime(node.created_at)}`
         : `${node.child_count}`
+
+  /* The row a day heading compares with: the one above, past a document's files. */
+  const above = (index: number) => workspace.nodes.slice(0, index).filter((n) => !workspace.isNested(n)).at(-1)
 
   const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false
 
@@ -56,6 +62,9 @@
     workspace.openSheet('actions')
   }
 
+  /* What is in the folder itself, not the files folded open under its documents. */
+  const items = $derived(workspace.nodes.filter((node) => !workspace.isNested(node)).length)
+
   /* Inside a folder, a phone has no h key and no crumbs on the bar: this is the way up. */
   const nested = $derived(isTouchDevice && !workspace.query && workspace.path.length > 1)
 </script>
@@ -78,7 +87,7 @@
     <span class="marker"></span>
     <span class="name">{workspace.space?.slug ?? 'diary'}</span>
     <span class="count">
-      {workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}{#if workspace.foundCards.length > 0}
+      {items} {items === 1 ? 'item' : 'items'}{#if workspace.foundCards.length > 0}
         · {workspace.foundCards.length} {workspace.foundCards.length === 1 ? 'card' : 'cards'}{/if}{#if workspace.foundNotes.length > 0}
         · {workspace.foundNotes.length} {workspace.foundNotes.length === 1 ? 'note' : 'notes'}{/if}
     </span>
@@ -103,10 +112,11 @@
       </li>
     {/if}
     {#each workspace.nodes as node, index (node.id)}
-      {@const previous = workspace.nodes[index - 1]}
+      {@const previous = above(index)}
+      {@const nested = workspace.isNested(node)}
       <!-- Day headings only make sense in a list that is a journal: documents,
            in date order, not a search and not a folder listing. -->
-      {#if !workspace.query && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
+      {#if !workspace.query && !nested && node.kind === 'document' && (!previous || previous.kind !== 'document' || formatDay(previous.created_at) !== formatDay(node.created_at))}
         <li class="daybreak label rule">
           <span><span class="day">{formatDay(node.created_at)}</span> {formatWeekday(node.created_at)}</span>
         </li>
@@ -127,6 +137,7 @@
           class:active={index === workspace.cursor}
           class:open={workspace.tiles.some((tile) => tile.open?.id === node.id)}
           class:marked={workspace.isMarked(node.id)}
+          class:nested
           data-index={index}
           onclick={(event) => click(event, index, node)}
         >
@@ -324,6 +335,9 @@
   .item { display: flex; align-items: center; }
   .more { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; background: none; color: var(--muted); }
   .up .title { font-family: var(--font-mono); }
+  /* A document's own files, folded open under it. */
+  .row.nested { padding-left: 28px; }
+  .row.nested .title { font-size: 13px; }
 
   /* Roomier tap targets where there is no keyboard. */
   @media (pointer: coarse) {

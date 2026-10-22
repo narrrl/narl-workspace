@@ -57,6 +57,8 @@ export interface WorkspaceNode extends NodeSummary {
   cards: AgendaCard[]
   /** Where each `[[title]]` in the body leads, as an /n/ path; a title that leads nowhere is missing. */
   wikilinks: Record<string, string>
+  /** A document's own files, oldest first: what was pasted into it, and what was put beside it. */
+  files: NodeSummary[]
 }
 
 /** A document that links to the one asked about, and the line it does it on. */
@@ -254,20 +256,6 @@ export interface Board {
   space_id: number
   space_name: string
   lists: BoardList[]
-}
-
-export interface MediaFile {
-  id: string
-  filename: string
-  mime: string
-  size: number
-  created_at: number
-  url: string
-  encrypted: boolean
-  /** Every document that embeds this file — a file may be used by several. */
-  node_ids: number[]
-  /** The file node it is, when it sits in the tree; deleted from there. */
-  file_node: number | null
 }
 
 /** One thing a certificate, key or keystore file holds, as `/inspect` describes it. */
@@ -627,20 +615,13 @@ export const api = {
   moveCard: (id: number, list_id: number, position?: number) =>
     request<Moved>(`/cards/${id}/move`, { method: 'POST', body: body({ list_id, position }) }),
 
-  listMedia: () => pages((limit, offset) => request<MediaFile[]>(`/media?limit=${limit}&offset=${offset}`)),
-
   /**
-   * Upload files into a space or folder as file nodes. XHR rather than fetch,
-   * because a gigabyte going up needs to say how far along it is.
+   * Upload files into a space or folder, or to a document as its own files.
+   * XHR rather than fetch, because a gigabyte going up needs to say how far
+   * along it is.
    */
   putFiles: (parentId: number, files: File[], encrypt: boolean, progress?: (fraction: number) => void) =>
     send<WorkspaceNode[]>(`/api/nodes/${parentId}/files${encrypt ? '?encrypt=true' : ''}`, files, progress),
-
-  /** Files to embed in a document, with the same progress as `putFiles`. */
-  upload: (files: File[], progress?: (fraction: number) => void) =>
-    send<MediaFile[]>('/api/media', files, progress),
-
-  deleteMedia: (id: string) => request<{ ok: true }>(`/media/${id}`, { method: 'DELETE' }),
 
   vaultStatus: () => request<VaultStatus>('/vault'),
 

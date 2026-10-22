@@ -28,9 +28,11 @@ note in the scratchpad are written in it too, and behave the same way.
   back on. On a touch screen they start off.
 
 Drag, drop or paste an image, a video or a sound file into the text and it is
-uploaded and embedded where the cursor is. `:upload` picks files to embed, and
-`:media` lists every upload: `Enter` embeds the one under the cursor, `y`
-copies its address.
+uploaded and embedded where the cursor is. `:upload` picks files to embed. Each
+one becomes a file of the document: it moves, seals, goes to the trash and
+comes back with it. `:info files` lists them: `Enter` opens one, `i` embeds it
+at the cursor, `y` copies how to embed it in another document. In the list a
+document with files says `+2`, and `za` folds them open under it.
 
 ## Saving
 

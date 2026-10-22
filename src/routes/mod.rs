@@ -111,11 +111,7 @@ pub fn api_router(max_upload: usize) -> Router<AppState> {
         .route("/vault/lock", post(vault::lock))
         .route("/nodes/{id}/share", post(share::enable))
         .route("/nodes/{id}/share", delete(share::disable))
-        .route(
-            "/media",
-            post(media::upload).layer(uploads).get(media::list),
-        )
-        .route("/media/{id}", get(media::serve).delete(media::remove))
+        .route("/media/{id}", get(media::serve))
         .route("/share/{token}", post(share::read))
         .route("/share/{token}/media/{id}", get(share::serve_media))
         .route("/share/{token}/typst", post(share::typeset))

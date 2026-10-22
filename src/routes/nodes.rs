@@ -42,6 +42,18 @@ pub fn is_container(kind: &str) -> bool {
     kind == SPACE || kind == FOLDER
 }
 
+/// Whether a node of kind `parent` may hold one of kind `child`: a space or a
+/// folder anything but a space, and a document its own files — the picture
+/// pasted into it, the PDF it is about — so they move, seal, go to the trash
+/// and come back with it.
+pub fn holds(parent: &str, child: &str) -> bool {
+    match parent {
+        SPACE | FOLDER => child != SPACE,
+        DOCUMENT => child == FILE,
+        _ => false,
+    }
+}
+
 /// The bytes behind a file node, as the client needs them to show or fetch it.
 #[derive(Serialize)]
 pub struct FileInfo {
@@ -105,8 +117,13 @@ pub struct Node {
     pub updated_at: i64,
     pub shared: bool,
     pub share_token: Option<String>,
+    /// For a document, whether the files it is given are sealed: the folder
+    /// it is in decides.
     pub sealed: bool,
     pub file: Option<FileInfo>,
+    /// A document's own files, oldest first: what was pasted into it, and
+    /// what was put beside it.
+    pub files: Vec<NodeSummary>,
     /// This node's ancestors, the space first and the node itself last — the
     /// breadcrumb, and everything needed to build its /n/... path.
     pub path: Vec<Crumb>,
@@ -1041,7 +1058,6 @@ async fn movable(
     ids: &[i64],
     parent: i64,
 ) -> AppResult<Vec<(i64, String, Option<i64>)>> {
-    container(&mut *db, parent).await?;
     let mut nodes = Vec::with_capacity(ids.len());
     for &id in ids {
         if id == parent {
@@ -1061,6 +1077,7 @@ async fn movable(
                 "{name} is a space, and a space cannot be moved into anything"
             )));
         }
+        place_for(&mut *db, parent, &kind).await?;
         // Moving a folder into its own subtree would cut that subtree loose
         // from every root, where nothing could reach it again.
         if descendants(&mut *db, id).await?.contains(&parent) {
@@ -1076,16 +1093,24 @@ async fn movable(
 /// Refuse anything but a space or a folder as the place a node goes into —
 /// and one in the trash, where whatever went in would go when it is purged.
 pub async fn container(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
-    let kind: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
+    place_for(db, id, FOLDER).await
+}
+
+/// Refuse `id` as the place a node of `kind` goes into: one that cannot hold
+/// it, by [`holds`], or one in the trash.
+pub async fn place_for(db: &mut SqliteConnection, id: i64, kind: &str) -> AppResult<()> {
+    let parent: String = sqlx::query("SELECT kind FROM nodes WHERE id = ?1")
         .bind(id)
         .fetch_optional(&mut *db)
         .await?
         .ok_or(AppError::NotFound)?
         .get("kind");
-    if !is_container(&kind) {
-        return Err(AppError::BadRequest(format!(
-            "a {kind} cannot contain other nodes"
-        )));
+    if !holds(&parent, kind) {
+        return Err(AppError::BadRequest(if parent == DOCUMENT {
+            "a document holds only its own files".into()
+        } else {
+            format!("a {parent} cannot contain other nodes")
+        }));
     }
     if trash::in_trash(&mut *db, id).await? {
         return Err(AppError::BadRequest(
@@ -1157,6 +1182,21 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
             boards::cards_of(&mut conn, id).await?,
         )
     };
+    let (files, sealed) = if summary.kind == DOCUMENT {
+        let files = sqlx::query(&format!(
+            "SELECT {SUMMARY_COLUMNS} FROM nodes n
+             WHERE n.parent_id = ?1 AND n.kind = 'file' ORDER BY n.created_at, n.id"
+        ))
+        .bind(id)
+        .fetch_all(&state.db)
+        .await?;
+        (
+            files.iter().map(|row| row_to_summary(row, "")).collect(),
+            crate::routes::seal::sealed(state, id).await?,
+        )
+    } else {
+        (Vec::new(), summary.sealed)
+    };
 
     Ok(Node {
         id: summary.id,
@@ -1174,8 +1214,9 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         updated_at: summary.updated_at,
         shared: summary.shared,
         share_token: summary.share_token,
-        sealed: summary.sealed,
+        sealed,
         file: summary.file,
+        files,
         path: path_of(&state.db, id).await?,
         backlinks,
         cards,
@@ -1188,8 +1229,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        excerpt, fts_query, next_slug, purge_subtree, recent_documents, slugify, EXCERPT_CHARS,
-        HEAD_CHARS,
+        excerpt, fts_query, load, move_nodes, next_slug, place_for, purge_subtree,
+        recent_documents, slugify, DOCUMENT, EXCERPT_CHARS, FILE, FOLDER, HEAD_CHARS,
     };
     use crate::error::AppError;
 
@@ -1319,6 +1360,141 @@ mod tests {
             .map(|n| n.slug)
             .collect();
         assert_eq!(slugs, ["b", "c"]);
+    }
+
+    /// 0029: a file a document embeds, and that was in the tree nowhere,
+    /// becomes that document's file — a living document's before one in the
+    /// trash — under the same media id. A file already in the tree stays
+    /// where it is, and one nothing embeds is left to the sweep.
+    #[tokio::test]
+    async fn embedded_files_become_the_files_of_their_document() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("an in-memory database");
+        let mut before = sqlx::migrate!("./migrations");
+        before.migrations = before
+            .migrations
+            .iter()
+            .filter(|m| m.version < 29)
+            .cloned()
+            .collect();
+        before.run(&db).await.expect("migrations up to 0028");
+
+        let node = |parent: &'static str, kind: &'static str, slug: &'static str| {
+            let db = db.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
+                     VALUES ((SELECT id FROM nodes WHERE slug = ?1), ?2, ?3, ?3, '', 1, 1)
+                     RETURNING id",
+                )
+                .bind(parent)
+                .bind(kind)
+                .bind(slug)
+                .fetch_one(&db)
+                .await
+                .expect("insert")
+            }
+        };
+        let gone = node(".trash", "document", "gone").await;
+        let plan = node("uni", "document", "plan").await;
+        for (id, name) in [("a0", "both.png"), ("b0", "gone.png"), ("c0", "loose.png")] {
+            sqlx::query(
+                "INSERT INTO media (id, filename, mime, size, created_at)
+                 VALUES (?1 || '000000-0000-0000-0000-000000000000', ?2, 'image/png', 1, 1)",
+            )
+            .bind(id)
+            .bind(name)
+            .execute(&db)
+            .await
+            .expect("media");
+        }
+        for (doc, media) in [(gone, "a0"), (plan, "a0"), (gone, "b0")] {
+            sqlx::query(
+                "INSERT INTO node_media (node_id, media_id)
+                 VALUES (?1, ?2 || '000000-0000-0000-0000-000000000000')",
+            )
+            .bind(doc)
+            .bind(media)
+            .execute(&db)
+            .await
+            .expect("embedded");
+        }
+
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("0029 applies");
+
+        let files: Vec<(String, i64, String)> = sqlx::query_as(
+            "SELECT n.name, n.parent_id, n.slug FROM nodes n WHERE n.kind = 'file' ORDER BY n.name",
+        )
+        .fetch_all(&db)
+        .await
+        .expect("files");
+        assert_eq!(
+            files,
+            [
+                ("both.png".into(), plan, "file-a0000000".into()),
+                ("gone.png".into(), gone, "file-b0000000".into()),
+            ]
+        );
+        let owned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM node_media nm JOIN nodes f ON f.id = nm.node_id
+             WHERE f.kind = 'file' AND nm.media_id = f.media_id",
+        )
+        .fetch_one(&db)
+        .await
+        .expect("count");
+        assert_eq!(owned, 2, "each file owns its bytes");
+    }
+
+    /// A document holds its own files and nothing else; a folder holds both.
+    #[tokio::test]
+    async fn a_document_holds_files_only() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let mut conn = state.db.acquire().await.expect("a connection");
+        let space: i64 = sqlx::query_scalar("SELECT id FROM nodes WHERE slug = 'uni'")
+            .fetch_one(&mut *conn)
+            .await
+            .expect("the seeded space");
+        let doc: i64 = sqlx::query_scalar(
+            "INSERT INTO nodes (parent_id, kind, name, slug, body, created_at, updated_at)
+             VALUES (?1, 'document', 'Plan', 'plan', '', 1, 1) RETURNING id",
+        )
+        .bind(space)
+        .fetch_one(&mut *conn)
+        .await
+        .expect("a document");
+        place_for(&mut conn, doc, FILE)
+            .await
+            .expect("a file in a document");
+        place_for(&mut conn, space, FILE)
+            .await
+            .expect("a file in a space");
+        for kind in [DOCUMENT, FOLDER] {
+            assert!(place_for(&mut conn, doc, kind).await.is_err(), "{kind}");
+        }
+        drop(conn);
+
+        crate::routes::media::insert_file(
+            &state.db,
+            doc,
+            "f0000000-0000-0000-0000-000000000000",
+            "a.png",
+            "image/png",
+            1,
+            false,
+        )
+        .await
+        .expect("a file of the document");
+        let loaded = load(&state, doc).await.expect("load");
+        assert_eq!(loaded.files.len(), 1);
+        assert_eq!(loaded.files[0].name, "a.png");
+        assert_eq!(loaded.child_count, 1);
+        assert!(move_nodes(&state, &[doc], doc, None).await.is_err());
     }
 
     /// 0010 widens a CHECK by editing the stored schema. Every connection —

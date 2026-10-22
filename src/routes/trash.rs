@@ -257,7 +257,7 @@ pub async fn restore_node(state: &AppState, id: i64) -> AppResult<bool> {
     let from_parent: Option<i64> = row.get("from_parent");
     let from_space: Option<i64> = row.get("from_space");
     let (target, elsewhere) = match from_parent {
-        Some(parent) if is_live_container(&mut conn, parent).await? => (parent, false),
+        Some(parent) if is_live_place(&mut conn, parent, &kind).await? => (parent, false),
         _ => (fallback(&mut conn, from_space).await?, true),
     };
     drop(conn);
@@ -273,12 +273,14 @@ pub async fn restore_node(state: &AppState, id: i64) -> AppResult<bool> {
     Ok(elsewhere)
 }
 
-async fn is_live_container(db: &mut SqliteConnection, id: i64) -> AppResult<bool> {
-    let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM nodes WHERE id = ?1")
+/// Whether `id` is still there to take back a node of `kind`: a folder, or
+/// the document a file belonged to.
+async fn is_live_place(db: &mut SqliteConnection, id: i64, kind: &str) -> AppResult<bool> {
+    let parent: Option<String> = sqlx::query_scalar("SELECT kind FROM nodes WHERE id = ?1")
         .bind(id)
         .fetch_optional(&mut *db)
         .await?;
-    Ok(kind.is_some_and(|kind| nodes::is_container(&kind)) && !in_trash(db, id).await?)
+    Ok(parent.is_some_and(|parent| nodes::holds(&parent, kind)) && !in_trash(db, id).await?)
 }
 
 /// Where a node goes back to when its folder is gone: the root of its space,

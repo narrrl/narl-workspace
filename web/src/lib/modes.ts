@@ -21,7 +21,7 @@ import { bindings, type Binding, type Context } from './keymap'
 import { workspace } from './store.svelte'
 
 /** The sheets with keys of their own, under the same name as the sheet. */
-const sheets = new Set<string>(['help', 'overview', 'media', 'trash'])
+const sheets = new Set<string>(['help', 'overview', 'trash'])
 
 /** The stack, the topmost first. */
 export function stack(): Context[] {

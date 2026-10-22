@@ -93,10 +93,15 @@ export async function openInfo(section?: InfoSection) {
     await workspace.loadBacklinks()
     // Picked afresh each time, from the first: the open card leads.
     workspace.cardsCursor = 0
+    workspace.filesCursor = 0
     if (section) workspace.infoSection = section
     workspace.openSheet('info')
   })
 }
+
+/** A document is open and in focus — being written or read — rather than the list. */
+const readingDocument = () =>
+  workspace.editing || (workspace.focus === 'node' && workspace.open?.kind === 'document')
 
 /** The board's cursor, or the card turned over beside it, has the keys. */
 const onBoard = () => workspace.focus === 'board' || workspace.focus === 'card'
@@ -1127,8 +1132,8 @@ export const commands: CommandSpec[] = [
     name: 'upload',
     aliases: ['up'],
     group: 'editing',
-    help: 'while writing, attach files at the cursor — otherwise put files into this folder',
-    run: () => (workspace.editing ? hooks.pickFiles() : hooks.pickTreeFiles(false)),
+    help: "files for the open document — while writing, embedded at the cursor — or, from the list, into this folder",
+    run: () => (readingDocument() ? hooks.pickFiles() : hooks.pickTreeFiles(false)),
     bang: {
       help: 'put files into this folder sealed in the vault — encrypted before they touch the disk',
       run: () =>
@@ -1136,16 +1141,6 @@ export const commands: CommandSpec[] = [
           if (await workspace.ensureUnlocked()) hooks.pickTreeFiles(true)
         }),
     },
-  },
-  {
-    name: 'media',
-    group: 'editing',
-    help: 'browse everything you have uploaded — j/k, i inserts it while writing, y copies its address, x deletes',
-    run: () => workspace.guard(async () => {
-      await workspace.loadMedia()
-      workspace.mediaCursor = 0
-      workspace.openSheet('media')
-    }),
   },
   {
     name: 'outline',
@@ -1156,13 +1151,13 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'info',
-    args: '[outline|history|backlinks|cards|share]',
+    args: '[outline|history|backlinks|cards|files|share]',
     group: 'documents',
-    help: 'what is known about the open document: its headings, earlier versions, backlinks, cards and sharing — Tab between them (gi)',
+    help: 'what is known about the open document: its headings, earlier versions, backlinks, cards, files and sharing — Tab between them (gi)',
     complete: () => infoSections,
     run: (arg) => {
       const section = arg.trim()
-      if (section && !infoSections.includes(section as InfoSection)) return workspace.say('usage: :info [outline|history|backlinks|cards|share]', 'error')
+      if (section && !infoSections.includes(section as InfoSection)) return workspace.say('usage: :info [outline|history|backlinks|cards|files|share]', 'error')
       return openInfo((section || undefined) as InfoSection | undefined)
     },
   },

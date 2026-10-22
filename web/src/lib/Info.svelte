@@ -1,5 +1,7 @@
 <script lang="ts" module>
   import type { AgendaCard, Backlink, NodeSummary, RevisionSummary } from './api'
+  import { hooks } from './commands'
+  import { embedSnippet } from './markdown'
   import { workspace, type InfoSection } from './store.svelte'
   import { formatStamp } from './util'
 
@@ -7,9 +9,9 @@
    * What the keys in actions.ts do here too, so a key and a click are the
    * same thing. The info sheet holds what is known about the open document
    * besides its text: its headings, its earlier versions, what links to it,
-   * the cards about it, and whether it is shared.
+   * the cards about it, its own files, and whether it is shared.
    */
-  export const infoSections: InfoSection[] = ['outline', 'history', 'backlinks', 'cards', 'share']
+  export const infoSections: InfoSection[] = ['outline', 'history', 'backlinks', 'cards', 'files', 'share']
 
   /** Tab and Shift-Tab: the next part along, round the ends. */
   export function turnInfo(by: number) {
@@ -36,6 +38,25 @@
     const last = Math.max(workspace.history.length - 1, 0)
     const index = Math.min(Math.max(workspace.historyCursor + by, 0), last)
     if (index !== workspace.historyCursor) void workspace.guard(() => workspace.showRevision(index))
+  }
+
+  /** Enter on one of the document's files: the file is opened. */
+  export function openFile(file: NodeSummary) {
+    workspace.closeSheet()
+    return workspace.guard(() => workspace.openNode(file.id))
+  }
+
+  /** `i`: the file embedded at the cursor, while the document is being written. */
+  export function embedFile(file: NodeSummary) {
+    if (!workspace.editing) return workspace.say('embedding works while writing — i on the document first', 'error')
+    hooks.insertText(embedSnippet(file))
+    workspace.closeSheet()
+  }
+
+  /** `y`: how to embed it, to paste into another document. */
+  export async function copyEmbed(file: NodeSummary) {
+    const copied = await workspace.copy(embedSnippet(file))
+    workspace.say(copied ? `copied how to embed ${file.name}` : 'the clipboard said no', copied ? 'info' : 'error')
   }
 
   /** Enter on a backlink: the linking document is opened. */
@@ -80,7 +101,7 @@
 <script lang="ts">
   import Sheet from './Sheet.svelte'
   import { diffLines, folded } from './diff'
-  import { formatDay, relative } from './util'
+  import { formatBytes, formatDay, relative } from './util'
 
   const doc = $derived(workspace.open)
 
@@ -116,6 +137,7 @@
     ['history', `history ${workspace.history.length}`],
     ['backlinks', `linked from ${workspace.backlinks.length}`],
     ['cards', `cards ${doc?.cards.filter((card) => card.done_at === null).length ?? 0}`],
+    ['files', `files ${doc?.files.length ?? 0}`],
     ['share', doc?.shared ? 'shared' : 'private'],
   ])
 
@@ -125,6 +147,7 @@
       history: workspace.historyCursor,
       backlinks: workspace.backlinksCursor,
       cards: workspace.cardsCursor,
+      files: workspace.filesCursor,
       share: undefined,
     }[section],
   )
@@ -230,6 +253,24 @@
         </li>
       {:else}
         <li class="muted">no card about this document — c makes one, and a card's [[title]] counts too.</li>
+      {/each}
+    </ul>
+  {:else if section === 'files'}
+    <ul class="items">
+      {#each doc?.files ?? [] as file, index (file.id)}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+        <li
+          class="item"
+          data-index={index}
+          class:at={index === workspace.filesCursor}
+          onpointerenter={() => (workspace.filesCursor = index)}
+          onclick={() => openFile(file)}
+        >
+          <span class="name">{file.name}</span>
+          <span class="muted">{file.file ? `${file.file.mime} · ${formatBytes(file.file.size)}` : ''}{file.file?.encrypted ? ' · sealed' : ''}</span>
+        </li>
+      {:else}
+        <li class="muted">no files of its own — a picture pasted or dropped while writing is one, and so is :upload while reading it.</li>
       {/each}
     </ul>
   {:else}

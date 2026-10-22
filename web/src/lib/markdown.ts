@@ -187,9 +187,11 @@ export function renderMarkdown(
   return holder.innerHTML
 }
 
-/** The markdown snippet that embeds a freshly uploaded file. */
-export function embedSnippet(file: { url: string; filename: string; mime: string }): string {
-  const name = file.filename.replaceAll(']', '')
+/** The markdown snippet that embeds a file node: a picture, a player, or a link to it. */
+export function embedSnippet(node: { name: string; file: { url: string; mime: string } | null }): string {
+  const file = node.file
+  if (!file) return ''
+  const name = node.name.replaceAll(']', '')
   if (file.mime.startsWith('image/')) return `![${name}](${file.url})`
   if (file.mime.startsWith('video/')) return `<video src="${file.url}" controls playsinline></video>`
   if (file.mime.startsWith('audio/')) return `<audio src="${file.url}" controls></audio>`

@@ -33,6 +33,9 @@ directory.
   different first heading back renames it.
 - Files sit beside the documents under their own names. A later file with the
   same name is told apart by its id: `slides (42).pdf`.
+- A document's own files are in `<slug>/`, beside its `.md`. The directory is
+  listed once the document has a file, and can be copied into either way. It
+  holds files and nothing else, and moves when the `.md` is renamed.
 - Anything copied in that is not a `.md` becomes a file, and its text is
   indexed for search.
 - `rm` and `rmdir` put things in the trash, as a delete in the browser does.

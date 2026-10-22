@@ -3,13 +3,20 @@
 ## Files
 
 A file is a node like a document, only with bytes instead of text. It sits in a
-folder beside the notes about it, shows its size in the list, and `Enter` opens
-it.
+folder beside the notes about it, or belongs to a document, shows its size in
+the list, and `Enter` opens it.
+
+A document's own files are the ones pasted or dropped into it while writing,
+and the ones `:upload` puts in while reading it. They move, seal, go to the
+trash and come back with the document. A document with files says `+2` in the
+list; `za` folds them open under it, and `:info files` lists them too. With
+the cursor among them, `p` drops files picked up elsewhere in.
 
 Put files in:
 
 - drop them onto the list;
-- `:upload` picks files for the folder you are in;
+- `:upload` picks files for the folder you are in, or for the document you
+  are reading;
 - `:import` uploads a whole folder, and `:import!` a zip
   (see [Not losing things](Not-Losing-Things.md#import));
 - copy them in over the [SFTP mount](SFTP.md).

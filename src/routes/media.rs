@@ -11,7 +11,7 @@ use axum::{
     Json,
 };
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::{Connection, Row, SqliteConnection, SqlitePool};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
@@ -65,47 +65,6 @@ pub(crate) fn sanitize_mime(raw: &str) -> String {
 
 fn is_inline(mime: &str) -> bool {
     mime != "application/octet-stream"
-}
-
-#[derive(Serialize)]
-pub struct Media {
-    pub id: String,
-    pub filename: String,
-    pub mime: String,
-    pub size: i64,
-    pub created_at: i64,
-    pub url: String,
-    /// Sealed in the vault: its bytes on disk are ciphertext.
-    pub encrypted: bool,
-    /// Every document that embeds this file, which may be none or several.
-    pub node_ids: Vec<i64>,
-    /// The file node it is, when it sits in the tree: deleted from there, not
-    /// from the media list.
-    pub file_node: Option<i64>,
-}
-
-fn row_to_media(row: &sqlx::sqlite::SqliteRow) -> Media {
-    let id: String = row.get("id");
-    // `group_concat` gives "3,7" or NULL; queries that do not ask for it at all
-    // (a fresh upload) get an empty list.
-    let node_ids = row
-        .try_get::<Option<String>, _>("node_ids")
-        .ok()
-        .flatten()
-        .map(|joined| joined.split(',').filter_map(|n| n.parse().ok()).collect())
-        .unwrap_or_default();
-
-    Media {
-        url: format!("/api/media/{id}"),
-        id,
-        filename: row.get("filename"),
-        mime: row.get("mime"),
-        size: row.get("size"),
-        created_at: row.get("created_at"),
-        encrypted: row.try_get("encrypted").unwrap_or(false),
-        node_ids,
-        file_node: row.try_get("file_node").ok().flatten(),
-    }
 }
 
 /// The type an upload is stored as: what the browser declared, or what the
@@ -200,54 +159,6 @@ pub(crate) fn too_large(state: &AppState) -> AppError {
     ))
 }
 
-pub async fn upload(
-    _: Session,
-    State(state): State<AppState>,
-    mut multipart: Multipart,
-) -> AppResult<Json<Vec<Media>>> {
-    let mut uploaded = Vec::new();
-    let mut budget = state.config.max_upload_bytes as u64;
-
-    while let Some(mut field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| AppError::BadRequest(format!("malformed upload: {e}")))?
-    {
-        let filename = field
-            .file_name()
-            .map(str::to_string)
-            .unwrap_or_else(|| "upload".to_string());
-        let mime = mime_of(&filename, field.content_type());
-
-        let id = Uuid::new_v4().to_string();
-        let size = store_field(&state, &mut field, &id, &mut budget, None).await?;
-        if size == 0 {
-            continue;
-        }
-
-        let row = sqlx::query(
-            "INSERT INTO media (id, filename, mime, size, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             RETURNING id, filename, mime, size, created_at",
-        )
-        .bind(&id)
-        .bind(&filename)
-        .bind(&mime)
-        .bind(size as i64)
-        .bind(crate::now())
-        .fetch_one(&state.db)
-        .await?;
-
-        uploaded.push(row_to_media(&row));
-    }
-
-    if uploaded.is_empty() {
-        return Err(AppError::BadRequest("no files in upload".into()));
-    }
-    state.backup.signal();
-    Ok(Json(uploaded))
-}
-
 #[derive(Deserialize)]
 pub struct UploadQuery {
     /// Seal the files into the vault as they arrive.
@@ -256,7 +167,9 @@ pub struct UploadQuery {
 }
 
 /// `POST /api/nodes/{id}/files` — every file in the body becomes a file node
-/// in that space or folder, under the name it was uploaded with.
+/// in that space or folder, or of that document, under the name it was
+/// uploaded with. A picture pasted while writing comes this way too, and the
+/// document then embeds it by its `/api/media/<id>`.
 /// `?encrypt=true` seals them on the way in, which needs the vault open.
 pub async fn upload_into(
     _: Session,
@@ -265,8 +178,9 @@ pub async fn upload_into(
     Query(query): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Vec<nodes::Node>>> {
-    nodes::container(&mut *state.db.acquire().await?, parent).await?;
-    // A sealed folder seals what lands in it, asked or not.
+    nodes::place_for(&mut *state.db.acquire().await?, parent, nodes::FILE).await?;
+    // A sealed folder seals what lands in it, asked or not, and so does a
+    // document in one.
     let key = if query.encrypt || seal::sealed(&state, parent).await? {
         Some(state.vault.key().ok_or(AppError::Locked)?)
     } else {
@@ -356,7 +270,7 @@ pub(crate) async fn insert_file(
     // Checked inside the transaction that takes it, so the slug is still
     // free when the node is written; the folder too, which may have gone
     // while the upload was streaming in.
-    nodes::container(&mut tx, parent).await?;
+    nodes::place_for(&mut tx, parent, nodes::FILE).await?;
     let slug = nodes::unique_slug(&mut tx, Some(parent), &nodes::slugify(filename), None).await?;
     let now = crate::now();
 
@@ -395,36 +309,6 @@ pub(crate) async fn insert_file(
 
     tx.commit().await?;
     Ok(id)
-}
-
-#[derive(Deserialize)]
-pub struct ListQuery {
-    #[serde(default)]
-    pub limit: Option<i64>,
-    #[serde(default)]
-    pub offset: Option<i64>,
-}
-
-/// A page of the media list, newest first; the client asks for pages until
-/// one comes back short.
-pub async fn list(
-    _: Session,
-    State(state): State<AppState>,
-    Query(page): Query<ListQuery>,
-) -> AppResult<Json<Vec<Media>>> {
-    let rows = sqlx::query(
-        "SELECT m.id, m.filename, m.mime, m.size, m.created_at, m.encrypted,
-                (SELECT f.id FROM nodes f WHERE f.media_id = m.id) AS file_node,
-                (SELECT group_concat(nm.node_id)
-                 FROM node_media nm JOIN nodes d ON d.id = nm.node_id
-                 WHERE nm.media_id = m.id AND d.kind <> 'file') AS node_ids
-         FROM media m ORDER BY m.created_at DESC, m.id LIMIT ?1 OFFSET ?2",
-    )
-    .bind(page.limit.unwrap_or(500).clamp(1, 2000))
-    .bind(page.offset.unwrap_or(0).max(0))
-    .fetch_all(&state.db)
-    .await?;
-    Ok(Json(rows.iter().map(row_to_media).collect()))
 }
 
 pub async fn serve(
@@ -473,16 +357,6 @@ fn byte_range(
         return Err(());
     }
     Ok(Some(range))
-}
-
-pub async fn remove(
-    _: Session,
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> AppResult<Json<serde_json::Value>> {
-    delete_media(&state, &id).await?;
-    state.backup.signal();
-    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Shared by the private and the public-share media handlers. A sealed file
@@ -663,36 +537,6 @@ async fn open_stream(
 /// otherwise free to be `../diary.db`.
 pub(crate) fn canonical_id(id: &str) -> Option<String> {
     Uuid::try_parse(id).ok().map(|uuid| uuid.to_string())
-}
-
-pub async fn delete_media(state: &AppState, id: &str) -> AppResult<()> {
-    let id = canonical_id(id).ok_or(AppError::NotFound)?;
-    let mut tx = crate::db::begin_write(&state.db).await?;
-    // A file in the tree is its node's to delete: going round it here would
-    // take the node out of its folder without the tree having been asked.
-    let in_tree = sqlx::query("SELECT 1 FROM nodes WHERE media_id = ?1")
-        .bind(&id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .is_some();
-    if in_tree {
-        return Err(AppError::BadRequest(
-            "that is a file in the tree — delete it from its folder".into(),
-        ));
-    }
-    let deleted = sqlx::query("DELETE FROM media WHERE id = ?1")
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-    // No row, no file of ours: nothing on disk is removed on the word of a
-    // request alone.
-    if deleted == 0 {
-        return Err(AppError::NotFound);
-    }
-    tx.commit().await?;
-    remove_upload(&state.config.uploads_dir(), &id).await;
-    Ok(())
 }
 
 /// The bytes of an upload whose row is already gone. Called after the

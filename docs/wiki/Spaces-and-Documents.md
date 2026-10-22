@@ -79,6 +79,7 @@ reader:
 | `gi` | the info sheet |
 | `gO` | the headings as a list to jump to |
 | `zl` / `zh` | scroll a wide table or code block sideways |
+| `za` | fold a document's own files open under it in the list |
 | `F` | a letter over every link and button in view; type it to follow |
 | `gh` | earlier versions |
 | `gb` | the documents that link here |

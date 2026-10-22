@@ -18,7 +18,6 @@
   import Verify from './lib/Verify.svelte'
   import Login from './lib/Login.svelte'
   import Overview from './lib/Overview.svelte'
-  import MediaBrowser from './lib/MediaBrowser.svelte'
   import Trash from './lib/Trash.svelte'
   import CardTile from './lib/CardTile.svelte'
   import Scratch from './lib/Scratch.svelte'
@@ -62,7 +61,6 @@
     verify: Verify,
     info: Info,
     trash: Trash,
-    media: MediaBrowser,
   }
   let boardEl = $state<HTMLDivElement>()
   /** The first half of `gg`, `dd`, `]]` …, shown until the second comes. */
@@ -195,8 +193,11 @@
     input.value = ''
     if (files.length === 0) return
     await workspace.guard(async () => {
-      const uploaded = await workspace.upload(files)
-      hooks.insertText(uploaded.map(embedSnippet).join('\n\n'))
+      // While writing, they go in at the cursor too; while reading, the
+      // document only holds them.
+      const writing = workspace.editing
+      const created = await workspace.attach(files)
+      if (writing && created.length > 0) hooks.insertText(created.map(embedSnippet).join('\n\n'))
     })
   }
 

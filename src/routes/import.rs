@@ -4,9 +4,11 @@
 //! `docs/`, a folder of lecture notes, an export of this very diary. Storing it
 //! as opaque files would make it unsearchable and uneditable, so the importer
 //! reproduces the directory as nodes: directories become folders, markdown
-//! becomes documents, everything else becomes a file. The links between the
-//! files are rewritten as they land, because a set of documents that can no
-//! longer reach each other is a worse copy of what was uploaded.
+//! becomes documents, everything else becomes a file. A directory beside a
+//! document and named like it, `plan.md` and `plan/`, holds that document's
+//! files, which is how the export writes them. The links between the files
+//! are rewritten as they land, because a set of documents that can no longer
+//! reach each other is a worse copy of what was uploaded.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -729,13 +731,43 @@ async fn build(
     }
     let uploads = unique;
 
-    // An export keeps the files documents embed in `media/`, beside the spaces;
-    // they come back as what they were, embedded files, not as a folder.
+    // An older export kept the files documents embed in `media/`, beside the
+    // spaces; each comes back as a file of the first document that embeds it.
     let embedded = |path: &str| manifest.is_some() && parent_of(path) == manifest::MEDIA_DIR;
     let meta = |path: &str| -> Option<&NodeMeta> { manifest.as_ref()?.nodes.get(path) };
 
+    // `plan/` is the files of `plan.md` when it holds files and nothing else,
+    // and the manifest, if there is one, does not know it as a folder.
+    let mut crowded: BTreeSet<&str> = BTreeSet::new();
+    for upload in &uploads {
+        let dir = parent_of(&upload.path);
+        if matches!(upload.content, Content::Markdown(_)) {
+            crowded.insert(dir);
+        }
+        let mut above = parent_of(dir);
+        while !above.is_empty() {
+            crowded.insert(above);
+            above = parent_of(above);
+        }
+    }
+    let documents_at: BTreeSet<&str> = uploads
+        .iter()
+        .filter(|u| matches!(u.content, Content::Markdown(_)))
+        .filter_map(|u| u.path.strip_suffix(".md"))
+        .collect();
+    let attached: BTreeSet<String> = uploads
+        .iter()
+        .map(|u| parent_of(&u.path))
+        .filter(|dir| !dir.is_empty() && documents_at.contains(dir) && !crowded.contains(dir))
+        .filter(|dir| meta(dir).is_none_or(|m| !nodes::is_container(&m.kind)))
+        .map(str::to_string)
+        .collect();
+
     let mut directories: BTreeSet<String> = BTreeSet::new();
-    for upload in uploads.iter().filter(|u| !embedded(&u.path)) {
+    for upload in uploads
+        .iter()
+        .filter(|u| !embedded(&u.path) && !attached.contains(parent_of(&u.path)))
+    {
         let mut dir = parent_of(&upload.path);
         while !dir.is_empty() {
             directories.insert(dir.to_string());
@@ -853,8 +885,14 @@ async fn build(
     let mut documents: Vec<(i64, String, String)> = Vec::new();
     let mut by_path: HashMap<String, i64> = HashMap::new();
     let mut files = 0usize;
+    // The files of `media/`, waiting for the document that embeds them.
+    let mut unowned: HashMap<String, (String, i64, i64)> = HashMap::new();
 
-    for upload in &uploads {
+    // Documents before files, so a document is there for its files to go in.
+    let mut ordered: Vec<&Upload> = uploads.iter().collect();
+    ordered.sort_by_key(|u| !matches!(u.content, Content::Markdown(_)));
+
+    for upload in ordered {
         let dated = meta(&upload.path);
         let (created, updated) = dated.map_or((now, now), |m| (m.created_at, m.updated_at));
 
@@ -888,37 +926,20 @@ async fn build(
                 Landed::Media(format!("/api/media/{media_id}")),
             );
             if embedded(&upload.path) {
+                unowned.insert(media_id.clone(), (filename.to_string(), created, updated));
                 continue;
             }
 
-            // The file sits in the tree under the name it had, and owns its
-            // bytes the way a document owns what it embeds — so deleting the
-            // folder it landed in takes it along.
-            let parent = dir_ids[parent_of(&upload.path)];
+            // The file sits in the tree under the name it had: in its folder,
+            // or as a file of the document whose directory it came in.
+            let dir = parent_of(&upload.path);
+            let parent = if attached.contains(dir) {
+                by_path[&format!("{dir}.md")]
+            } else {
+                dir_ids[dir]
+            };
             let taken = siblings.entry(parent).or_default();
-            let slug = next_slug(taken, &slugify(filename))?;
-            taken.insert(slug.clone());
-
-            let node: i64 = sqlx::query_scalar(
-                "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 RETURNING id",
-            )
-            .bind(parent)
-            .bind(FILE)
-            .bind(filename)
-            .bind(&slug)
-            .bind(created)
-            .bind(updated)
-            .bind(media_id)
-            .fetch_one(&mut *tx)
-            .await?;
-
-            sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
-                .bind(node)
-                .bind(media_id)
-                .execute(&mut *tx)
-                .await?;
+            file_node(&mut tx, taken, parent, media_id, filename, created, updated).await?;
             files += 1;
         } else if let Content::Markdown(raw) = &upload.content {
             let dir = parent_of(&upload.path);
@@ -975,6 +996,18 @@ async fn build(
         }
         media::link_to_node(&mut tx, *id, &rewritten).await?;
         links::index(&mut tx, *id, &rewritten).await?;
+
+        let embeds: BTreeSet<String> = media::MEDIA_REF
+            .captures_iter(&rewritten)
+            .map(|c| c[1].to_lowercase())
+            .collect();
+        for media_id in embeds {
+            if let Some((filename, created, updated)) = unowned.remove(&media_id) {
+                let taken = siblings.entry(*id).or_default();
+                file_node(&mut tx, taken, *id, &media_id, &filename, created, updated).await?;
+                files += 1;
+            }
+        }
     }
 
     // The boards come back only where spaces do, and the scratchpad with
@@ -1012,6 +1045,42 @@ async fn build(
         cards,
         skipped,
     })
+}
+
+/// A file node for bytes already in `media`, under `parent`, with a slug not
+/// in `taken` — which it then is. It owns its bytes the way a document owns
+/// what it embeds, so deleting its folder or its document takes it along.
+async fn file_node(
+    tx: &mut sqlx::SqliteConnection,
+    taken: &mut BTreeSet<String>,
+    parent: i64,
+    media_id: &str,
+    filename: &str,
+    created: i64,
+    updated: i64,
+) -> AppResult<i64> {
+    let slug = next_slug(taken, &slugify(filename))?;
+    taken.insert(slug.clone());
+    let node: i64 = sqlx::query_scalar(
+        "INSERT INTO nodes (parent_id, kind, name, slug, created_at, updated_at, media_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         RETURNING id",
+    )
+    .bind(parent)
+    .bind(FILE)
+    .bind(filename)
+    .bind(&slug)
+    .bind(created)
+    .bind(updated)
+    .bind(media_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO node_media (node_id, media_id) VALUES (?1, ?2)")
+        .bind(node)
+        .bind(media_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(node)
 }
 
 #[cfg(test)]
@@ -1082,6 +1151,69 @@ mod tests {
             .read_to_string(&mut back)
             .unwrap();
         assert_eq!(back, "private bytes");
+    }
+
+    /// `plan/` beside `plan.md` is the document's files, as the export
+    /// writes them; a file an older export kept in `media/` becomes a file of
+    /// the document that embeds it.
+    #[tokio::test]
+    async fn a_documents_files_come_back_as_its_files() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let photo = "1a000000-0000-0000-0000-000000000000";
+        let old = "2b000000-0000-0000-0000-000000000000";
+        let file = |path: &str, id: &str| {
+            text(
+                path,
+                Content::File {
+                    id: id.into(),
+                    mime: "image/png".into(),
+                    size: 1,
+                },
+            )
+        };
+        let uploads = vec![
+            text(
+                "work/plan.md",
+                Content::Markdown(format!(
+                    "# Plan\n\n![p](plan/photo.png)\n\n![o](../media/{old}-old.png)"
+                )),
+            ),
+            file("work/plan/photo.png", photo),
+            file(&format!("media/{old}-old.png"), old),
+        ];
+        let manifest = crate::routes::manifest::Manifest {
+            format: crate::routes::manifest::FORMAT,
+            media: [(format!("media/{old}-old.png"), "old.png".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let report = super::build(
+            &state,
+            &super::Into::Root,
+            uploads,
+            Vec::new(),
+            Some(manifest),
+        )
+        .await
+        .unwrap();
+        assert_eq!((report.folders, report.documents, report.files), (0, 1, 2));
+
+        let (plan, body): (i64, String) =
+            sqlx::query_as("SELECT id, body FROM nodes WHERE kind = 'document' AND name = 'Plan'")
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+        assert!(body.contains(&format!("/api/media/{photo}")), "{body}");
+        let parents: Vec<(String, i64)> =
+            sqlx::query_as("SELECT name, parent_id FROM nodes WHERE kind = 'file' ORDER BY name")
+                .fetch_all(&state.db)
+                .await
+                .unwrap();
+        assert_eq!(
+            parents,
+            [("old.png".into(), plan), ("photo.png".into(), plan)]
+        );
     }
 
     fn text(path: &str, content: Content) -> Upload {

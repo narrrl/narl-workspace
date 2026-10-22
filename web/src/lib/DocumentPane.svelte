@@ -153,7 +153,8 @@
 
     <!--
       The readout is the way to everything else about the document: its
-      headings, its history, what links to it and who can read it — gi.
+      headings, its history, what links to it, its files and who can read
+      it — gi.
     -->
     <button class="meta" title="info (gi)" onclick={() => openInfo()}>
       <span class="field"><span class="caption">written</span>{formatStamp(tile.draft.created_at)} {formatWeekday(tile.draft.created_at)}</span>
@@ -161,6 +162,9 @@
       <span class="field"><span class="caption">words</span>{words}<span class="unit">words</span></span>
       {#if doc.backlinks > 0}
         <span class="field"><span class="caption">linked</span>from {doc.backlinks}</span>
+      {/if}
+      {#if doc.files.length > 0}
+        <span class="field"><span class="caption">files</span>{doc.files.length}</span>
       {/if}
       {#if doc.shared}
         <span class="field public"><span class="ring"></span>public</span>
@@ -207,7 +211,7 @@
     </div>
     {#if isTouchDevice}
       <div class="mobilebar">
-        <button onclick={() => runCommand('upload')}>+ media</button>
+        <button onclick={() => runCommand('upload')}>+ file</button>
         <button onclick={() => runCommand('w')}>save</button>
         <button onclick={() => runCommand('wq')}>done</button>
       </div>

@@ -248,8 +248,8 @@
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return
     await workspace.guard(async () => {
-      const uploaded = await workspace.upload(files)
-      insertAtCursor(uploaded.map(embedSnippet).join('\n\n'))
+      const created = await workspace.attach(files, tile)
+      if (created.length > 0) insertAtCursor(created.map(embedSnippet).join('\n\n'))
     })
   }
 

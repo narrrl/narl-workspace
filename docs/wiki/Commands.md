@@ -41,6 +41,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `i · a` | edit the open document |
 | `R` | rename what is under the cursor — document, folder or card — starting from its name |
 | `m / p` | pick nodes up, then drop them all into the folder you walk to |
+| `za` | a document's own files, folded open under it in the list — again folds them away; p drops marked files in there |
 | `M` | pick up the whole folder — again puts it all back |
 | `Ctrl / Shift-click` | pick a row up · every row up to it — drag them onto a folder |
 | `S` | the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away |
@@ -191,7 +192,7 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:cards` | the cards about the open document — its own, and the ones whose summary links here: j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board (gc) |
 | `:source` | show an open markdown file as written, or rendered again |
 | `:outline, :toc` | the open document's headings to pick from — gO, in the editor too |
-| `:info [outline\|history\|backlinks\|cards\|share]` | what is known about the open document: its headings, earlier versions, backlinks, cards and sharing — Tab between them (gi) |
+| `:info [outline\|history\|backlinks\|cards\|files\|share]` | what is known about the open document: its headings, earlier versions, backlinks, cards, files and sharing — Tab between them (gi) |
 | `:search, :se [text]` | full-text search in this space (empty clears) |
 | `:search!` | full-text search across every space — Ctrl-P |
 | `:clear, :noh` | clear the search filter |
@@ -223,9 +224,8 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:name, :title, :rename <text>` | rename what is under the cursor — document, folder, or card on a board; bare, while writing, into the title |
 | `:name!` | rename the space you are in — on the board, the list under the cursor |
 | `:date <yyyy-mm-dd>` | re-date the open document |
-| `:upload, :up` | while writing, attach files at the cursor — otherwise put files into this folder |
+| `:upload, :up` | files for the open document — while writing, embedded at the cursor — or, from the list, into this folder |
 | `:upload!` | put files into this folder sealed in the vault — encrypted before they touch the disk |
-| `:media` | browse everything you have uploaded — j/k, i inserts it while writing, y copies its address, x deletes |
 
 ### Sharing & export
 

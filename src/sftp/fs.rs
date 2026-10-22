@@ -2,8 +2,10 @@
 //! and the files beside them. Directories are spaces and folders; documents
 //! are `<slug>.md`, and file nodes appear under their own name — the one a
 //! download of them gets — with a later file that shares it told apart by its
-//! id, `slides (42).pdf`. There is no on-disk mirror — every call reads or
-//! writes `nodes` directly, so a save here is a save in the browser too.
+//! id, `slides (42).pdf`. A document's own files are in `<slug>/` beside it,
+//! which is listed while it holds any and can be written into either way.
+//! There is no on-disk mirror — every call reads or writes `nodes` directly,
+//! so a save here is a save in the browser too.
 //!
 //! A document reads as `# <title>` followed by its body, the same shape the
 //! export writes, and a leading heading written back becomes the title again.
@@ -71,6 +73,8 @@ enum Target {
     },
     /// A document, `<slug>.md`.
     Doc(Doc),
+    /// A document's files, `<slug>/`: a directory that holds files only.
+    Files { id: i64, updated_at: i64 },
     /// A file node.
     File(FileNode),
     /// A session-only file, keyed by its normalised path.
@@ -388,7 +392,7 @@ impl SpaceFs {
         parent: i64,
         over_sealed: bool,
     ) -> SftpResult<Option<Arc<vault::Keyring>>> {
-        let sealed: bool = sqlx::query_scalar("SELECT sealed FROM nodes WHERE id = ?1")
+        let sealed: bool = sqlx::query_scalar(seal::SEALS)
             .bind(parent)
             .fetch_optional(&self.db)
             .await
@@ -529,12 +533,12 @@ impl SpaceFs {
                 .map_err(|_| StatusCode::Failure)?;
         let mut taken: std::collections::HashSet<String> = others
             .iter()
-            .map(|row| {
+            .flat_map(|row| {
                 let slug: String = row.get("slug");
                 if row.get::<String, _>("kind") == nodes::DOCUMENT {
-                    format!("{slug}.md")
+                    vec![format!("{slug}.md"), slug]
                 } else {
-                    slug
+                    vec![slug]
                 }
             })
             .collect();
@@ -650,17 +654,59 @@ impl SpaceFs {
         Ok(None)
     }
 
+    /// The files of the document under `parent` whose slug is `leaf`, the
+    /// directory beside its `.md`. Every document has one, empty or not.
+    async fn files_of(&self, parent: Option<i64>, leaf: &str) -> SftpResult<Option<Target>> {
+        let Some(parent) = parent else {
+            return Ok(None);
+        };
+        let slugged = nodes::slugify(leaf);
+        for slug in [leaf, slugged.as_str()] {
+            let row = sqlx::query(
+                "SELECT id, updated_at FROM nodes
+                 WHERE parent_id = ?1 AND slug = ?2 AND kind = 'document'",
+            )
+            .bind(parent)
+            .bind(slug)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(|_| StatusCode::Failure)?;
+            if let Some(row) = row {
+                return Ok(Some(Target::Files {
+                    id: row.get("id"),
+                    updated_at: row.get("updated_at"),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     /// Resolve a path of directory segments to a node id, `None` meaning the
-    /// root.
+    /// root. The last may be a document's files.
     async fn resolve_dir(&self, segs: &[&str]) -> SftpResult<Option<i64>> {
         let mut current: Option<i64> = None;
         for seg in segs {
-            match self.dir_in(current, seg).await? {
-                Some(Target::Dir { id, .. }) => current = Some(id),
+            let found = match self.dir_in(current, seg).await? {
+                Some(found) => Some(found),
+                None => self.files_of(current, seg).await?,
+            };
+            match found {
+                Some(Target::Dir { id, .. } | Target::Files { id, .. }) => current = Some(id),
                 _ => return Err(StatusCode::NoSuchFile),
             }
         }
         Ok(current)
+    }
+
+    /// Refuse `parent` as the place for a node of `kind`: a document holds
+    /// files and nothing else.
+    async fn may_hold(&self, parent: i64, kind: &str) -> SftpResult<()> {
+        nodes::place_for(&mut *self.conn().await?, parent, kind)
+            .await
+            .map_err(|e| match e {
+                AppError::NotFound => StatusCode::NoSuchFile,
+                _ => StatusCode::PermissionDenied,
+            })
     }
 
     async fn target(&self, path: &str) -> SftpResult<Target> {
@@ -678,6 +724,9 @@ impl SpaceFs {
         };
         if let Some(doc) = self.doc_in(parent, leaf).await? {
             return Ok(Target::Doc(doc));
+        }
+        if let Some(files) = self.files_of(Some(parent), leaf).await? {
+            return Ok(files);
         }
         if let Some(file) = self.file_in(parent, leaf).await? {
             return Ok(Target::File(file));
@@ -702,7 +751,9 @@ impl SpaceFs {
     fn attrs_of(&self, target: &Target) -> FileAttributes {
         match target {
             Target::Root => dir_attrs(crate::now()),
-            Target::Dir { updated_at, .. } => dir_attrs(*updated_at),
+            Target::Dir { updated_at, .. } | Target::Files { updated_at, .. } => {
+                dir_attrs(*updated_at)
+            }
             Target::Doc(doc) => file_attrs(
                 render_doc(&doc.name, &doc.body).len() as u64,
                 doc.updated_at,
@@ -725,6 +776,7 @@ impl SpaceFs {
     /// An empty document under `parent`, named after the file it was created
     /// as until a heading says otherwise.
     async fn create_doc(&mut self, parent: i64, stem: &str) -> SftpResult<i64> {
+        self.may_hold(parent, nodes::DOCUMENT).await?;
         let slug = nodes::unique_slug(
             &mut *self.conn().await?,
             Some(parent),
@@ -1118,7 +1170,9 @@ impl SpaceFs {
         let segs = segments(path);
         let parent = self.resolve_dir(&segs).await?;
         let rows = sqlx::query(&format!(
-            "SELECT kind, slug, updated_at, {DOC_SIZE} AS size FROM nodes
+            "SELECT kind, slug, updated_at, {DOC_SIZE} AS size,
+                    EXISTS (SELECT 1 FROM nodes f WHERE f.parent_id = nodes.id) AS has_files
+             FROM nodes
              WHERE parent_id IS ?1 AND kind <> 'file' AND role IS NOT 'trash'
              ORDER BY kind, slug"
         ))
@@ -1127,20 +1181,25 @@ impl SpaceFs {
         .await
         .map_err(|_| StatusCode::Failure)?;
 
-        let mut files: Vec<File> = rows
-            .iter()
-            .map(|row| {
-                let kind: String = row.get("kind");
-                let slug: String = row.get("slug");
-                let mtime: i64 = row.get("updated_at");
-                if kind == nodes::DOCUMENT {
-                    let size: i64 = row.try_get("size").unwrap_or(0);
-                    File::new(format!("{slug}.md"), file_attrs(size as u64, mtime))
-                } else {
-                    File::new(slug, dir_attrs(mtime))
+        let mut files: Vec<File> = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let kind: String = row.get("kind");
+            let slug: String = row.get("slug");
+            let mtime: i64 = row.get("updated_at");
+            if kind == nodes::DOCUMENT {
+                let size: i64 = row.try_get("size").unwrap_or(0);
+                files.push(File::new(
+                    format!("{slug}.md"),
+                    file_attrs(size as u64, mtime),
+                ));
+                // Its files, once it has any; written into, it has.
+                if row.get::<bool, _>("has_files") {
+                    files.push(File::new(slug, dir_attrs(mtime)));
                 }
-            })
-            .collect();
+            } else {
+                files.push(File::new(slug, dir_attrs(mtime)));
+            }
+        }
 
         if let Some(parent) = parent {
             for (shown, file) in self.files_in(parent).await? {
@@ -1249,7 +1308,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                 Target::File(file) if size as i64 != file.size => {
                     return Err(StatusCode::OpUnsupported)
                 }
-                Target::Root | Target::Dir { .. } | Target::File(_) => {}
+                Target::Root | Target::Dir { .. } | Target::Files { .. } | Target::File(_) => {}
             }
         }
         Ok(ok_status(id))
@@ -1331,7 +1390,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                 StatusCode::NoSuchFile
             });
         };
-        if self.dir_in(Some(parent), leaf).await?.is_some() {
+        if self.dir_in(Some(parent), leaf).await?.is_some()
+            || self.files_of(Some(parent), leaf).await?.is_some()
+        {
             return Err(StatusCode::Failure);
         }
 
@@ -1600,7 +1661,9 @@ impl russh_sftp::server::Handler for SpaceFs {
             Target::Scratch(key) => {
                 self.scratch.remove(&key);
             }
-            Target::Root | Target::Dir { .. } => return Err(StatusCode::PermissionDenied),
+            Target::Root | Target::Dir { .. } | Target::Files { .. } => {
+                return Err(StatusCode::PermissionDenied)
+            }
         }
         Ok(ok_status(id))
     }
@@ -1625,6 +1688,7 @@ impl russh_sftp::server::Handler for SpaceFs {
             self.changed();
             return Ok(ok_status(id));
         };
+        self.may_hold(parent, nodes::FOLDER).await?;
         let slug = nodes::unique_slug(
             &mut *self.conn().await?,
             Some(parent),
@@ -1650,8 +1714,24 @@ impl russh_sftp::server::Handler for SpaceFs {
 
     async fn rmdir(&mut self, id: u32, path: String) -> SftpResult<russh_sftp::protocol::Status> {
         self.authorized().await?;
-        let Target::Dir { id: node, .. } = self.target(&path).await? else {
-            return Err(StatusCode::PermissionDenied);
+        let node = match self.target(&path).await? {
+            Target::Dir { id, .. } => id,
+            // A document's files go when the document does; emptied, the
+            // directory is gone from the listing already.
+            Target::Files { id: doc, .. } => {
+                let files: i64 =
+                    sqlx::query_scalar("SELECT count(*) FROM nodes WHERE parent_id = ?1")
+                        .bind(doc)
+                        .fetch_one(&self.db)
+                        .await
+                        .map_err(|_| StatusCode::Failure)?;
+                return if files > 0 {
+                    Err(StatusCode::Failure)
+                } else {
+                    Ok(ok_status(id))
+                };
+            }
+            _ => return Err(StatusCode::PermissionDenied),
         };
         let children: i64 = sqlx::query("SELECT count(*) AS n FROM nodes WHERE parent_id = ?1")
             .bind(node)
@@ -1687,7 +1767,8 @@ impl russh_sftp::server::Handler for SpaceFs {
         let now = crate::now();
 
         match source {
-            Target::Root => return Err(StatusCode::PermissionDenied),
+            // A document's files are renamed and moved with its `.md`.
+            Target::Root | Target::Files { .. } => return Err(StatusCode::PermissionDenied),
 
             Target::Dir {
                 id: node,
@@ -1708,6 +1789,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                         return Err(StatusCode::PermissionDenied)
                     }
                     (_, Some(parent)) => {
+                        self.may_hold(parent, &kind).await?;
                         let below = nodes::descendants(&mut *self.conn().await?, node)
                             .await
                             .map_err(|_| StatusCode::Failure)?;
@@ -1754,7 +1836,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                     return Err(StatusCode::PermissionDenied);
                 };
                 match (doc_slug(new_leaf), dest) {
-                    (_, Some(Target::Dir { .. } | Target::File(_))) => {
+                    (_, Some(Target::Dir { .. } | Target::Files { .. } | Target::File(_))) => {
                         return Err(StatusCode::Failure)
                     }
                     // Onto another document: that one takes this one's text
@@ -1765,6 +1847,7 @@ impl russh_sftp::server::Handler for SpaceFs {
                         self.replace_node(doc.id).await?;
                     }
                     (Some(stem), _) => {
+                        self.may_hold(new_parent, nodes::DOCUMENT).await?;
                         let new_slug = nodes::unique_slug(
                             &mut *self.conn().await?,
                             Some(new_parent),
@@ -1813,7 +1896,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                     return Err(StatusCode::PermissionDenied);
                 };
                 match dest {
-                    Some(Target::Dir { .. } | Target::Doc(_)) => return Err(StatusCode::Failure),
+                    Some(Target::Dir { .. } | Target::Files { .. } | Target::Doc(_)) => {
+                        return Err(StatusCode::Failure)
+                    }
                     Some(Target::File(other)) if other.id == file.id => {}
                     // Onto another file, as rename(2) does: that one goes.
                     Some(Target::File(other)) => self.replace_node(other.id).await?,
@@ -1831,7 +1916,9 @@ impl russh_sftp::server::Handler for SpaceFs {
                     return Err(StatusCode::PermissionDenied);
                 };
                 match (doc_slug(new_leaf), dest) {
-                    (_, Some(Target::Dir { .. })) => return Err(StatusCode::Failure),
+                    (_, Some(Target::Dir { .. } | Target::Files { .. })) => {
+                        return Err(StatusCode::Failure)
+                    }
                     // A temp file renamed over a file, or onto a name worth
                     // keeping: what a sync tool's atomic write looks like.
                     (None, Some(Target::File(other))) => {
@@ -1958,6 +2045,67 @@ mod tests {
 
     /// A file put through the mount is a file node, read back from disk, and
     /// renamed, replaced and removed the way any file would be.
+    /// A document's files are a directory beside it, named like it: listed
+    /// once it holds any, holding files and nothing else, and moving with
+    /// the document's `.md`.
+    #[tokio::test]
+    async fn a_document_keeps_its_files_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fs = fs_in(dir.path().to_path_buf()).await;
+        fs.mkdir(0, "/proj".into(), FileAttributes::empty())
+            .await
+            .expect("mkdir");
+        put(&mut fs, "/proj/plan.md", "# Plan\n\ntext").await;
+
+        async fn names(fs: &SpaceFs, path: &str) -> Vec<String> {
+            let mut names: Vec<String> = fs
+                .listing(path)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|f| f.filename)
+                .collect();
+            names.sort();
+            names
+        }
+        assert_eq!(names(&fs, "/proj").await, ["plan.md"]);
+
+        put(&mut fs, "/proj/plan/photo.png", "png").await;
+        assert_eq!(names(&fs, "/proj").await, ["plan", "plan.md"]);
+        assert_eq!(names(&fs, "/proj/plan").await, ["photo.png"]);
+        assert_eq!(get(&mut fs, "/proj/plan/photo.png").await, "png");
+        let (doc, _, _) = node(&fs, "plan").await;
+        let parent: i64 = sqlx::query_scalar("SELECT parent_id FROM nodes WHERE kind = 'file'")
+            .fetch_one(&fs.db)
+            .await
+            .unwrap();
+        assert_eq!(parent, doc);
+
+        // Files, and nothing else.
+        assert!(fs
+            .mkdir(0, "/proj/plan/sub".into(), FileAttributes::empty())
+            .await
+            .is_err());
+        assert!(open_at(&mut fs, "/proj/plan/inner.md", CREATE)
+            .await
+            .is_err());
+
+        fs.rename(0, "/proj/plan.md".into(), "/proj/roadmap.md".into())
+            .await
+            .expect("rename");
+        assert_eq!(names(&fs, "/proj").await, ["roadmap", "roadmap.md"]);
+        assert_eq!(get(&mut fs, "/proj/roadmap/photo.png").await, "png");
+
+        fs.remove(0, "/proj/roadmap/photo.png".into())
+            .await
+            .expect("remove");
+        assert_eq!(names(&fs, "/proj").await, ["roadmap.md"]);
+        fs.rmdir(0, "/proj/roadmap".into())
+            .await
+            .expect("rmdir of no files");
+        assert_eq!(names(&fs, "/proj").await, ["roadmap.md"]);
+    }
+
     #[tokio::test]
     async fn files_are_nodes_on_disk() {
         let dir = tempfile::tempdir().unwrap();

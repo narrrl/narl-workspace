@@ -11,9 +11,8 @@
 import { cycleTile, focusTile, followLink, hooks, openInfo, runCommand } from './commands'
 import { bindings, type Context } from './keymap'
 import { focusHelpFilter, scrollHelp } from './Help.svelte'
-import { copyMedia, insertMedia, removeMedia } from './MediaBrowser.svelte'
 import { purgeTrashed, restoreTrashed } from './Trash.svelte'
-import { goHeading, moveHistory, openBacklink, renewLink, restoreShown, toggleSharing, turnInfo } from './Info.svelte'
+import { copyEmbed, embedFile, goHeading, moveHistory, openBacklink, openFile, renewLink, restoreShown, toggleSharing, turnInfo } from './Info.svelte'
 import { workspace } from './store.svelte'
 import { dwindle, formatDay, neighbour, type Direction } from './util'
 
@@ -34,7 +33,7 @@ const spaceIndex = (key: string) => {
 const reading = () => !!workspace.open && !workspace.editing && workspace.pane === 'document'
 
 /** A cursor down a sheet's list, kept on it. */
-function step(cursor: 'outlineCursor' | 'mediaCursor' | 'trashCursor' | 'backlinksCursor' | 'cardsCursor', length: number, by: number) {
+function step(cursor: 'outlineCursor' | 'filesCursor' | 'trashCursor' | 'backlinksCursor' | 'cardsCursor', length: number, by: number) {
   workspace[cursor] = Math.min(Math.max(workspace[cursor] + by, 0), Math.max(length - 1, 0))
 }
 
@@ -163,22 +162,22 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     go: () => goHeading(),
   },
 
-  /** The media list: j/k down the files, i inserts, y copies, x deletes. */
-  media: {
-    down: () => step('mediaCursor', workspace.media.length, 1),
-    up: () => step('mediaCursor', workspace.media.length, -1),
-    bottom: () => step('mediaCursor', workspace.media.length, Infinity),
+  /** Its files: j/k down them, Enter opens one, i embeds it while writing, y copies how. */
+  files: {
+    down: () => step('filesCursor', workspace.open?.files.length ?? 0, 1),
+    up: () => step('filesCursor', workspace.open?.files.length ?? 0, -1),
+    bottom: () => step('filesCursor', workspace.open?.files.length ?? 0, Infinity),
+    open: () => {
+      const file = workspace.open?.files[workspace.filesCursor]
+      if (file) void openFile(file)
+    },
     insert: () => {
-      const file = workspace.media[workspace.mediaCursor]
-      if (file) insertMedia(file)
+      const file = workspace.open?.files[workspace.filesCursor]
+      if (file) embedFile(file)
     },
     copy: () => {
-      const file = workspace.media[workspace.mediaCursor]
-      if (file) void copyMedia(file)
-    },
-    delete: () => {
-      const file = workspace.media[workspace.mediaCursor]
-      if (file) void removeMedia(file)
+      const file = workspace.open?.files[workspace.filesCursor]
+      if (file) void copyEmbed(file)
     },
   },
 
@@ -386,6 +385,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     // Pick nodes up here, walk to a folder, put them down with `p`.
     mark: () => workspace.mark(),
     markAll: () => workspace.markAll(),
+    files: () => guard(() => workspace.toggleFiles()),
     drop: () => guard(() => workspace.drop()),
     new: () => void runCommand('new'),
     // Capture: a thought goes on this space's inbox without leaving here.

@@ -12,7 +12,6 @@ import {
   type Crumb,
   type DiaryEntry,
   type WorkspaceNode,
-  type MediaFile,
   type Moved,
   type NodeSummary,
   type Revision,
@@ -35,9 +34,9 @@ export type Pane = 'list' | 'document'
 export type TileKind = 'node' | 'board' | 'agenda' | 'calendar' | 'card'
 export type View = Exclude<TileKind, 'node'>
 /** What floats over the tiles; one at a time. */
-export type Sheet = 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'info' | 'trash'
+export type Sheet = 'help' | 'overview' | 'actions' | 'verify' | 'info' | 'trash'
 /** The info sheet's parts: what the open document holds, and what is around it. */
-export type InfoSection = 'outline' | 'history' | 'backlinks' | 'cards' | 'share'
+export type InfoSection = 'outline' | 'history' | 'backlinks' | 'cards' | 'files' | 'share'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
 
 /**
@@ -404,8 +403,6 @@ class Workspace {
   secret = $state.raw<{ text: string; resolve: (value: string | null) => void } | null>(null)
   /** The vault, as last heard from the server; null until asked. */
   vault = $state<VaultStatus | null>(null)
-  media = $state<MediaFile[]>([])
-  mediaCursor = $state(0)
   /** What `:trash` lists: everything deleted, the last first. */
   trash = $state<TrashItem[]>([])
   trashCursor = $state(0)
@@ -420,6 +417,10 @@ class Workspace {
   backlinksCursor = $state(0)
   /** The info sheet's cards: where its cursor is in the open document's. */
   cardsCursor = $state(0)
+  /** The file picked in the info sheet's files: Enter opens it, `i` embeds it while writing. */
+  filesCursor = $state(0)
+  /** Documents whose files `za` has folded open under them in the list. */
+  unfolded = $state<number[]>([])
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
@@ -991,7 +992,7 @@ class Workspace {
     this.globalSearch = false
     this.path = folder.path
     this.spaceId = folder.path[0]?.id ?? id
-    this.nodes = await api.listNodes({ parent: id })
+    this.nodes = await this.#withFiles(await api.listNodes({ parent: id }))
     const index = this.nodes.findIndex((n) => n.id === keep)
     this.cursor = index >= 0 ? index : 0
     this.#syncUrl(folder.path)
@@ -1017,12 +1018,40 @@ class Workspace {
         api.scratch(this.query),
       ])
     } else {
-      this.nodes = await api.listNodes({ parent: this.parentId ?? undefined })
+      this.nodes = await this.#withFiles(await api.listNodes({ parent: this.parentId ?? undefined }))
       this.foundCards = []
       this.foundNotes = []
     }
     const index = this.nodes.findIndex((n) => n.id === keepId)
     this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(this.rows - 1, 0))
+  }
+
+  /** The list, with the files of each document `za` folded open under it. */
+  async #withFiles(list: NodeSummary[]): Promise<NodeSummary[]> {
+    const open = list.filter((n) => n.kind === 'document' && n.child_count > 0 && this.unfolded.includes(n.id))
+    if (open.length === 0) return list
+    const files = new Map(await Promise.all(open.map(async (doc) => [doc.id, await api.listNodes({ parent: doc.id })] as const)))
+    return list.flatMap((n) => [n, ...(files.get(n.id) ?? [])])
+  }
+
+  /** `za`: a document's own files, folded open under it in the list, or away again. */
+  async toggleFiles() {
+    const node = this.selected
+    if (!node || this.query) return
+    const doc = node.kind === 'document' ? node : this.nodes.find((n) => n.id === node.parent_id && n.kind === 'document')
+    if (!doc) return this.say('za folds open the files of a document', 'error')
+    if (this.unfolded.includes(doc.id)) {
+      this.unfolded = this.unfolded.filter((id) => id !== doc.id)
+    } else {
+      if (doc.child_count === 0) return this.say('no files — :upload while reading it gives it some', 'error')
+      this.unfolded = [...this.unfolded, doc.id]
+    }
+    await this.refresh(doc.id)
+  }
+
+  /** A row the list shows under its document, not in the folder itself. */
+  isNested(node: NodeSummary): boolean {
+    return !this.query && node.parent_id !== this.parentId
   }
 
   /** The space a search keeps to; none for one across every space. */
@@ -1234,7 +1263,11 @@ class Workspace {
       if (this.overlay !== 'trash') await this.enterSpace(node.id)
       this.say(`restored the space ${name}`)
     } else {
-      const parent = node.path.at(-2)
+      // A document's file comes back to the document, shown folded open in
+      // the list of the folder the document is in.
+      const owner = node.path.at(-2)?.kind === 'document' ? node.path.at(-2) : undefined
+      if (owner && !this.unfolded.includes(owner.id)) this.unfolded = [...this.unfolded, owner.id]
+      const parent = node.path.at(owner ? -3 : -2)
       if (parent && node.path[0]?.id === this.spaceId) {
         if (parent.id === this.parentId && !this.query) await this.refresh(node.id)
         else if (this.overlay !== 'trash') await this.goTo(parent.id, node.id)
@@ -1608,11 +1641,21 @@ class Workspace {
     this.say(`marked ${what} — p drops ${count === 1 ? 'it' : 'them'} in the folder you are in`)
   }
 
-  /** `p`: drop the marked nodes into the folder the list is showing. */
+  /**
+   * `p`: drop the marked nodes into the folder the list is showing — or,
+   * when they are files and the cursor is in a document's files folded open,
+   * into that document.
+   */
   async drop() {
     const parent = this.parentId
     if (this.marked.length === 0) return this.say('nothing marked — press m on a row first', 'error')
     if (parent === null) return this.say('no folder open', 'error')
+    const at = this.selected
+    const doc = at && this.isNested(at) ? at.parent_id : at?.id
+    if (doc && this.unfolded.includes(doc) && this.marked.every((n) => n.kind === 'file')) {
+      const name = this.nodes.find((n) => n.id === doc)?.name.trim()
+      return this.moveNodes(this.marked, doc, `to ${name || 'the document'}`)
+    }
     await this.moveNodes(this.marked, parent)
   }
 
@@ -2409,19 +2452,32 @@ class Workspace {
     this.say(created.length === 1 ? `uploaded ${this.here}/${created[0].slug}` : `uploaded ${created.length} files`)
   }
 
-  async upload(files: File[]): Promise<MediaFile[]> {
+  /**
+   * Give the document in `tile` files of its own — what a picture pasted
+   * while writing is too. Answers the file nodes, for the editor to embed.
+   */
+  async attach(files: File[], tile = this.tile): Promise<NodeSummary[]> {
+    const doc = tile.open
+    if (doc?.kind !== 'document') {
+      this.say('files go to a document — open one first', 'error')
+      return []
+    }
+    // In a sealed folder they are sealed on the way, which needs the vault.
+    if (doc.sealed && !(await this.ensureUnlocked())) return []
     const what = files.length === 1 ? files[0].name : `${files.length} files`
     const total = files.reduce((sum, file) => sum + file.size, 0)
-    this.say(`uploading ${what} (${formatBytes(total)}) …`)
-    const uploaded = await api.upload(files, (fraction) =>
+    const name = doc.name.trim() || doc.slug
+    this.say(`uploading ${what} (${formatBytes(total)}) to ${name} …`)
+    const created = await api.putFiles(doc.id, files, doc.sealed, (fraction) =>
       this.say(`uploading ${what} — ${Math.floor(fraction * 100)}%`),
     )
-    this.say(`uploaded ${uploaded.length} file${uploaded.length === 1 ? '' : 's'}`)
-    return uploaded
-  }
-
-  async loadMedia() {
-    this.media = await api.listMedia()
+    // Its list of files, without touching what is being written in it.
+    if (tile.open?.id === doc.id) {
+      tile.open = { ...tile.open, files: [...tile.open.files, ...created], child_count: tile.open.child_count + created.length }
+    }
+    await this.refresh()
+    this.say(`${created.length === 1 ? created[0].name : `${created.length} files`} now belong${created.length === 1 ? 's' : ''} to ${name}`)
+    return created
   }
 
   setVim(enabled: boolean) {

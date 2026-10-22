@@ -20,7 +20,7 @@ export type Context =
   | 'overview'
   | 'info'
   | 'outline'
-  | 'media'
+  | 'files'
   | 'trash'
   | 'backlinks'
   | 'cards'
@@ -103,6 +103,7 @@ export const bindings = [
   { context: 'tree', keys: ['R'], action: 'rename', help: 'rename what is under the cursor — document, folder or card — starting from its name' },
   { context: 'tree', keys: ['m'], action: 'mark', label: 'm / p', help: 'pick nodes up, then drop them all into the folder you walk to' },
   { context: 'tree', keys: ['p'], action: 'drop' },
+  { context: 'tree', keys: ['za'], action: 'files', help: "a document's own files, folded open under it in the list — again folds them away; p drops marked files in there" },
   { context: 'tree', keys: ['M'], action: 'markAll', help: 'pick up the whole folder — again puts it all back' },
   { context: 'tree', label: 'Ctrl / Shift-click', help: 'pick a row up · every row up to it — drag them onto a folder' },
   { context: 'global', keys: ['S'], action: 'plan', help: 'the board, the agenda and the calendar, tiled ahead of what is open with the board focused — S again puts every view away' },
@@ -245,12 +246,12 @@ export const bindings = [
   { context: 'outline', keys: ['G'], action: 'bottom' },
   { context: 'outline', keys: ['Enter', 'l'], action: 'go', caps: ['↵'], hint: 'jump there' },
 
-  { context: 'media', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
-  { context: 'media', keys: ['k', 'ArrowUp'], action: 'up' },
-  { context: 'media', keys: ['G'], action: 'bottom' },
-  { context: 'media', keys: ['Enter', 'i'], action: 'insert', caps: ['i'], hint: 'insert' },
-  { context: 'media', keys: ['y'], action: 'copy', hint: 'copy url' },
-  { context: 'media', keys: ['x'], action: 'delete', hint: 'delete' },
+  { context: 'files', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
+  { context: 'files', keys: ['k', 'ArrowUp'], action: 'up' },
+  { context: 'files', keys: ['G'], action: 'bottom' },
+  { context: 'files', keys: ['Enter', 'l'], action: 'open', caps: ['↵'], hint: 'open' },
+  { context: 'files', keys: ['i'], action: 'insert', hint: 'embed' },
+  { context: 'files', keys: ['y'], action: 'copy', hint: 'copy embed' },
 
   { context: 'trash', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
   { context: 'trash', keys: ['k', 'ArrowUp'], action: 'up' },

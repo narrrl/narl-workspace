@@ -141,6 +141,7 @@ it; in the document pane it is that document. In the browse pane:
 | `i`, `a` | edit the open entry |
 | `R` | rename what is highlighted — a document, a folder or a file — starting from its name (`:name!` renames the space) |
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
+| `za` | fold a document's own files open under it in the list, or away again |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
 | `S` | the board, the agenda and the calendar tiled ahead of what is open, or every view away again; `Alt-h`/`j`/`k`/`l` move between the tiles, `f` gives one the screen |
 | `b` | the board of this space, in a tile; a digit there shows another space's |
@@ -165,7 +166,7 @@ it; in the document pane it is that document. In the browse pane:
 Inside the editor the full vim keymap is live — `w`/`b`, `dd`, `ciw`, visual
 mode, macros, `:w` to write. `:help` lists every ex command; the useful ones are
 `:w`, `:wq`, `:q!`, `:new [template] [yyyy-mm-dd] [name]`, `:date`, `:name`, `:share`, `:link`,
-`:upload`, `:media`, `:search`, `:backup` and
+`:upload`, `:search`, `:backup` and
 `:set novim`. `:name` on its own moves up into the title; `Enter`, `Esc` or `↓`
 there goes back down into the text. In the text, `]]`, `[[` and `gO` walk the
 headings as they do in the reader. `gf` follows the link under the cursor, saving
@@ -443,8 +444,9 @@ readers already hold.
 
 `:export` downloads the open document as markdown. `:export!` downloads the
 whole workspace as a zip: the tree as real directories, empty folders too, one
-markdown file per document, every file in the tree where it sits and every
-other embedded file in `media/`, under their real names, and relative links
+markdown file per document, every file in the tree where it sits — a
+document's own files in a directory named like it, `plan/` beside `plan.md` —
+under their real names, and relative links
 between documents, folders and files, so the archive reads in any markdown
 viewer without this application. What plain files have no place for — when
 each entry was written, names as they were typed, which space is the diary,
@@ -457,15 +459,17 @@ the agenda still know which space it is, and it cannot be deleted — empty it
 instead. Before a new build migrates the database it keeps a copy of it as
 it was, `diary.db.pre-<version>`, next to it in the data directory.
 
-An upload that nothing embeds any more — pasted, then deleted from the
-document — is kept a week and then removed, along with what a killed upload
-or a crash leaves in `uploads/`. That runs at start and once a day. A file in
-the tree is never one of them: it is deleted from its folder, not from
-`:media`, and its bytes stay on the disk until it leaves the trash.
-
-`:media` lists every upload: `j`/`k` walk it, `i` or `Enter` embeds the
-highlighted one at the cursor while writing, `y` copies its address and `x`
-deletes it, asking first.
+Every upload is a file in the tree. One pasted or dropped while writing, or
+put in with `:upload` while reading a document, belongs to that document: it
+moves, seals, goes to the trash and comes back with it. The info sheet lists
+a document's files (`:info files`): `Enter` opens one, `i` embeds it at the
+cursor while writing, `y` copies how to embed it elsewhere. In the list a
+document with files says `+2`, and `za` folds them open under it, where they
+are renamed, deleted and picked up like any other row; `p` with the cursor
+among them drops marked files there. A file is deleted where it sits, and its
+bytes stay on the disk until it leaves the trash — or for as long as another
+document still embeds it. What a killed upload or a crash leaves in
+`uploads/` is removed at start and once a day.
 
 ## Links
 
@@ -654,9 +658,9 @@ heading), anything else becomes a file in the tree. `:import!` does the same wit
 a zip, which is the shape `:export!` writes. `:import! /` pours an `:export!`
 back in at the root: each directory becomes a space again — or goes into the
 space already there by that name — and with `.workspace.json` beside it the
-dates, names, boards and cards come back as they were, embedded files go back
-to being embedded rather than a `media` folder, and a file that happened to end
-in `.md` stays a file.
+dates, names, boards and cards come back as they were, a document's files go
+back to being its own — `plan/` beside `plan.md`, or the `media/` folder of an
+older export — and a file that happened to end in `.md` stays a file.
 
 Links between the imported files are rewritten as they land: a link to a
 markdown file becomes the document's address, a link to an image becomes its
@@ -903,11 +907,10 @@ sealed or not.
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |
 | `POST`/`DELETE` | `/api/backup/login` | log the mirror in to Proton, body `{"username","password"}` / forget its session |
 | `POST` | `/api/backup/login/totp`, `/api/backup/login/captcha` | the two-factor code `{"code"}`, or the solved human check `{"token"}`, a waiting login asked for |
-| `GET`/`POST` | `/api/media` | list / upload (multipart) |
-| `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
+| `GET` | `/api/media/{id}` | serve a file's bytes (with `Range`) |
 | `POST` | `/api/typst` | `{source}` of a ` ```typst ` block → `{svg}`, or `{error}` as typst words it |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
-| `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
+| `POST` | `/api/nodes/{id}/files` | upload files (multipart) into a space or folder, or to a document as its own; `?encrypt=true` seals them, and a sealed folder always does |
 | `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
 | `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or a folder for good — what is in it and what lands later — or take it out |
 | `GET`/`POST`/`PUT` | `/api/vault` | status / set the password once / change it |

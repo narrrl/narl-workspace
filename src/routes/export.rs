@@ -166,8 +166,9 @@ This is a complete copy of a ~/workspace.
 
   <space>/          one directory per space, holding the same tree of folders,
                     documents and files that the workspace shows; one markdown
-                    file per document, and every file under its own name
-  media/            the files documents embed that are not in the tree themselves
+                    file per document, every file under its own name, and a
+                    document's own files in a directory named like it
+  media/            files embedded somewhere that belong to no document
   .workspace.json   what plain files cannot hold: dates, names as they were
                     typed, the boards. Importing the archive puts it all back.
 

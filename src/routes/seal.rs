@@ -117,7 +117,9 @@ pub async fn enter(state: &AppState, id: i64, parent: i64) -> AppResult<()> {
     // sealed ones — needs nothing, not even the vault open.
     let ready: Option<bool> = sqlx::query_scalar(
         "SELECT CASE WHEN n.kind = 'file' THEN m.encrypted
-                     WHEN n.kind = 'document' THEN 1
+                     WHEN n.kind = 'document' THEN NOT EXISTS (
+                         SELECT 1 FROM nodes f JOIN media fm ON fm.id = f.media_id
+                         WHERE f.parent_id = n.id AND fm.encrypted = 0)
                      ELSE n.sealed END
          FROM nodes n LEFT JOIN media m ON m.id = n.media_id WHERE n.id = ?1",
     )
@@ -126,7 +128,8 @@ pub async fn enter(state: &AppState, id: i64, parent: i64) -> AppResult<()> {
     .await?;
     match ready {
         None => return Err(AppError::NotFound),
-        // A document is not sealed; it moves in as it is.
+        // A document's text is not sealed, so it moves in as it is once its
+        // files are.
         Some(true) => return Ok(()),
         Some(false) => {}
     }
@@ -145,14 +148,21 @@ pub async fn enter(state: &AppState, id: i64, parent: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// Whether files that land in this folder or space are sealed.
+/// Whether files that land in this folder or space are sealed. A document
+/// keeps its files under the rules of the folder it is in.
 pub async fn sealed(state: &AppState, id: i64) -> AppResult<bool> {
-    Ok(sqlx::query_scalar("SELECT sealed FROM nodes WHERE id = ?1")
+    Ok(sqlx::query_scalar(SEALS)
         .bind(id)
         .fetch_optional(&state.db)
         .await?
         .unwrap_or(false))
 }
+
+/// [`sealed`] as one statement, `?1` the node, for callers with a pool of
+/// their own.
+pub(crate) const SEALS: &str =
+    "SELECT CASE WHEN n.kind = 'document' THEN p.sealed ELSE n.sealed END
+     FROM nodes n LEFT JOIN nodes p ON p.id = n.parent_id WHERE n.id = ?1";
 
 async fn place(state: &AppState, id: i64) -> AppResult<(String, Option<i64>)> {
     let row = sqlx::query("SELECT kind, parent_id FROM nodes WHERE id = ?1")

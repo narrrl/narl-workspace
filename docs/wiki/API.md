@@ -50,11 +50,10 @@ sealed or not.
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |
 | `POST`/`DELETE` | `/api/backup/login` | log the mirror in to Proton, body `{"username","password"}` / forget its session |
 | `POST` | `/api/backup/login/totp`, `/api/backup/login/captcha` | the two-factor code `{"code"}`, or the solved human check `{"token"}`, a waiting login asked for |
-| `GET`/`POST` | `/api/media` | list / upload (multipart) |
-| `GET`/`DELETE` | `/api/media/{id}` | serve (with `Range`) / delete a file nothing in the tree owns |
+| `GET` | `/api/media/{id}` | serve a file's bytes (with `Range`) |
 | `POST` | `/api/typst` | `{source}` of a ` ```typst ` block → `{svg}`, or `{error}` as typst words it |
 | `GET` | `/api/spaces/overview` | every space with what was last written in it |
-| `POST` | `/api/nodes/{id}/files` | upload files into this folder as file nodes (`?encrypt=true` seals them) |
+| `POST` | `/api/nodes/{id}/files` | upload files (multipart) into a space or folder, or to a document as its own; `?encrypt=true` seals them, and a sealed folder always does |
 | `POST` | `/api/nodes/{id}/inspect` | what a certificate, key or keystore file holds (`{password}` opens a protected one) |
 | `POST` | `/api/nodes/{id}/encrypt`, `/decrypt` | seal a file, or a folder for good — what is in it and what lands later — or take it out |
 | `GET`/`POST`/`PUT` | `/api/vault` | status / set the password once / change it |
