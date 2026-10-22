@@ -108,14 +108,14 @@ export const bindings = [
   { context: 'tree', keys: ['za'], action: 'files', help: "a document's own files, folded open under it in the list — again folds them away; p drops marked files in there" },
   { context: 'tree', keys: ['M'], action: 'markAll', help: 'pick up the whole folder — again puts it all back' },
   { context: 'tree', label: 'Ctrl / Shift-click', help: 'pick a row up · every row up to it — drag them onto a folder' },
-  { context: 'global', keys: ['S'], action: 'plan', help: 'the plan screen: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were', essential: true },
-  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — on the plan screen', essential: true },
+  { context: 'global', keys: ['S'], action: 'plan', help: 'the plan screen with every view on it: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were', essential: true },
+  { context: 'global', keys: ['t'], action: 'agenda', help: 'agenda — late, due this week, in hand, on every board — on the plan screen, alone or beside what is there', essential: true },
   { context: 'global', keys: ['T'], action: 'today', help: "today's diary entry, started if there is none — from templates/day when the diary has one", essential: true },
-  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, on the plan screen: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents' },
+  { context: 'global', keys: ['C'], action: 'calendar', help: 'the diary by month, on the plan screen, alone or beside what is there: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents' },
   { context: 'tree', keys: ['[d'], action: 'previousEntry', label: '[d / ]d', help: 'the diary entry before / after the one open, by date' },
   { context: 'tree', keys: [']d'], action: 'nextEntry' },
   { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'go to anything by its name, in every space — words before the last narrow the path, as in proj/ingest; Tab or Ctrl-N/P walk, Enter goes', essential: true },
-  { context: 'global', keys: ['b'], action: 'board', help: "the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's" },
+  { context: 'global', keys: ['b'], action: 'board', help: "the board, on the plan screen, alone or beside what is there: this space's, or the last one shown — 1 … 9 there shows another's" },
   { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry", essential: true },
   { context: 'tree', keys: ['q'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several — Esc first puts down what m picked up, and in the list lets go of a search', essential: true },
   { context: 'tree', keys: ['Escape'], action: 'escape' },
@@ -141,7 +141,7 @@ export const bindings = [
   { context: 'writing', keys: ['*'], action: 'refocus' },
 
   // --- what the views share: the board, the agenda, the calendar, a card's back
-  { context: 'views', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: "on the plan screen: from a card's back to the board, from the board, the agenda or the calendar back to the documents" },
+  { context: 'views', keys: ['q', 'Escape'], action: 'close', label: 'q · Esc', caps: ['q'], hint: 'close', help: "on the plan screen: the view goes, and the plan stays while anything is left on it — a card's back goes back to the board, the last view back to the documents" },
 
   // --- on a board ---------------------------------------------------------------
   { context: 'board', keys: ['h', 'ArrowLeft'], action: 'left', label: 'h / l', caps: ['h', 'j', 'k', 'l'], hint: 'move', help: 'to the list left / right — right of the last, to the tile beside' },

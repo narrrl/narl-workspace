@@ -565,7 +565,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     calendar: () => void runCommand('cal'),
     // `S`, as the desktop's special workspace is bound: the plan screen —
     // the board, the agenda and the calendar — and back to the documents.
-    // `b`, `t` and `C` go there too, to their own view.
+    // `b`, `t` and `C` go there with their own view alone, or add it beside.
     plan: () => void runCommand('plan'),
     line: () => line(':'),
     help: () => void runCommand('help'),

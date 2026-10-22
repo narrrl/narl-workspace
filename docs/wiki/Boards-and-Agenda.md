@@ -4,22 +4,25 @@
 
 The board, the agenda, the [calendar](Diary.md#the-calendar) and the back of
 a card are views, and they have a screen of their own: the plan. `S` (or
-`:plan`) goes there — the board on the left, the agenda over the calendar on
-the right, and no list — and back to the documents, which wait behind it as
-they were left. The views are tiles like the documents', walked the same way.
+`:plan`) goes there with all three on it — the board on the left, the agenda
+over the calendar on the right, and no list — and back to the documents, which
+wait behind it as they were left. `b`, `t` and `C` go there with their own view
+alone, and on the plan they add it beside what is there. The views are tiles
+like the documents', walked the same way, and `q` closes one as it closes a
+document; closing the last goes back to the documents.
 
 ![The board, the agenda and the calendar](../images/board.png)
 
 | key | what it does |
 | --- | --- |
-| `S` | to the plan screen, or back to the documents |
-| `b`, `t`, `C` | to the board, the agenda or the calendar, on the plan screen |
+| `S` | to the plan screen with every view on it, or back to the documents |
+| `b`, `t`, `C` | the board, the agenda or the calendar: alone on the plan screen, or beside what is on it |
 | `gt` / `gT` | the next / previous tile |
 | `Ctrl-h` / `Ctrl-j` / `Ctrl-k` / `Ctrl-l` | the tile that way |
 | `l` past the last list, `h` in the agenda, `j` past its end | on into the tile beside |
 | `f` | the focused tile fills the screen; again or `Esc` to leave |
 | `1` … `9` | switch space; the plan stays, and the board shows that space's |
-| `q`, `Esc` | from a card's back to the board; from the board, the agenda or the calendar back to the documents |
+| `q`, `Esc` | close the focused view — a card's back goes back to the board; the last view back to the documents |
 
 The keys go to the tile with focus, which wears the light border and its key
 lit in its head; the other views keep their cursors, dimmed. What is opened
@@ -28,14 +31,14 @@ is a document, so it opens on the documents' screen, beside what is there, and
 `S` comes back to the plan. Each view is read again whenever it is gone to.
 
 The plan is the same in every space, the way the desktop's special workspace
-stays up: a digit on the board shows that space's board, with the agenda still
-beside it. Each space keeps its own documents behind it, and they are there
+stays up: a digit on the board shows that space's board, with whatever was
+beside it still there. Each space keeps its own documents behind it, and they are there
 again on going back.
 
 ## The board
 
 Every space except the diary has a board. `b`, the board button on the rail, or
-`:board` shows it on the plan screen, and `q` or `Esc` goes back to the documents.
+`:board` shows it on the plan screen, and `q` or `Esc` closes it again.
 It is the board of the space being browsed, or, in a space without one such as
 the diary, the last board shown. The head of the board names every space that
 has one, with the digit that goes there.

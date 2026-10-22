@@ -605,14 +605,14 @@ export const commands: CommandSpec[] = [
   {
     name: 'board',
     group: 'board',
-    help: "this space's board, on the plan screen — the last one shown when this space has none",
+    help: "this space's board, on the plan screen, alone or beside what is there — the last one shown when this space has none",
     run: () => workspace.guard(() => workspace.tiles.show('board')),
   },
   {
     name: 'plan',
     aliases: ['special'],
     group: 'board',
-    help: 'the plan screen: the board, the agenda and the calendar, in place of the documents — S goes there and back again; 1 … 9 on the board picks the board',
+    help: 'the plan screen with every view on it: the board, the agenda and the calendar, in place of the documents — S goes there and back again; 1 … 9 on the board picks the board',
     run: () => workspace.guard(() => workspace.tiles.togglePlan()),
   },
   {
@@ -888,7 +888,7 @@ export const commands: CommandSpec[] = [
     name: 'close',
     aliases: ['clo'],
     group: 'tiles',
-    help: 'close the focused tile — q while reading; on the plan screen, back to the documents; asks when its draft could not be written',
+    help: 'close the focused tile — q while reading; on the plan screen the view, and the last one back to the documents; asks when its draft could not be written',
     run: () =>
       workspace.guard(async () => {
         await workspace.drafts.flushTile()

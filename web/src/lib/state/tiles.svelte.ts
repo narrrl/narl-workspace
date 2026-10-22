@@ -171,11 +171,11 @@ export class Tiles {
 
   /**
    * `:close`: the focused tile goes, or with only one, what it shows. On the
-   * plan only a card's back goes; closing the board, the agenda or the
-   * calendar goes back to the documents.
+   * plan a view goes as a document's tile does, and the plan stays while
+   * anything is left on it; closing the last goes back to the documents.
    */
   close() {
-    if (this.planning && this.current.kind !== 'card') return this.leavePlan()
+    if (this.planning && this.all.length === 1) return this.leavePlan()
     this.ws.drafts.leaveCard()
     this.current.clear()
     this.prune()
@@ -219,11 +219,13 @@ export class Tiles {
 
   /*
    * The views — the board, the agenda, the calendar, a card's back — are
-   * the tiles of the plan screen. Each is read again whenever it is gone to:
-   * it is looked at in passing, and what it says should be what is true now.
+   * the tiles of the plan screen. The plan opens on the one asked for, and
+   * the others come beside it when they are asked for in turn. Each is read
+   * again whenever it is gone to: it is looked at in passing, and what it
+   * says should be what is true now.
    */
 
-  /** The views the plan screen holds, in the order they are tiled. */
+  /** The views `S` puts on the plan screen, in the order they are tiled. */
   static readonly PLAN: View[] = ['board', 'agenda', 'calendar']
 
   /** The other screen on show, and this one put away as it is. */
@@ -237,14 +239,12 @@ export class Tiles {
     this.planning = !this.planning
   }
 
-  /** To the plan screen, with every view on it, from wherever the documents were. */
-  enterPlan() {
+  /** To the plan screen, with `kinds` on it and nothing else, from wherever the documents were. */
+  enterPlan(kinds: View[]) {
     if (this.planning) return
     this.ws.drafts.leaveCard()
     this.swap()
-    const cards = this.all.filter((tile) => tile.kind === 'card')
-    this.all = [...Tiles.PLAN.map((kind) => this.view(kind) ?? new Tile(kind)), ...cards]
-    this.focused = Math.min(this.focused, this.all.length - 1)
+    this.replace(kinds.map((kind) => new Tile(kind)))
     this.ws.pane = 'document'
   }
 
@@ -258,21 +258,25 @@ export class Tiles {
     if (!this.current.empty) this.focusOn(this.focused)
   }
 
-  /** `b`, `t`, `C`, Enter on a card: to the plan screen, and that view on it focused. */
-  async show(kind: View) {
-    // Coming to the plan, every view on it is read again, not only this one.
-    const kinds = this.planning ? [kind] : Tiles.PLAN
+  /**
+   * `b`, `t`, `C`, Enter on a card: that view focused on the plan screen —
+   * alone on it when coming from the documents, beside what is there when
+   * already on it.
+   */
+  async show(kind: View, all = false) {
+    // Coming to the plan, every view put on it is read again, not only this one.
+    const kinds = all ? Tiles.PLAN : [kind]
     await Promise.all(kinds.map((each) => this.loadView(each)))
-    this.enterPlan()
-    if (!this.view(kind)) this.all.push(new Tile(kind))
+    this.enterPlan(kinds)
+    if (!this.view(kind)) this.add(new Tile(kind))
     this.focusOn(this.all.indexOf(this.view(kind)!))
     if (kind === 'board' && this.ws.cards.boardSpaceId === null) this.ws.say('no space has a board — :set board turns one on', 'error')
   }
 
-  /** `S`: the plan screen with the board focused, or back to the documents. */
+  /** `S`: the plan screen with every view on it and the board focused, or back to the documents. */
   async togglePlan() {
     if (this.planning) return this.leavePlan()
-    await this.show('board')
+    await this.show('board', true)
   }
 
   /** Read again what a view shows. */

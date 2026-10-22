@@ -25,7 +25,9 @@ beside the documents, or belongs to the one document it was put into.
 They are shown on two screens. The **documents** screen has the list on the
 left and the documents open in tiles beside it. The **plan** screen has the
 board, the agenda and the calendar, and a card turned over. `S` goes from one to
-the other, and each keeps what was on it. The scratchpad comes down over either.
+the other, with every view on the plan, and the documents keep what was on them.
+`b`, `t` and `C` open the plan on their own view alone, or add it beside what is
+there; `q` closes one view at a time. The scratchpad comes down over either.
 
 ## Morning: what needs you
 

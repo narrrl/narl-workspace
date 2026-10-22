@@ -72,7 +72,7 @@ The rail of buttons on the right does the same as the keys, for a mouse.
    `h` comes back up.
 6. Press `c`, type `try the board`, and press `Enter`. That is a card in the
    inbox of this space's board. Press `b` to see the board on the plan screen,
-   beside the agenda and the calendar, and `Esc` to go back to the documents.
+   `t` to put the agenda beside it, and `Esc` twice to go back to the documents.
    `S` goes to the plan and back; `Ctrl-h`/`j`/`k`/`l` walk between the tiles.
 7. Press `T`. That is today's diary entry, started for you.
 8. Press `?` for the list of every key and command. `h` / `l` walk its columns, `/` narrows it down, and `Esc` closes it.

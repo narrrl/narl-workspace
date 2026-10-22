@@ -156,9 +156,9 @@ it; in the document pane it is that document. In the browse pane:
 | `m` / `p` | pick nodes up — `m` again puts one back, `M` takes the whole folder — then drop them all into the folder you walk to |
 | `za` | fold a document's own files open under it in the list, or away again |
 | `Ctrl`/`Shift`-click | pick a row up / every row from the cursor to it; drag picked-up rows onto a folder, a crumb or a space |
-| `S` | the plan screen — the board, the agenda and the calendar, in place of the documents and the list — or back to the documents as they were left |
-| `b` | the board of this space, on the plan screen; a digit there shows another space's |
-| `t` | the agenda: what is late, due this week, or in hand, on every board, on the plan screen |
+| `S` | the plan screen with every view on it — the board, the agenda and the calendar, in place of the documents and the list — or back to the documents as they were left |
+| `b` | the board of this space, alone on the plan screen or beside what is on it; a digit there shows another space's |
+| `t` | the agenda: what is late, due this week, or in hand, on every board, alone on the plan screen or beside what is on it |
 | `T` | today's diary entry, started if there is none |
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
@@ -291,8 +291,9 @@ start as `sftp_host_key` in the data directory.
 ## Boards
 
 `b`, the board door on the rail, or `:board` shows the board of the space
-being browsed on the plan screen, beside the agenda and the calendar, and `q`
-or `Esc` goes back to the documents. Every space has one except the
+being browsed on the plan screen — alone, or beside the views already there —
+and `q` or `Esc` closes it again; closing the last view goes back to the
+documents. Every space has one except the
 diary — a journal has no backlog — and `:set board` / `:set noboard` changes
 that for the space you are in (the dimmed board door on the rail does the
 same). A new board starts with `backlog`, `doing` and `done`, and the columns mean

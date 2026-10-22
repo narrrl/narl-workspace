@@ -43,13 +43,13 @@ arguments and `↑` / `↓` recall earlier lines.
 | `za` | a document's own files, folded open under it in the list — again folds them away; p drops marked files in there |
 | `M` | pick up the whole folder — again puts it all back |
 | `Ctrl / Shift-click` | pick a row up · every row up to it — drag them onto a folder |
-| `S` | the plan screen: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were |
-| `t` | agenda — late, due this week, in hand, on every board — on the plan screen |
+| `S` | the plan screen with every view on it: the board, the agenda and the calendar, in place of the documents and the list — S again goes back to the documents as they were |
+| `t` | agenda — late, due this week, in hand, on every board — on the plan screen, alone or beside what is there |
 | `T` | today's diary entry, started if there is none — from templates/day when the diary has one |
-| `C` | the diary by month, on the plan screen: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents |
+| `C` | the diary by month, on the plan screen, alone or beside what is there: h/l a day, j/k a week, H/L a month, . today, Enter opens or starts the day among the documents |
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | go to anything by its name, in every space — words before the last narrow the path, as in proj/ingest; Tab or Ctrl-N/P walk, Enter goes |
-| `b` | the board, on the plan screen: this space's, or the last one shown — 1 … 9 there shows another's |
+| `b` | the board, on the plan screen, alone or beside what is there: this space's, or the last one shown — 1 … 9 there shows another's |
 | `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
 | `Esc · q` | close the document, and its tile when there are several — Esc first puts down what m picked up, and in the list lets go of a search |
 | `/` | full-text search, inside the current space and its text files — Tab takes it to every space, Ctrl-N/P walk the results, Enter opens one, Esc gives up |
@@ -63,7 +63,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-S` | save, from anywhere |
 | `?` | this screen — the keys to start with, then on a second ? every key and command; h/l a column, / filters it down |
 | `,` | the settings sheet: vim and the clipboard, the vault, the backup, signed-in browsers, ssh keys, capture tokens |
-| `q · Esc` | on the plan screen: from a card's back to the board, from the board, the agenda or the calendar back to the documents |
+| `q · Esc` | on the plan screen: the view goes, and the plan stays while anything is left on it — a card's back goes back to the board, the last view back to the documents |
 
 ### On a board
 
@@ -154,8 +154,8 @@ whole workspace. A command that does a second thing takes a word for it:
 
 | command | what it does |
 | --- | --- |
-| `:board` | this space's board, on the plan screen — the last one shown when this space has none |
-| `:plan, :special` | the plan screen: the board, the agenda and the calendar, in place of the documents — S goes there and back again; 1 … 9 on the board picks the board |
+| `:board` | this space's board, on the plan screen, alone or beside what is there — the last one shown when this space has none |
+| `:plan, :special` | the plan screen with every view on it: the board, the agenda and the calendar, in place of the documents — S goes there and back again; 1 … 9 on the board picks the board |
 | `:card, :c [title]` | add a card — reading a document, one about it, titled after it unless named, and gf on it comes back; on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:due <when\|->` | due date of the card in focus — on the board, its back, in the agenda, or the open document's: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
@@ -196,7 +196,7 @@ whole workspace. A command that does a second thing takes a word for it:
 
 | command | what it does |
 | --- | --- |
-| `:close, :clo` | close the focused tile — q while reading; on the plan screen, back to the documents; asks when its draft could not be written |
+| `:close, :clo` | close the focused tile — q while reading; on the plan screen the view, and the last one back to the documents; asks when its draft could not be written |
 | `:only, :on` | close every tile but the focused one |
 | `:ls, :buffers, :files` | list the open tiles, % on the focused one |
 | `:buffer, :b <n\|name>` | focus a tile by its number in :ls, or by the start of its name |
