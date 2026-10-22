@@ -387,3 +387,8 @@ export function urgency(card: { due_at: number | null; done_at: number | null })
   if (card.due_at < start) return 'overdue'
   return card.due_at < start + 86400 ? 'today' : ''
 }
+
+/** What a note is called in a list: its first line that says something. */
+export function headline(body: string): string {
+  return body.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '').trim() ?? ''
+}

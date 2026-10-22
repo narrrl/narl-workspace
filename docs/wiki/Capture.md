@@ -27,14 +27,20 @@ curl -H "Authorization: Bearer nwc_…" -H 'content-type: application/json' \
 | field | meaning |
 | --- | --- |
 | `text` | what to write down; for a card, the first line is the title and the rest its notes |
-| `to` | `"card"` (the default) or `"diary"` |
-| `space` | for a card, the slug of the space whose inbox it goes in |
+| `to` | `"card"` (the default), `"diary"`, `"note"` or `"document"` |
+| `space` | for a card, the slug of the space whose inbox it goes in; for a document, the space its title is looked for in first |
+| `document` | for `"document"`, which one, as a link names it: `Plan`, `[[Plan]]` or `/n/work/plan` |
+| `note` | the id of the scratch note the text came from; it is dropped once the text has landed |
 
 - `"to": "card"` puts a card in the inbox of the space named by `space`, or else
   of the first space that has a board.
 - `"to": "diary"` adds `- 14:05 call the bank` to the end of today's entry, in
   `WORKSPACE_TIMEZONE`, and starts the entry from `templates/day` when there is
   none yet.
+- `"to": "note"` puts it on the scratchpad, for when it is not clear yet where
+  it belongs.
+- `"to": "document"` adds it as a paragraph at the end of a document. The text
+  it replaces is kept in the document's history, as a save keeps it.
 
 The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
 

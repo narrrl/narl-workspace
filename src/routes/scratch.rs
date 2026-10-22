@@ -2,11 +2,12 @@
 //!
 //! A note here has a body and nothing else — no space, no folder, no name —
 //! because deciding those is the cost a quick note should not pay. The drawer
-//! lists them newest first; one worth keeping is made into a document by the
-//! client, which then deletes it here, so a note lives in one place at a time.
+//! lists them newest first, and search finds them. A note leaves by becoming
+//! something else — a document, a card, a few lines at the end of a document
+//! or of today's entry (see `capture`) — so a note lives in one place at a time.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ use sqlx::{Row, SqliteConnection};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::manifest::ScratchMeta,
+    routes::{manifest::ScratchMeta, nodes},
     state::AppState,
 };
 
@@ -55,14 +56,48 @@ fn row_to_note(row: &sqlx::sqlite::SqliteRow) -> Note {
     }
 }
 
-/// Every note, the one touched last first.
-pub async fn list(_: Session, State(state): State<AppState>) -> AppResult<Json<Vec<Note>>> {
-    let rows = sqlx::query(
-        "SELECT id, body, created_at, updated_at FROM scratch_notes
-         ORDER BY updated_at DESC, id DESC",
-    )
-    .fetch_all(&state.db)
-    .await?;
+#[derive(Deserialize)]
+pub struct ListQuery {
+    /// Only the notes this finds, the best match first.
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
+/// As many notes as a search lists; the drawer shows them all.
+const SEARCH_LIMIT: i64 = 50;
+
+/// Every note, the one touched last first — or those a search finds.
+pub async fn list(
+    _: Session,
+    State(state): State<AppState>,
+    Query(params): Query<ListQuery>,
+) -> AppResult<Json<Vec<Note>>> {
+    let rows = match params.q.as_deref() {
+        None => {
+            sqlx::query(
+                "SELECT id, body, created_at, updated_at FROM scratch_notes
+                 ORDER BY updated_at DESC, id DESC",
+            )
+            .fetch_all(&state.db)
+            .await?
+        }
+        Some(q) => {
+            let Some(query) = nodes::fts_query(q) else {
+                return Ok(Json(Vec::new()));
+            };
+            sqlx::query(
+                "SELECT n.id, n.body, n.created_at, n.updated_at FROM scratch_notes n
+                 JOIN scratch_fts ON scratch_fts.rowid = n.id
+                 WHERE scratch_fts MATCH ?1
+                 ORDER BY scratch_fts.rank
+                 LIMIT ?2",
+            )
+            .bind(query)
+            .bind(SEARCH_LIMIT)
+            .fetch_all(&state.db)
+            .await?
+        }
+    };
     Ok(Json(rows.iter().map(row_to_note).collect()))
 }
 
@@ -71,18 +106,33 @@ pub async fn create(
     State(state): State<AppState>,
     Json(input): Json<NoteInput>,
 ) -> AppResult<Json<Note>> {
-    checked(&input.body)?;
-    let now = crate::now();
+    let note = insert(&state.db, &input.body).await?;
+    state.backup.signal();
+    Ok(Json(note))
+}
+
+/// A new note at the top of the drawer.
+pub(crate) async fn insert(db: &sqlx::SqlitePool, body: &str) -> AppResult<Note> {
+    checked(body)?;
     let row = sqlx::query(
         "INSERT INTO scratch_notes (body, created_at, updated_at) VALUES (?1, ?2, ?2)
          RETURNING id, body, created_at, updated_at",
     )
-    .bind(&input.body)
-    .bind(now)
-    .fetch_one(&state.db)
+    .bind(body)
+    .bind(crate::now())
+    .fetch_one(db)
     .await?;
-    state.backup.signal();
-    Ok(Json(row_to_note(&row)))
+    Ok(row_to_note(&row))
+}
+
+/// The note gone, now that what it said lives somewhere else. One already
+/// gone is no error: the text has landed either way.
+pub(crate) async fn consume(db: &sqlx::SqlitePool, id: i64) -> AppResult<()> {
+    sqlx::query("DELETE FROM scratch_notes WHERE id = ?1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 pub async fn update(

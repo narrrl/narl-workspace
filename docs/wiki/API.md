@@ -25,7 +25,7 @@ sealed or not.
 | `POST` | `/api/diary/day` | `{ day? }`: the entry of `2026-10-22`, or of today in `WORKSPACE_TIMEZONE`, started from `templates/day` when there is none; answers `{ id, created }` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
-| `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |
+| `POST` | `/api/capture` | `{ text, to: "card" \| "diary" \| "note" \| "document", space?, document?, note? }`, with a session or `Authorization: Bearer` a token; `note` is a scratch note the text came from, dropped once it has landed |
 | `GET`/`POST` | `/api/tokens` | the capture tokens / make one, `{ name }`, answered with the token this once |
 | `DELETE` | `/api/tokens/{id}` | remove a capture token |
 | `POST` | `/api/spaces/{id}/lists` | add a list |
@@ -34,7 +34,7 @@ sealed or not.
 | `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
 | `GET` | `/api/cards?q=…` | cards whose title, summary or a checklist step matches, open ones first; `space` keeps it to one board |
-| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
+| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first, or with `?q=` those a search finds / a new note `{ body }` |
 | `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |

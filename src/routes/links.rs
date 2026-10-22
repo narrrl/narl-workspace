@@ -212,6 +212,27 @@ async fn resolve(
     }
 }
 
+/// What a link written by hand leads to: `/n/work/plan` by its path, and
+/// `[[Plan]]` or a bare `Plan` by its title, looked for in `space` first —
+/// the same thing the link would find written in a document there.
+pub async fn find(
+    db: &mut SqliteConnection,
+    written: &str,
+    space: Option<i64>,
+) -> AppResult<Option<i64>> {
+    let written = written.trim();
+    match written.strip_prefix("/n/") {
+        Some(path) => resolve_path(db, path).await,
+        None => {
+            let title = written
+                .strip_prefix("[[")
+                .and_then(|rest| rest.strip_suffix("]]"))
+                .unwrap_or(written);
+            resolve_title(db, title.trim(), space).await
+        }
+    }
+}
+
 /// A node's path from its space, `work/notes/plan`, as `/n/` writes it.
 async fn path_text(db: &mut SqliteConnection, id: i64) -> AppResult<String> {
     let slugs: Vec<String> = sqlx::query_scalar(

@@ -50,7 +50,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
 | `b` | the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's |
-| `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it |
+| `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it; Tab on the line makes it a note, or a line in today's entry |
 | `Esc · q` | close the document, and its tile when there are several |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
 | `n / N` | next / previous search result, opened beside the results — :noh clears the search |
@@ -127,6 +127,8 @@ The first list is the inbox, the last list is done.
 | `o` | a new note, written straight away — it saves itself |
 | `Enter · e · i` | write the note — Esc in normal mode, or :q, comes back to the notes |
 | `K` | keep the note: a document in the folder being browsed, titled by its first line — :keep <title> names it |
+| `C` | make the note a card where :card puts one — the first line its title, the rest its description |
+| `A` | put the note at the end of a document — :append, with the one on screen filled in; Tab completes a title |
 | `dd` | drop the note (asks y/N) |
 | `q · Esc · Q` | raise the scratchpad |
 
@@ -173,10 +175,11 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | command | what it does |
 | --- | --- |
 | `:scratch, :sc [text]` | the scratchpad, lowered over whatever is on screen — Q does the same; with text, a note on it without leaving |
+| `:append [document]` | put the scratch note at the end of a document, by its title — Tab completes it — or the one on screen, and take it off the scratchpad |
 | `:keep [title]` | make the scratch note a document in the folder being browsed — titled by its first line unless given one — and take it off the scratchpad |
 | `:new, :n, :o [template] [yyyy-mm-dd] [name]` | start a new document here — from one of the space's templates, dated, named; in the diary from templates/day |
 | `:cal, :calendar` | the diary by month — h/l a day, j/k a week, H/L a month, Enter opens the day or starts it |
-| `:today` | open today's diary entry, starting one if there is none yet |
+| `:today [text]` | open today's diary entry, starting one if there is none yet; with text, a timed line at its end without going there |
 | `:next` | open the next node down the list |
 | `:prev` | open the previous node |
 | `:first` | open the first node in the list |

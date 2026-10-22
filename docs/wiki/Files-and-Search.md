@@ -59,6 +59,8 @@ previous result beside the list, and `:noh` clears the search.
 Cards are searched too, by their title, description and checklist steps. They
 are listed after the documents, under `cards`, with the board and list each is
 on. `Enter` on one turns it over on its board; `n` and `N` only light it up.
+Notes on the scratchpad come last, under `notes`, whatever space is searched;
+`Enter` lowers the scratchpad at the note.
 
 ![A search that found a line in a log file](../images/search.png)
 

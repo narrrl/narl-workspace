@@ -3,7 +3,7 @@
   import { carry, into, release } from './carry'
   import Icon from './Icon.svelte'
   import { workspace } from './store.svelte'
-  import { formatBytes, formatDay, formatTime, formatWeekday, hitParts, isTouchDevice } from './util'
+  import { formatBytes, formatDay, formatTime, formatWeekday, headline, hitParts, isTouchDevice, relative } from './util'
 
   let list = $state<HTMLUListElement>()
   /** Files are being dragged over the list, which takes them into this folder. */
@@ -79,7 +79,8 @@
     <span class="name">{workspace.space?.slug ?? 'diary'}</span>
     <span class="count">
       {workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}{#if workspace.foundCards.length > 0}
-        · {workspace.foundCards.length} {workspace.foundCards.length === 1 ? 'card' : 'cards'}{/if}
+        · {workspace.foundCards.length} {workspace.foundCards.length === 1 ? 'card' : 'cards'}{/if}{#if workspace.foundNotes.length > 0}
+        · {workspace.foundNotes.length} {workspace.foundNotes.length === 1 ? 'note' : 'notes'}{/if}
     </span>
   </div>
 
@@ -159,6 +160,20 @@
           <span class="dot"></span>
           <span class="title">{card.title}<span class="where">{card.space_slug}/{card.list_name}</span></span>
           <span class="aside">{card.done_at !== null ? 'done' : card.due_at !== null ? formatDay(card.due_at) : 'card'}</span>
+        </button>
+      </li>
+    {/each}
+    <!-- Then the notes it found on the scratchpad: Enter lowers it, at the note. -->
+    {#if workspace.foundNotes.length > 0}
+      <li class="daybreak label rule"><span>notes</span></li>
+    {/if}
+    {#each workspace.foundNotes as note, at (note.id)}
+      {@const index = workspace.nodes.length + workspace.foundCards.length + at}
+      <li class="item">
+        <button class="row note" class:active={index === workspace.cursor} data-index={index} onclick={() => pick(index)}>
+          <span class="dot"></span>
+          <span class="title">{headline(note.body) || '—'}<span class="where">scratch</span></span>
+          <span class="aside">{relative(note.updated_at)}</span>
         </button>
       </li>
     {/each}
@@ -266,6 +281,7 @@
   .row.open.active .dot { background: var(--ink); }
   /* A card is told from a node by its square. */
   .row.card .dot { border: 1px solid currentColor; border-radius: 1px; }
+  .row.note .dot { border: 1px dashed currentColor; background: none; }
   .row.card.done .title { color: var(--muted); text-decoration: line-through; }
 
   .title {

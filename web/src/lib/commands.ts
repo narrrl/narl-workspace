@@ -189,6 +189,34 @@ const spaceNames = () => workspace.spaces.map((space) => space.slug)
 /** The capture tokens' names, for Tab after `:token rm`; null until fetched. */
 let tokenNames: string[] | null = null
 
+/*
+ * The titles of the documents a search finds for what is typed after
+ * `:append`, for Tab — fetched as the typing goes, so by the time Tab is
+ * pressed they are usually there.
+ */
+let titlesFor = ''
+let titles: string[] = []
+function documentTitles(arg: string): string[] {
+  const wanted = arg.trim()
+  if (wanted && wanted !== titlesFor) {
+    titlesFor = wanted
+    void api.listNodes({ q: wanted }).then(
+      (found) => {
+        if (titlesFor !== wanted) return
+        titles = found.filter((node) => node.kind === 'document').map((node) => node.name.trim() || node.slug)
+      },
+      () => {},
+    )
+  }
+  return titles
+}
+
+/** The document in a tile, the focused one first: what a note goes to the end of unless told otherwise. */
+function documentOnScreen(): string | undefined {
+  const tile = [workspace.tile, ...workspace.tiles].find((t) => t.open?.kind === 'document')
+  return tile?.open ? `/n/${tile.open.path.map((crumb) => crumb.slug).join('/')}` : undefined
+}
+
 /** The templates of the space last asked about, for `:new` to complete. */
 let templateCache: { space: number; names: string[] } | null = null
 
@@ -548,6 +576,19 @@ export const commands: CommandSpec[] = [
     },
   },
   {
+    name: 'append',
+    args: '[document]',
+    group: 'documents',
+    help: 'put the scratch note at the end of a document, by its title — Tab completes it — or the one on screen, and take it off the scratchpad',
+    complete: documentTitles,
+    run: async (arg) => {
+      if (!workspace.scratchOpen) return workspace.say('no scratch note — Q lowers the scratchpad', 'error')
+      const target = arg.trim() || documentOnScreen()
+      if (!target) return workspace.say('usage: :append <document> — or open the one it goes to', 'error')
+      await workspace.guard(() => workspace.appendScratchNote(target))
+    },
+  },
+  {
     name: 'keep',
     args: '[title]',
     group: 'documents',
@@ -697,9 +738,11 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'today',
+    args: '[text]',
     group: 'documents',
-    help: "open today's diary entry, starting one if there is none yet",
-    run: async () => {
+    help: "open today's diary entry, starting one if there is none yet; with text, a timed line at its end without going there",
+    run: async (arg) => {
+      if (arg.trim()) return workspace.guard(() => workspace.logToday(arg.trim()))
       await workspace.guard(() => workspace.openDay())
       hooks.focusEditor()
     },

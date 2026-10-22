@@ -84,7 +84,10 @@ More in [Writing](Writing.md).
 
 In a meeting someone asks you to renew a certificate. Press `c`, type
 `Renew the gateway certificate`, and `Enter`. The card is in this space's
-inbox, and you have not left the document you were reading.
+inbox, and you have not left the document you were reading. Not a task? `Tab`
+on the same line makes it a note on the scratchpad, and `Tab` again a timed line
+in today's diary entry. A note waits there until `K`, `C` or `A` turns it into a
+document, a card, or more of a document.
 
 Press `b` to see the **board**, in a tile beside the document. A digit there
 shows the board of another space.

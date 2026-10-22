@@ -148,7 +148,7 @@ it; in the document pane it is that document. In the browse pane:
 | `T` | today's diary entry, started if there is none |
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
-| `c` | capture a card into this space's inbox without leaving where you are — reading a document, a card about it |
+| `c` | capture a card into this space's inbox without leaving where you are — reading a document, a card about it; `Tab` on the line makes it a note, or a line in today's entry |
 | `Q` | the scratchpad, lowered over whatever is on screen — see [The scratchpad](docs/wiki/Writing.md#the-scratchpad) |
 | `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
@@ -264,7 +264,8 @@ done cards older than a week fold away until `z` shows them.
 
 `c` captures from anywhere: `:card <title>` outside the board puts the card in
 this space's inbox (or the first space that has a board) and leaves you where
-you were. On the board, `o` or `c` puts a card on the column under the cursor.
+you were. `Tab` on that line makes it a note on the scratchpad instead, or a
+timed line in today's diary entry (`:today <text>`). On the board, `o` or `c` puts a card on the column under the cursor.
 
 | key | action |
 | --- | --- |
@@ -375,7 +376,9 @@ named by `"space": "<slug>"`, or else of the first space that has a board,
 the same as `:card` outside the board. The first line is the card's title and
 the rest its notes. `"to": "diary"` adds `- 14:05 call the bank` to the end of
 today's entry, in `WORKSPACE_TIMEZONE`, and starts the entry when there is
-none yet, from `templates/day` when the diary has one. The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
+none yet, from `templates/day` when the diary has one. `"to": "note"` puts it
+on the scratchpad, and `"to": "document"` at the end of the document named by
+`"document"`, as a link names it: `Plan`, `[[Plan]]` or `/n/work/plan`. The answer says where it went: `{"to":"card","id":7,"where":"work/backlog"}`.
 
 A token opens this one route and nothing else — it reads nothing, not even the
 list of spaces — and only its SHA-256 is kept, the way a share key is. Wrong
@@ -875,7 +878,7 @@ sealed or not.
 | `POST` | `/api/diary/day` | `{ day? }`: the entry of `2026-10-22`, or of today in `WORKSPACE_TIMEZONE`, started from `templates/day` when there is none; answers `{ id, created }` |
 | `GET` | `/api/diary/around/{id}` | the entries before and after a diary entry, by date |
 | `GET` | `/api/nodes/{id}/templates` | the templates of the space the node is in |
-| `POST` | `/api/capture` | `{ text, to: "card" \| "diary", space? }`, with a session or `Authorization: Bearer` a token |
+| `POST` | `/api/capture` | `{ text, to: "card" \| "diary" \| "note" \| "document", space?, document?, note? }`, with a session or `Authorization: Bearer` a token; `note` is a scratch note the text came from, dropped once it has landed |
 | `GET`/`POST` | `/api/tokens` | the capture tokens / make one, `{ name }`, answered with the token this once |
 | `DELETE` | `/api/tokens/{id}` | remove a capture token |
 | `POST` | `/api/spaces/{id}/lists` | add a list |
@@ -884,7 +887,7 @@ sealed or not.
 | `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
 | `GET` | `/api/cards?q=…` | cards whose title, summary or a checklist step matches, open ones first; `space` keeps it to one board |
-| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
+| `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first, or with `?q=` those a search finds / a new note `{ body }` |
 | `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
 | `POST` | `/api/nodes/move` | `{ ids, parent_id }`: several into one folder, all or none |

@@ -292,6 +292,11 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     new: () => workspace.newScratchNote(),
     write: () => workspace.editScratchNote(),
     keep: () => guard(() => workspace.keepScratchNote()),
+    card: () => guard(() => workspace.cardScratchNote()),
+    append: () => {
+      const open = [workspace.tile, ...workspace.tiles].find((tile) => tile.open?.kind === 'document')?.open
+      line(`:append ${open ? open.name.trim() || open.slug : ''}`)
+    },
     drop: () => {
       if (!workspace.scratchNote) return
       void (async () => {

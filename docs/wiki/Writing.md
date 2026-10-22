@@ -67,6 +67,8 @@ a body and the time it was last touched, newest on top.
 | `o` | a new note, written straight away |
 | `Enter`, `e`, `i` | write the note under the cursor |
 | `K` | keep it: a document in the folder being browsed (`:keep [title]`) |
+| `C` | make it a card, where `:card` puts one: the first line its title, the rest its description |
+| `A` | put it at the end of a document (`:append [document]`) |
 | `dd` | drop the note (asks y/N) |
 | `Q`, `q`, `Esc` | raise the scratchpad |
 
@@ -80,6 +82,15 @@ Keeping a note makes it a document in the folder the tree is showing, and
 takes it off the scratchpad. Its first line is the title — `# Plan` or plain
 `Plan` alike — and the rest the body; `:keep <title>` names it instead and
 keeps every line. The document opens, and the drawer goes up.
+
+`C` makes the note a card on the list under the board's cursor, or in this
+space's inbox. `A` opens `:append` with the document on screen filled in;
+change it to any document's title — `Tab` completes it — and `Enter` puts the
+note at its end, as a paragraph of its own. The document's text before is kept
+in its history. Either way the note leaves the scratchpad, as it does with `K`.
+
+`/` finds notes too, listed under `notes` after the documents and the cards;
+`Enter` on one lowers the scratchpad with it under the cursor.
 
 The notes are in the backup, and an export of the whole workspace carries
 them in `.workspace.json`, so `:import! /` puts them back.

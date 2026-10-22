@@ -52,6 +52,25 @@
   let input = $state<HTMLInputElement>()
   let list = $state<HTMLUListElement>()
   const isSearch = $derived(value.startsWith('/'))
+
+  /*
+   * A capture line — `c` opens one — writes a thought down somewhere without
+   * going there: a card, a note, a line in today's entry. Tab walks the three
+   * with the text kept. A card stays linked to the document being read when
+   * the line began as one that was.
+   */
+  const card = untrack(() => (initial.startsWith(':card! ') ? 'card!' : 'card'))
+  const targets = [card, 'scratch', 'today']
+  const targetNames: Record<string, string> = { card: 'card', 'card!': 'card about this', scratch: 'note', today: 'today' }
+  const capture = $derived(/^:(card!?|scratch|today)\s/.exec(value)?.[1])
+
+  function retarget(delta: 1 | -1): boolean {
+    if (!capture) return false
+    const at = targets.indexOf(capture === 'card!' || capture === 'card' ? card : capture)
+    const next = targets[(at + delta + targets.length) % targets.length]
+    value = value.replace(/^:\S+/, `:${next}`)
+    return true
+  }
   const historyKey = $derived(isSearch ? 'diary:history:search' : 'diary:history:cmd')
 
   /*
@@ -129,7 +148,7 @@
       const query = line.slice(1)
       await workspace.guard(async () => {
         if (query && workspace.query !== query) await workspace.search(query, global)
-        if (query && (workspace.selected || workspace.foundCard)) await workspace.openSelected()
+        if (query && (workspace.selected || workspace.foundCard || workspace.foundNote)) await workspace.openSelected()
       })
       hooks.focusList()
       return
@@ -187,7 +206,7 @@
       workspace.move(event.shiftKey ? -1 : 1)
     } else if (event.key === 'Tab') {
       event.preventDefault()
-      complete(event.shiftKey ? -1 : 1)
+      if (!retarget(event.shiftKey ? -1 : 1)) complete(event.shiftKey ? -1 : 1)
     } else if (ctrl && isSearch && (event.key === 'n' || event.key === 'p')) {
       // The results, walked without leaving the line; Enter opens the one lit.
       event.preventDefault()
@@ -227,6 +246,7 @@
 
   <form onsubmit={submit}>
     {#if isSearch}<span class="scope label">{global ? 'all spaces' : (workspace.space?.slug ?? '')}</span>{/if}
+    {#if capture}<span class="scope label" title="Tab: card · note · today">→ {targetNames[capture]} <span class="kbd">tab</span></span>{/if}
     <input bind:this={input} bind:value {onkeydown} {oninput} spellcheck="false" autocomplete="off" />
   </form>
 </div>

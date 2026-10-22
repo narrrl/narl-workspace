@@ -139,8 +139,9 @@ class Workspace {
 
   /** Children of the current folder, or the results of a search. */
   nodes = $state<NodeSummary[]>([])
-  /** The cards a search found, listed after the nodes. */
+  /** The cards a search found, listed after the nodes, and the notes after them. */
   foundCards = $state<AgendaCard[]>([])
+  foundNotes = $state<ScratchNote[]>([])
   cursor = $state(0)
   query = $state('')
 
@@ -446,14 +447,20 @@ class Workspace {
     return this.nodes[this.cursor]
   }
 
-  /** How many rows the list has to walk: the nodes, then the cards a search found. */
+  /** How many rows the list has to walk: the nodes, then the cards and the notes a search found. */
   get rows(): number {
-    return this.nodes.length + this.foundCards.length
+    return this.nodes.length + this.foundCards.length + this.foundNotes.length
   }
 
   /** The card a search found under the cursor, past the nodes it found. */
   get foundCard(): AgendaCard | undefined {
     return this.cursor >= this.nodes.length ? this.foundCards[this.cursor - this.nodes.length] : undefined
+  }
+
+  /** The note a search found under the cursor, past the cards. */
+  get foundNote(): ScratchNote | undefined {
+    const at = this.cursor - this.nodes.length - this.foundCards.length
+    return at >= 0 ? this.foundNotes[at] : undefined
   }
 
   /**
@@ -1003,10 +1010,16 @@ class Workspace {
     const keepId = keep ?? this.selected?.id
     if (this.query) {
       const space = this.#searchSpace
-      ;[this.nodes, this.foundCards] = await Promise.all([api.listNodes({ q: this.query, space }), api.searchCards(this.query, space)])
+      // A note is in no space, so every search looks through them all.
+      ;[this.nodes, this.foundCards, this.foundNotes] = await Promise.all([
+        api.listNodes({ q: this.query, space }),
+        api.searchCards(this.query, space),
+        api.scratch(this.query),
+      ])
     } else {
       this.nodes = await api.listNodes({ parent: this.parentId ?? undefined })
       this.foundCards = []
+      this.foundNotes = []
     }
     const index = this.nodes.findIndex((n) => n.id === keepId)
     this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(this.rows - 1, 0))
@@ -1094,6 +1107,8 @@ class Workspace {
   async openSelected(edit = false) {
     const found = this.foundCard
     if (found) return this.turnTo(found)
+    const note = this.foundNote
+    if (note) return this.showNote(note.id)
     const selected = this.selected
     if (!selected) return
     // A match from anywhere opens beside the results, as one from this space
@@ -1831,11 +1846,11 @@ class Workspace {
    * a thought down must not cost the place you were at. On the board itself
    * it goes on the list under the cursor instead.
    */
-  async createCard(title: string, nodeId: number | null = null) {
+  async createCard(title: string, nodeId: number | null = null, body = '') {
     if (this.focus === 'board' || this.focus === 'card') {
       const list = this.list
       if (!list) return this.say('no list to put it on', 'error')
-      const card = await api.createCard(list.id, { title, node_id: nodeId })
+      const card = await api.createCard(list.id, { title, node_id: nodeId, body })
       await this.reloadBoard(this.boardSpaceId, card.id)
       await this.#reloadCardsAbout()
       return this.say(nodeId === null ? `carded "${card.title}"` : `carded "${card.title}" → #${nodeId}`)
@@ -1845,7 +1860,7 @@ class Workspace {
     if (!space) return this.say('no space has a board — :set board turns one on', 'error')
     const inbox = (await api.board(space.id)).lists[0]
     if (!inbox) return this.say(`${space.slug} has no lists — :board, then :list <name>`, 'error')
-    const card = await api.createCard(inbox.id, { title, node_id: nodeId })
+    const card = await api.createCard(inbox.id, { title, node_id: nodeId, body })
     await this.loadAgenda()
     await this.#reloadCardsAbout()
     this.say(`carded "${card.title}" → ${space.slug}/${inbox.name}`)
@@ -1993,9 +2008,89 @@ class Workspace {
   async dropScratchNote(say = true, note = this.scratchNote) {
     if (!note) return
     await api.deleteScratch(note.id)
-    this.scratchNotes = this.scratchNotes.filter((n) => n.id !== note.id)
-    this.scratchCursor = Math.min(this.scratchCursor, Math.max(this.scratchNotes.length - 1, 0))
+    this.#forgetNote(note.id)
     if (say) this.say('scratch note dropped')
+  }
+
+  /** A note gone from the drawer and from the search results, the cursors kept in range. */
+  #forgetNote(id: number) {
+    this.scratchNotes = this.scratchNotes.filter((n) => n.id !== id)
+    this.scratchCursor = Math.min(this.scratchCursor, Math.max(this.scratchNotes.length - 1, 0))
+    if (!this.foundNotes.some((n) => n.id === id)) return
+    this.foundNotes = this.foundNotes.filter((n) => n.id !== id)
+    this.cursor = Math.min(this.cursor, Math.max(this.rows - 1, 0))
+  }
+
+  /** A note found by a search: the drawer down, with it under the cursor. */
+  async showNote(id: number) {
+    if (!this.scratchOpen) await this.toggleScratch()
+    else this.scratchNotes = await api.scratch()
+    const at = this.scratchNotes.findIndex((note) => note.id === id)
+    if (at < 0) return this.say('that note is gone', 'error')
+    this.scratchCursor = at
+  }
+
+  /** The note under the cursor, saved and closed if it was being written, for it to leave. */
+  async #leavingNote(): Promise<ScratchNote | undefined> {
+    if (this.scratchEditing && !(await this.leaveWriting())) return
+    const note = this.scratchNote
+    if (!note) this.say('no scratch note under the cursor', 'error')
+    return note
+  }
+
+  /** A note split as a card or a document takes it: the first line, a `# heading` or not, and the rest. */
+  #split(note: ScratchNote): { title: string; rest: string } {
+    const [first, ...rest] = note.body.replace(/^\s+/, '').split('\n')
+    return { title: first.replace(/^#+\s*/, '').trim().slice(0, 200), rest: rest.join('\n').replace(/^\n+/, '') }
+  }
+
+  /**
+   * `C`: the note under the cursor made a card, where `:card` would put one
+   * — the list under the board's cursor, or this space's inbox. The first
+   * line is its title, and the rest its description.
+   */
+  async cardScratchNote() {
+    const note = await this.#leavingNote()
+    if (!note) return
+    const { title, rest } = this.#split(note)
+    if (!title) return this.say('the note has nothing to call a card by', 'error')
+    // Made first, dropped after: a failure in between leaves two copies, never none.
+    await this.createCard(title, null, rest)
+    await this.dropScratchNote(false, note)
+  }
+
+  /**
+   * `:append <document>`: the note under the cursor put at the end of a
+   * document, named as a link names it, and taken off the scratchpad. Open
+   * drafts are written first, and a tile showing the document reads it again.
+   */
+  async appendScratchNote(document: string) {
+    const note = await this.#leavingNote()
+    if (!note) return
+    await this.flush()
+    const space = this.space?.role === 'diary' ? undefined : this.space?.slug
+    const landed = await api.capture({ text: note.body, to: 'document', document, space, note: note.id })
+    this.#forgetNote(note.id)
+    await this.#reread(landed.id)
+    this.say(`appended to ${landed.where}`)
+  }
+
+  /** `:today <text>`: a line at the end of today's diary entry, without going there. */
+  async logToday(text: string) {
+    await this.flush()
+    const landed = await api.capture({ text, to: 'diary' })
+    await this.#reread(landed.id)
+    this.say(`logged in ${landed.where}`)
+  }
+
+  /** Every tile showing `id` reads it again, after it was written somewhere else. */
+  async #reread(id: number) {
+    for (const tile of this.tiles) {
+      if (tile.open?.id !== id || tile.dirty) continue
+      const node = await api.getNode(id)
+      tile.open = node
+      tile.draft = { name: node.name, body: node.body, created_at: node.created_at }
+    }
   }
 
   /** `:scratch <text>`: a note from the command line, without the drawer. */
@@ -2011,19 +2106,14 @@ class Workspace {
    * line is the title — a `# heading` or not — and the rest the body.
    */
   async keepScratchNote(title = '') {
-    if (this.scratchEditing && !(await this.leaveWriting())) return
-    const note = this.scratchNote
-    if (!note) return this.say('no scratch note to keep', 'error')
+    const note = await this.#leavingNote()
+    if (!note) return
     const parent = this.parentId ?? this.spaceId ?? this.spaces.find((space) => space.role !== 'diary')?.id
     if (parent === undefined || parent === null) return this.say('no space to keep it in', 'error')
 
-    let name = title.trim()
-    let body = note.body
-    if (!name) {
-      const [first, ...rest] = note.body.replace(/^\s+/, '').split('\n')
-      name = first.replace(/^#+\s*/, '').trim().slice(0, 200)
-      body = rest.join('\n').replace(/^\n+/, '')
-    }
+    const split = this.#split(note)
+    const name = title.trim() || split.title
+    const body = title.trim() ? note.body : split.rest
     const node = await api.createNode({ parent_id: parent, name, body })
     // Made first, dropped after: a failure in between leaves two copies, never none.
     await this.dropScratchNote(false, note)

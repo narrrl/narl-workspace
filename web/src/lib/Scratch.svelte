@@ -9,7 +9,7 @@
   import Keys from './Keys.svelte'
   import { renderMarkdown } from './markdown'
   import { workspace } from './store.svelte'
-  import { relative } from './util'
+  import { headline, relative } from './util'
 
   let list = $state<HTMLUListElement>()
 
@@ -20,11 +20,6 @@
     const at = workspace.scratchCursor
     list?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
   })
-
-  /** What a note is called in the list: its first line that says something. */
-  function headline(body: string): string {
-    return body.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '').trim() ?? ''
-  }
 
   function pick(index: number) {
     if (workspace.scratchEditing) return

@@ -105,7 +105,7 @@ export interface ApiToken {
 
 /** Where `POST /api/capture` put the text. */
 export interface Captured {
-  to: 'card' | 'diary'
+  to: 'card' | 'diary' | 'note' | 'document'
   id: number
   where: string
 }
@@ -608,8 +608,15 @@ export const api = {
     },
   ) => request<Moved>(`/cards/${id}`, { method: 'PUT', body: body(patch) }),
 
-  /** The scratchpad's notes, the one touched last first. */
-  scratch: () => request<ScratchNote[]>('/scratch'),
+  /** The scratchpad's notes, the one touched last first — or those a search finds, the best first. */
+  scratch: (q?: string) => request<ScratchNote[]>(`/scratch${q === undefined ? '' : `?q=${encodeURIComponent(q)}`}`),
+  /**
+   * Text written down somewhere: a card in an inbox, a line in today's entry,
+   * a note, the end of a document. With `note`, the text is that note's, and
+   * it leaves the scratchpad once the text has landed.
+   */
+  capture: (input: { text: string; to: Captured['to']; space?: string; document?: string; note?: number }) =>
+    request<Captured>('/capture', { method: 'POST', body: body(input) }),
   createScratch: (text: string) => request<ScratchNote>('/scratch', { method: 'POST', body: body({ body: text }) }),
   updateScratch: (id: number, text: string) =>
     request<ScratchNote>(`/scratch/${id}`, { method: 'PUT', body: body({ body: text }) }),
