@@ -56,6 +56,10 @@ folder it is in. `Tab` or `Ctrl-N` / `Ctrl-P` walk them without leaving the
 line, and `Enter` opens the one lit. Afterwards `n` and `N` open the next and
 previous result beside the list, and `:noh` clears the search.
 
+Cards are searched too, by their title, description and checklist steps. They
+are listed after the documents, under `cards`, with the board and list each is
+on. `Enter` on one turns it over on its board; `n` and `N` only light it up.
+
 ![A search that found a line in a log file](../images/search.png)
 
 Each word you type matches the start of a word, so `inge` finds "ingest". All

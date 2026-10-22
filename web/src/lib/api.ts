@@ -53,6 +53,8 @@ export interface WorkspaceNode extends NodeSummary {
   path: Crumb[]
   /** How many documents link here. */
   backlinks: number
+  /** The cards about it — its own, and those whose summary links here — open ones first. */
+  cards: AgendaCard[]
   /** Where each `[[title]]` in the body leads, as an /n/ path; a title that leads nowhere is missing. */
   wikilinks: Record<string, string>
 }
@@ -191,12 +193,16 @@ export interface Moved extends Card {
   again: Card | null
 }
 
-/** An open card as the agenda lists it, with the board it lives on. */
+/**
+ * A card with the board it lives on: as the agenda lists it, as a document
+ * lists the cards about it, and as a search finds it.
+ */
 export interface AgendaCard extends Card {
   space_id: number
   space_slug: string
   list_name: string
-  role: 'inbox' | 'doing'
+  /** The agenda only ever has the first two. */
+  role: 'inbox' | 'doing' | 'done'
 }
 
 export interface Agenda {
@@ -456,6 +462,11 @@ export const api = {
   },
 
   getNode: (id: number) => request<WorkspaceNode>(`/nodes/${id}`),
+  /** The cards about a document, as `getNode` has them. */
+  nodeCards: (id: number) => request<AgendaCard[]>(`/nodes/${id}/cards`),
+  /** The cards whose title, summary or steps match — in one space's board with `space`. */
+  searchCards: (q: string, space?: number) =>
+    request<AgendaCard[]>(`/cards?${new URLSearchParams(space === undefined ? { q } : { q, space: String(space) })}`),
 
   /** `work/einarbeiten/01-was-ist-eebus` — the node behind a `/n/...` address. */
   resolvePath: (path: string) => request<WorkspaceNode>(`/resolve?path=${encodeURIComponent(path)}`),

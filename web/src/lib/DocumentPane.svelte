@@ -5,6 +5,7 @@
   import { workspace, type Tile } from './store.svelte'
   import Icon from './Icon.svelte'
   import {
+    formatDay,
     formatStamp,
     formatWeekday,
     headingsIn,
@@ -26,6 +27,9 @@
   const words = $derived(
     (tile.editing ? tile.draft.body : doc.body).split(/\s+/).filter(Boolean).length,
   )
+  /** What is still to be done about it, and when the first of that is due. */
+  const tasks = $derived(doc.cards.filter((card) => card.done_at === null))
+  const due = $derived(tasks.reduce<number | null>((first, card) => (card.due_at !== null && (first === null || card.due_at < first) ? card.due_at : first), null))
   let reader = $state<HTMLElement>()
   let article = $state<HTMLElement>()
   let title = $state<HTMLInputElement>()
@@ -162,6 +166,18 @@
         <span class="field public"><span class="ring"></span>public</span>
       {/if}
     </button>
+    <!-- The work about it, in a line: what is still to do here — gc lists it. -->
+    {#if tasks.length > 0}
+      <button class="meta tasks" title="cards (gc)" onclick={() => openInfo('cards')}>
+        <span class="field">
+          <span class="caption">{tasks.length === 1 ? 'card' : 'cards'}</span>
+          {#if tasks.length === 1}<span class="what">{tasks[0].title}</span> · {tasks[0].list_name}{:else}{tasks.length} open{/if}
+        </span>
+        {#if due !== null}
+          <span class="field" class:late={due < Date.now() / 1000}><span class="caption">due</span>{formatWeekday(due)} {formatDay(due)}</span>
+        {/if}
+      </button>
+    {/if}
   </header>
 
   {#if tile.editing}
@@ -277,6 +293,8 @@
   .meta:hover .caption, .meta:focus-visible .caption { color: var(--light); }
   .caption { margin-right: 8px; color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; }
   .public { display: flex; align-items: center; gap: 6px; color: var(--light); }
+  .tasks .what { color: var(--light); }
+  .tasks .late { color: var(--alarm); }
   .ring { width: 7px; height: 7px; flex: none; border: 1.5px solid var(--light); border-radius: 999px; }
 
   .title {

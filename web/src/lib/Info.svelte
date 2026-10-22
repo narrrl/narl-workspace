@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { Backlink, NodeSummary, RevisionSummary } from './api'
+  import type { AgendaCard, Backlink, NodeSummary, RevisionSummary } from './api'
   import { workspace, type InfoSection } from './store.svelte'
   import { formatStamp } from './util'
 
@@ -7,9 +7,9 @@
    * What the keys in actions.ts do here too, so a key and a click are the
    * same thing. The info sheet holds what is known about the open document
    * besides its text: its headings, its earlier versions, what links to it,
-   * and whether it is shared.
+   * the cards about it, and whether it is shared.
    */
-  export const infoSections: InfoSection[] = ['outline', 'history', 'backlinks', 'share']
+  export const infoSections: InfoSection[] = ['outline', 'history', 'backlinks', 'cards', 'share']
 
   /** Tab and Shift-Tab: the next part along, round the ends. */
   export function turnInfo(by: number) {
@@ -44,6 +44,12 @@
     return workspace.guard(() => workspace.openPath(link.path))
   }
 
+  /** Enter on a card: the sheet away, and the card turned over on its board. */
+  export function turnCard(card: AgendaCard) {
+    workspace.closeSheet()
+    return workspace.guard(() => workspace.turnTo(card))
+  }
+
   // Sharing is a key away; taking a link back from its readers asks first.
   export async function toggleSharing(node: NodeSummary | null | undefined) {
     if (!node) return workspace.say('nothing selected', 'error')
@@ -66,14 +72,28 @@
     restore: 'replaced by a restore',
   }
   const reason = (summary: RevisionSummary) => REASONS[summary.reason] ?? summary.reason
+
+  /** Where a card stands, as one word: done, or the list it is on. */
+  const standing = (card: AgendaCard) => (card.done_at !== null ? 'done' : card.list_name)
 </script>
 
 <script lang="ts">
   import Sheet from './Sheet.svelte'
   import { diffLines, folded } from './diff'
-  import { relative } from './util'
+  import { formatDay, relative } from './util'
 
   const doc = $derived(workspace.open)
+
+  /** `work · doing · due 2026-10-23 · mentions it`: a card's line under its title. */
+  const where = (card: AgendaCard) =>
+    [
+      card.space_slug,
+      standing(card),
+      card.due_at !== null && card.done_at === null ? `due ${formatDay(card.due_at)}` : '',
+      card.node_id !== doc?.id ? 'mentions it' : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
   const section = $derived(workspace.infoSection)
 
   // The shallowest level in the document is the left edge, so a text that
@@ -95,11 +115,18 @@
     ['outline', `outline ${workspace.outline.length}`],
     ['history', `history ${workspace.history.length}`],
     ['backlinks', `linked from ${workspace.backlinks.length}`],
+    ['cards', `cards ${doc?.cards.filter((card) => card.done_at === null).length ?? 0}`],
     ['share', doc?.shared ? 'shared' : 'private'],
   ])
 
   const cursor = $derived(
-    { outline: workspace.outlineCursor, history: workspace.historyCursor, backlinks: workspace.backlinksCursor, share: undefined }[section],
+    {
+      outline: workspace.outlineCursor,
+      history: workspace.historyCursor,
+      backlinks: workspace.backlinksCursor,
+      cards: workspace.cardsCursor,
+      share: undefined,
+    }[section],
   )
 </script>
 
@@ -186,6 +213,25 @@
         <li class="muted">nothing links here yet — a link is [text](/n/…) or [[title]].</li>
       {/each}
     </ul>
+  {:else if section === 'cards'}
+    <ul class="items">
+      {#each doc?.cards ?? [] as card, index (card.id)}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+        <li
+          class="item"
+          class:at={index === workspace.cardsCursor}
+          class:done={card.done_at !== null}
+          data-index={index}
+          onpointerenter={() => (workspace.cardsCursor = index)}
+          onclick={() => turnCard(card)}
+        >
+          <span class="name">{card.title}</span>
+          <span class="muted">{where(card)}</span>
+        </li>
+      {:else}
+        <li class="muted">no card about this document — c makes one, and a card's [[title]] counts too.</li>
+      {/each}
+    </ul>
   {:else}
     <div class="share">
       {#if sharePath}
@@ -235,6 +281,8 @@
   .row.gone { background: color-mix(in oklab, var(--alarm) 16%, transparent); }
   .row.added { background: color-mix(in oklab, var(--light) 14%, transparent); }
   .row.fold { color: var(--muted); }
+
+  .done .name { color: var(--muted); text-decoration: line-through; }
 
   .context { font-size: 12px; color: var(--subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

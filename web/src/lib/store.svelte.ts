@@ -7,6 +7,7 @@ import {
   type AgendaCard,
   type Backlink,
   type Board,
+  type BoardList,
   type Card,
   type Crumb,
   type DiaryEntry,
@@ -35,7 +36,7 @@ export type View = Exclude<TileKind, 'node'>
 /** What floats over the tiles; one at a time. */
 export type Sheet = 'help' | 'media' | 'overview' | 'actions' | 'verify' | 'info' | 'trash'
 /** The info sheet's parts: what the open document holds, and what is around it. */
-export type InfoSection = 'outline' | 'history' | 'backlinks' | 'share'
+export type InfoSection = 'outline' | 'history' | 'backlinks' | 'cards' | 'share'
 export type Flash = { text: string; kind: 'info' | 'error' } | null
 
 /**
@@ -137,6 +138,8 @@ class Workspace {
 
   /** Children of the current folder, or the results of a search. */
   nodes = $state<NodeSummary[]>([])
+  /** The cards a search found, listed after the nodes. */
+  foundCards = $state<AgendaCard[]>([])
   cursor = $state(0)
   query = $state('')
 
@@ -407,6 +410,8 @@ class Workspace {
   /** `:backlinks`: the documents that link to the open one. */
   backlinks = $state<Backlink[]>([])
   backlinksCursor = $state(0)
+  /** The info sheet's cards: where its cursor is in the open document's. */
+  cardsCursor = $state(0)
   overview = $state<SpaceOverview[]>([])
   overviewCursor = $state(0)
 
@@ -434,6 +439,16 @@ class Workspace {
     return this.nodes[this.cursor]
   }
 
+  /** How many rows the list has to walk: the nodes, then the cards a search found. */
+  get rows(): number {
+    return this.nodes.length + this.foundCards.length
+  }
+
+  /** The card a search found under the cursor, past the nodes it found. */
+  get foundCard(): AgendaCard | undefined {
+    return this.cursor >= this.nodes.length ? this.foundCards[this.cursor - this.nodes.length] : undefined
+  }
+
   /**
    * What a verb acts on: the open document while the document pane has focus,
    * the row under the cursor while the list does. Walking the list with a
@@ -458,6 +473,38 @@ class Workspace {
 
   get card(): Card | undefined {
     return this.list?.cards[this.cardCursor]
+  }
+
+  /**
+   * The card the card verbs act on, wherever it is looked at: picked in the
+   * info sheet, under the board's cursor or turned over beside it,
+   * highlighted in the agenda — or, reading a document, the one open card
+   * about it, when there is only one.
+   */
+  get focusedCard(): Card | AgendaCard | undefined {
+    const about = this.open?.cards ?? []
+    if (this.overlay === 'info' && this.infoSection === 'cards') return about[this.cardsCursor]
+    switch (this.focus) {
+      case 'board':
+      case 'card':
+        return this.card
+      case 'agenda':
+        return this.agendaCards[this.agendaCursor]
+      case 'node': {
+        const open = about.filter((card) => card.done_at === null)
+        return open.length === 1 ? open[0] : undefined
+      }
+    }
+  }
+
+  /** The focused card, or `undefined` once it has been said why there is none. */
+  #needCard(): Card | AgendaCard | undefined {
+    const card = this.focusedCard
+    if (card) return card
+    const open = this.focus === 'node' ? (this.open?.cards ?? []).filter((c) => c.done_at === null).length : 0
+    if (open > 1) this.say(`${open} open cards about this — gc picks one`, 'error')
+    else if (this.focus === 'node' && this.open?.kind === 'document') this.say('no open card about this document — c makes one', 'error')
+    else this.say('no card in focus — :board', 'error')
   }
 
   /**
@@ -946,11 +993,20 @@ class Workspace {
   /** `keep` follows a node that just arrived, instead of holding the cursor. */
   async refresh(keep?: number) {
     const keepId = keep ?? this.selected?.id
-    this.nodes = this.query
-      ? await api.listNodes({ q: this.query, space: this.globalSearch ? undefined : (this.spaceId ?? undefined) })
-      : await api.listNodes({ parent: this.parentId ?? undefined })
+    if (this.query) {
+      const space = this.#searchSpace
+      ;[this.nodes, this.foundCards] = await Promise.all([api.listNodes({ q: this.query, space }), api.searchCards(this.query, space)])
+    } else {
+      this.nodes = await api.listNodes({ parent: this.parentId ?? undefined })
+      this.foundCards = []
+    }
     const index = this.nodes.findIndex((n) => n.id === keepId)
-    this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(this.nodes.length - 1, 0))
+    this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(this.rows - 1, 0))
+  }
+
+  /** The space a search keeps to; none for one across every space. */
+  get #searchSpace(): number | undefined {
+    return this.globalSearch ? undefined : (this.spaceId ?? undefined)
   }
 
   async search(query: string, global = this.globalSearch) {
@@ -962,25 +1018,25 @@ class Workspace {
 
   /**
    * `n` / `N`: the next or previous search result after the cursor, opened
-   * beside the results so the next `n` goes on from there. A folder is only
-   * highlighted: going into it would end the search. Past the last result it
-   * starts again at the first, as vim's `wrapscan` does.
+   * beside the results so the next `n` goes on from there. A folder or a card
+   * is only highlighted: going to it would end the search. Past the last
+   * result it starts again at the first, as vim's `wrapscan` does.
    */
   async nextResult(delta: 1 | -1) {
     if (!this.query) return this.say('no search — / starts one', 'error')
-    const count = this.nodes.length
+    const count = this.rows
     if (count === 0) return this.say(`no results for "${this.query}"`, 'error')
     const next = this.cursor + delta
     if (next >= count) this.say('search hit BOTTOM, continuing at TOP')
     else if (next < 0) this.say('search hit TOP, continuing at BOTTOM')
     this.cursor = (next + count) % count
-    const node = this.nodes[this.cursor]
-    if (!isContainer(node)) await this.openNode(node.id)
+    const node = this.selected
+    if (node && !isContainer(node)) await this.openNode(node.id)
   }
 
   move(delta: number) {
-    if (this.nodes.length === 0) return
-    this.cursor = Math.min(Math.max(this.cursor + delta, 0), this.nodes.length - 1)
+    if (this.rows === 0) return
+    this.cursor = Math.min(Math.max(this.cursor + delta, 0), this.rows - 1)
   }
 
   async openNode(id: number, edit = false) {
@@ -1028,6 +1084,8 @@ class Workspace {
 
   /** What Enter does: descend into a folder, open a document or a file. */
   async openSelected(edit = false) {
+    const found = this.foundCard
+    if (found) return this.turnTo(found)
     const selected = this.selected
     if (!selected) return
     // A match from anywhere opens beside the results, as one from this space
@@ -1470,44 +1528,13 @@ class Workspace {
     await this.showView('board')
   }
 
-  /** Space in the agenda: into that board's done list, from wherever it is. */
-  async finishCard(card: AgendaCard) {
-    const done = (await api.board(card.space_id)).lists.at(-1)
-    if (!done) return
-    const moved = await api.moveCard(card.id, done.id, done.cards.length)
-    await this.loadAgenda()
-    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
-    this.say(doneSaid(moved))
-  }
-
-  /** `:due` or `:repeat` with the agenda up: the highlighted card, on its own board. */
-  async patchAgendaCard(patch: Parameters<typeof api.updateCard>[1]) {
-    const card = this.agendaCards[this.agendaCursor]
-    if (!card) return this.say('no card highlighted', 'error')
-    const updated = await api.updateCard(card.id, patch)
-    await this.loadAgenda()
-    // It may have changed group; the cursor goes with it.
-    const at = this.agendaCards.findIndex((c) => c.id === card.id)
-    if (at >= 0) this.agendaCursor = at
-    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
-    return updated
-  }
-
   /**
-   * `H` / `L` in the agenda: the card to the list left or right of the one it
-   * is in, without going to the board — `L` on the last list but one is done.
+   * Enter on a card a search found, or one picked in a document's info
+   * sheet: to its board, turned over beside it.
    */
-  async sendAgendaCard(card: AgendaCard, delta: number) {
-    const lists = (await api.board(card.space_id)).lists
-    const from = lists.findIndex((list) => list.id === card.list_id)
-    const target = lists[from + delta]
-    if (from < 0 || !target) return this.say(`${card.title} is already in the ${delta < 0 ? 'first' : 'last'} list`, 'error')
-    const moved = await api.moveCard(card.id, target.id, target.cards.length)
-    await this.loadAgenda()
-    const at = this.agendaCards.findIndex((c) => c.id === card.id)
-    if (at >= 0) this.agendaCursor = at
-    if (this.boardSpaceId === card.space_id) await this.reloadBoard()
-    this.say(from + delta === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
+  async turnTo(card: AgendaCard) {
+    await this.goToCard(card)
+    await this.turnCard()
   }
 
   async loadOverview() {
@@ -1721,23 +1748,73 @@ class Workspace {
     await this.reloadBoard(this.boardSpaceId, card.id)
   }
 
-  /** `H`/`L`: the same card, one list over — the move a board is really for. */
-  async sendCard(delta: number) {
-    await this.sendCardTo(this.listCursor + delta)
+  /**
+   * `H`/`L`: the same card, one list over — the move a board is really for.
+   * From the agenda or a document too, without going to the board.
+   */
+  async sendCard(delta: number, card = this.#needCard()) {
+    if (!card) return
+    const lists = await this.#listsOf(card)
+    await this.#sendTo(card, lists, lists.findIndex((list) => list.id === card.list_id) + delta)
+  }
+
+  /** The digits on the board: the card under the cursor to that list. */
+  async sendCardTo(index: number) {
+    const card = this.card
+    if (!card || index === this.listCursor) return
+    await this.#sendTo(card, this.board?.lists ?? [], index)
+  }
+
+  /** The lists of a card's board: the one shown, or read for it. */
+  async #listsOf(card: Card | AgendaCard): Promise<BoardList[]> {
+    const shown = this.board?.lists ?? []
+    if (shown.some((list) => list.id === card.list_id)) return shown
+    return 'space_id' in card ? (await api.board(card.space_id)).lists : []
   }
 
   /*
    * The last list is "done": the server stamps a card finished as it arrives
    * there and clears the stamp as it leaves, so moving is all there is to it.
    */
-  async sendCardTo(index: number) {
-    const card = this.card
-    const lists = this.board?.lists ?? []
+  async #sendTo(card: Card, lists: BoardList[], index: number) {
     const target = lists[index]
-    if (!card || !target || index === this.listCursor) return
-    const moved = await api.moveCard(card.id, target.id, target.cards.length)
-    await this.reloadBoard(this.boardSpaceId, card.id)
+    if (!target) return this.say(`"${card.title}" is already in the ${index < 0 ? 'first' : 'last'} list`, 'error')
+    const moved = await api.moveCard(card.id, target.id)
+    await this.#cardChanged(card)
     this.say(index === lists.length - 1 ? doneSaid(moved) : `"${card.title}" → ${target.name}`)
+  }
+
+  /**
+   * After a card changed, wherever it was changed from: the board, the
+   * agenda and the open documents read it again, and the cursor that was on
+   * it stays on it.
+   */
+  async #cardChanged(card: Card) {
+    const shown = this.rawBoard?.lists.some((list) => list.cards.some((c) => c.id === card.id)) ?? false
+    const here = this.focus === 'board' || this.focus === 'card'
+    if (shown) await this.reloadBoard(this.boardSpaceId, here ? card.id : this.card?.id)
+    if (!shown || this.focus === 'agenda') {
+      await this.loadAgenda()
+      // It may have changed group; the cursor goes with it.
+      const at = this.agendaCards.findIndex((c) => c.id === card.id)
+      if (at >= 0 && this.focus === 'agenda') this.agendaCursor = at
+    }
+    await this.#reloadCardsAbout()
+    if (this.foundCards.some((c) => c.id === card.id)) this.foundCards = await api.searchCards(this.query, this.#searchSpace)
+    const at = this.open?.cards.findIndex((c) => c.id === card.id) ?? -1
+    if (at >= 0) this.cardsCursor = at
+  }
+
+  /** The cards about each document open in a tile, read again. */
+  async #reloadCardsAbout() {
+    await Promise.all(
+      this.tiles.map(async (tile) => {
+        const id = tile.open?.kind === 'document' ? tile.open.id : null
+        if (id === null) return
+        const cards = await api.nodeCards(id).catch(() => null)
+        if (cards && tile.open?.id === id) tile.open.cards = cards
+      }),
+    )
   }
 
   /**
@@ -1752,6 +1829,7 @@ class Workspace {
       if (!list) return this.say('no list to put it on', 'error')
       const card = await api.createCard(list.id, { title, node_id: nodeId })
       await this.reloadBoard(this.boardSpaceId, card.id)
+      await this.#reloadCardsAbout()
       return this.say(nodeId === null ? `carded "${card.title}"` : `carded "${card.title}" → #${nodeId}`)
     }
 
@@ -1761,30 +1839,25 @@ class Workspace {
     if (!inbox) return this.say(`${space.slug} has no lists — :board, then :list <name>`, 'error')
     const card = await api.createCard(inbox.id, { title, node_id: nodeId })
     await this.loadAgenda()
+    await this.#reloadCardsAbout()
     this.say(`carded "${card.title}" → ${space.slug}/${inbox.name}`)
   }
 
-  async patchCard(patch: Parameters<typeof api.updateCard>[1]) {
-    const card = this.card
-    if (!card) return this.say('no card selected', 'error')
+  /** A change to the focused card — or to `card`, when it is known which. */
+  async patchCard(patch: Parameters<typeof api.updateCard>[1], card = this.#needCard()) {
+    if (!card) return
     const updated = await api.updateCard(card.id, patch)
-    await this.reloadBoard(this.boardSpaceId, card.id)
+    await this.#cardChanged(card)
     return updated
   }
 
   /** Space: into the done list, or back out of it to the inbox. */
-  async toggleDone() {
-    const card = this.card
-    const lists = this.board?.lists ?? []
-    if (!card) return this.say('no card selected', 'error')
-    if (lists.length < 2) return this.say('a board needs two lists for one to mean done', 'error')
-    const last = lists.length - 1
-    if (this.listCursor === last) {
-      await this.sendCardTo(0)
-      this.say(`reopened: ${card.title}`)
-    } else {
-      await this.sendCardTo(last)
-    }
+  async toggleDone(card = this.#needCard()) {
+    if (!card) return
+    const done = card.done_at === null
+    const moved = await api.updateCard(card.id, { done })
+    await this.#cardChanged(card)
+    this.say(done ? doneSaid(moved) : `reopened: ${card.title}`)
   }
 
   async deleteCard() {
@@ -1972,7 +2045,8 @@ class Workspace {
   async saveDescription() {
     const card = this.card
     if (!card || !this.describing) return
-    await this.patchCard({ body: this.description })
+    // Named, as this also runs when the focus has just left the card.
+    await this.patchCard({ body: this.description }, card)
     this.descriptionDirty = false
     this.say(`"${card.title}" described`)
   }
@@ -2003,7 +2077,7 @@ class Workspace {
 
   /** The checklist written back whole, with the cursor on step `at`. */
   async writeChecklist(checklist: Task[], at = this.taskCursor) {
-    await this.patchCard({ checklist })
+    await this.patchCard({ checklist }, this.card)
     this.taskCursor = Math.min(Math.max(at, 0), Math.max(checklist.length - 1, 0))
   }
 
@@ -2071,11 +2145,11 @@ class Workspace {
   /** `:label work`: on the card, or off it when it is on already. */
   toggleLabel(name: string) {
     return this.inTurn(async () => {
-      const card = this.card
-      if (!card) return this.say('no card selected', 'error')
+      const card = this.#needCard()
+      if (!card) return
       const label = name.trim().toLowerCase()
       const on = card.labels.includes(label)
-      await this.patchCard({ labels: on ? card.labels.filter((l) => l !== label) : [...card.labels, label] })
+      await this.patchCard({ labels: on ? card.labels.filter((l) => l !== label) : [...card.labels, label] }, card)
       this.say(on ? `${label} off` : `${label} on`)
     })
   }

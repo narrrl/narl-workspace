@@ -245,23 +245,69 @@ async fn title_of(db: &mut SqliteConnection, id: i64) -> AppResult<String> {
     })
 }
 
-/// Record what `from` links to. Called by every write of a document's text,
-/// after it, in the same transaction.
-pub async fn index(db: &mut SqliteConnection, from: i64, body: &str) -> AppResult<()> {
-    let space = space_of(db, from).await?;
-    let before: HashMap<(Kind, String), i64> =
-        sqlx::query("SELECT kind, target, to_id FROM links WHERE from_id = ?1")
-            .bind(from)
-            .fetch_all(&mut *db)
-            .await?
-            .iter()
-            .map(|row| {
-                (
-                    (Kind::parse(row.get("kind")), row.get("target")),
-                    row.get("to_id"),
-                )
-            })
-            .collect();
+/// Where a link is written: a document's text, or a card's summary. Both are
+/// indexed, followed and rewritten alike; they are kept in tables of their own
+/// only because a card is not a node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Source {
+    Node(i64),
+    Card(i64),
+}
+
+impl Source {
+    /// The table its links are kept in, and the column that names it there.
+    fn table(self) -> (&'static str, &'static str, i64) {
+        match self {
+            Source::Node(id) => ("links", "from_id", id),
+            Source::Card(id) => ("card_links", "card_id", id),
+        }
+    }
+
+    /// The space a `[[title]]` in it is looked for first: the document's, or
+    /// that of the board the card is on.
+    async fn space(self, db: &mut SqliteConnection) -> AppResult<Option<i64>> {
+        match self {
+            Source::Node(id) => space_of(db, id).await,
+            Source::Card(id) => Ok(sqlx::query_scalar(
+                "SELECT l.space_id FROM cards c JOIN board_lists l ON l.id = c.list_id
+                 WHERE c.id = ?1",
+            )
+            .bind(id)
+            .fetch_optional(&mut *db)
+            .await?),
+        }
+    }
+
+    async fn body(self, db: &mut SqliteConnection) -> AppResult<String> {
+        let sql = match self {
+            Source::Node(_) => "SELECT body FROM nodes WHERE id = ?1",
+            Source::Card(_) => "SELECT body FROM cards WHERE id = ?1",
+        };
+        Ok(sqlx::query_scalar(sql)
+            .bind(self.table().2)
+            .fetch_one(&mut *db)
+            .await?)
+    }
+}
+
+/// Record what `source` links to, from its text as `body` now reads.
+async fn record(db: &mut SqliteConnection, source: Source, body: &str) -> AppResult<()> {
+    let (table, column, id) = source.table();
+    let space = source.space(db).await?;
+    let before: HashMap<(Kind, String), i64> = sqlx::query(&format!(
+        "SELECT kind, target, to_id FROM {table} WHERE {column} = ?1"
+    ))
+    .bind(id)
+    .fetch_all(&mut *db)
+    .await?
+    .iter()
+    .map(|row| {
+        (
+            (Kind::parse(row.get("kind")), row.get("target")),
+            row.get("to_id"),
+        )
+    })
+    .collect();
 
     let mut rows = Vec::new();
     for (kind, target) in written(body) {
@@ -274,31 +320,47 @@ pub async fn index(db: &mut SqliteConnection, from: i64, body: &str) -> AppResul
                 _ => None,
             },
         };
-        if let Some(to) = to.filter(|&to| to != from) {
+        // A document linking to itself is not a link to it.
+        if let Some(to) = to.filter(|&to| source != Source::Node(to)) {
             rows.push((kind, target, to));
         }
     }
 
-    sqlx::query("DELETE FROM links WHERE from_id = ?1")
-        .bind(from)
+    sqlx::query(&format!("DELETE FROM {table} WHERE {column} = ?1"))
+        .bind(id)
         .execute(&mut *db)
         .await?;
     for (kind, target, to) in rows {
-        sqlx::query("INSERT INTO links (from_id, kind, target, to_id) VALUES (?1, ?2, ?3, ?4)")
-            .bind(from)
-            .bind(kind.as_str())
-            .bind(&target)
-            .bind(to)
-            .execute(&mut *db)
-            .await?;
+        sqlx::query(&format!(
+            "INSERT INTO {table} ({column}, kind, target, to_id) VALUES (?1, ?2, ?3, ?4)"
+        ))
+        .bind(id)
+        .bind(kind.as_str())
+        .bind(&target)
+        .bind(to)
+        .execute(&mut *db)
+        .await?;
     }
     Ok(())
 }
 
+/// Record what `from` links to. Called by every write of a document's text,
+/// after it, in the same transaction.
+pub async fn index(db: &mut SqliteConnection, from: i64, body: &str) -> AppResult<()> {
+    record(db, Source::Node(from), body).await
+}
+
+/// Record what a card's summary links to. Called by every write of it, after
+/// it, in the same transaction.
+pub async fn index_card(db: &mut SqliteConnection, card: i64, body: &str) -> AppResult<()> {
+    record(db, Source::Card(card), body).await
+}
+
 /// After `id` was created, renamed or moved, in the same transaction. Every
 /// link to it, or to anything under it, that no longer finds what it linked
-/// to is rewritten to find it again; a link that found nothing until now and
-/// names it now is recorded. Returns how many documents were rewritten.
+/// to is rewritten to find it again, in a document or on a card; a link that
+/// found nothing until now and names it now is recorded. Returns how many
+/// texts were rewritten.
 pub async fn follow(db: &mut SqliteConnection, id: i64) -> AppResult<usize> {
     // Nothing in the trash is followed there: its links stay as they were
     // written, for whatever the restore brings it back as.
@@ -311,16 +373,23 @@ pub async fn follow(db: &mut SqliteConnection, id: i64) -> AppResult<usize> {
              UNION ALL
              SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
          )
-         SELECT from_id, kind, target, to_id FROM links
+         SELECT 0 AS card, from_id AS id, kind, target, to_id FROM links
+         WHERE to_id IN (SELECT id FROM sub)
+         UNION ALL
+         SELECT 1, card_id, kind, target, to_id FROM card_links
          WHERE to_id IN (SELECT id FROM sub)",
     )
     .bind(id)
     .fetch_all(&mut *db)
     .await?;
 
-    let mut linking: BTreeMap<i64, Vec<(Kind, String, i64)>> = BTreeMap::new();
+    let mut linking: BTreeMap<Source, Vec<(Kind, String, i64)>> = BTreeMap::new();
     for row in &rows {
-        linking.entry(row.get("from_id")).or_default().push((
+        let source = match row.get::<bool, _>("card") {
+            true => Source::Card(row.get("id")),
+            false => Source::Node(row.get("id")),
+        };
+        linking.entry(source).or_default().push((
             Kind::parse(row.get("kind")),
             row.get("target"),
             row.get("to_id"),
@@ -328,8 +397,8 @@ pub async fn follow(db: &mut SqliteConnection, id: i64) -> AppResult<usize> {
     }
 
     let mut rewritten = 0;
-    for (from, links) in linking {
-        let space = space_of(db, from).await?;
+    for (source, links) in linking {
+        let space = source.space(db).await?;
         let mut to = HashMap::new();
         for (kind, target, node) in links {
             if resolve(db, kind, &target, space).await? == Some(node) {
@@ -345,24 +414,33 @@ pub async fn follow(db: &mut SqliteConnection, id: i64) -> AppResult<usize> {
             continue;
         }
 
-        let body: String = sqlx::query_scalar("SELECT body FROM nodes WHERE id = ?1")
-            .bind(from)
-            .fetch_one(&mut *db)
-            .await?;
+        let body = source.body(db).await?;
         let body_now = rewrite(&body, &to);
         if body_now == body {
             continue;
         }
-        revisions::keep(db, from, &body_now, revisions::Reason::Edit).await?;
         // `updated_at` moves, so an editor open on the old text is told it
         // changed rather than saving the broken links back over it.
-        sqlx::query("UPDATE nodes SET body = ?1, updated_at = ?2 WHERE id = ?3")
-            .bind(&body_now)
-            .bind(crate::now())
-            .bind(from)
-            .execute(&mut *db)
-            .await?;
-        index(db, from, &body_now).await?;
+        match source {
+            Source::Node(from) => {
+                revisions::keep(db, from, &body_now, revisions::Reason::Edit).await?;
+                sqlx::query("UPDATE nodes SET body = ?1, updated_at = ?2 WHERE id = ?3")
+                    .bind(&body_now)
+                    .bind(crate::now())
+                    .bind(from)
+                    .execute(&mut *db)
+                    .await?;
+            }
+            Source::Card(card) => {
+                sqlx::query("UPDATE cards SET body = ?1, updated_at = ?2 WHERE id = ?3")
+                    .bind(&body_now)
+                    .bind(crate::now())
+                    .bind(card)
+                    .execute(&mut *db)
+                    .await?;
+            }
+        }
+        record(db, source, &body_now).await?;
         rewritten += 1;
     }
 
@@ -370,9 +448,9 @@ pub async fn follow(db: &mut SqliteConnection, id: i64) -> AppResult<usize> {
     Ok(rewritten)
 }
 
-/// Index again the documents that may have been waiting for `id`: whose
-/// `[[title]]` or path named nothing until it was called that, or put there.
-/// A rough cut by text, as the index then decides what each link finds.
+/// Index again the documents and cards that may have been waiting for `id`:
+/// whose `[[title]]` or path named nothing until it was called that, or put
+/// there. A rough cut by text, as the index then decides what each link finds.
 async fn claim(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
     let row = sqlx::query("SELECT name, slug FROM nodes WHERE id = ?1")
         .bind(id)
@@ -382,12 +460,17 @@ async fn claim(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
     let name = row.get::<String, _>("name").trim().to_ascii_lowercase();
     let slug: String = row.get("slug");
     let path = path_text(db, id).await?;
-    let waiting: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, body FROM nodes
+    let waiting: Vec<(bool, i64, String)> = sqlx::query_as(
+        "SELECT 0, id, body FROM nodes
          WHERE kind = 'document' AND id <> ?1
            AND (instr(body, '/n/' || ?4) > 0
                 OR (instr(body, '[[') > 0
-                    AND ((?2 <> '' AND instr(lower(body), ?2) > 0) OR instr(body, ?3) > 0)))",
+                    AND ((?2 <> '' AND instr(lower(body), ?2) > 0) OR instr(body, ?3) > 0)))
+         UNION ALL
+         SELECT 1, id, body FROM cards
+         WHERE instr(body, '/n/' || ?4) > 0
+            OR (instr(body, '[[') > 0
+                AND ((?2 <> '' AND instr(lower(body), ?2) > 0) OR instr(body, ?3) > 0))",
     )
     .bind(id)
     .bind(&name)
@@ -395,8 +478,13 @@ async fn claim(db: &mut SqliteConnection, id: i64) -> AppResult<()> {
     .bind(&path)
     .fetch_all(&mut *db)
     .await?;
-    for (from, body) in waiting {
-        index(db, from, &body).await?;
+    for (card, from, body) in waiting {
+        let source = if card {
+            Source::Card(from)
+        } else {
+            Source::Node(from)
+        };
+        record(db, source, &body).await?;
     }
     Ok(())
 }
@@ -527,31 +615,52 @@ pub async fn backlinks(
     Ok(Json(found))
 }
 
-/// Index every document, when there is no link recorded at all: the ones
-/// written before links were kept. Returns how many documents link anywhere.
+/// Index every document, when there is no link recorded at all, and every
+/// card, when no card's is: the ones written before links were kept. Returns
+/// how many documents and cards link anywhere.
 pub async fn backfill(db: &SqlitePool) -> AppResult<usize> {
-    let any: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM links)")
-        .fetch_one(db)
-        .await?;
-    if any {
+    let (documents, cards): (bool, bool) = sqlx::query_as(
+        "SELECT NOT EXISTS (SELECT 1 FROM links), NOT EXISTS (SELECT 1 FROM card_links)",
+    )
+    .fetch_one(db)
+    .await?;
+    if !documents && !cards {
         return Ok(0);
     }
-    let documents = sqlx::query(&format!(
-        "WITH RECURSIVE {} SELECT id, body FROM nodes
-         WHERE kind = 'document' AND id IN (SELECT id FROM live)
-           AND (instr(body, '/n/') > 0 OR instr(body, '[[') > 0)",
-        nodes::LIVE
-    ))
-    .fetch_all(db)
-    .await?;
+    let mut written: Vec<(Source, String)> = Vec::new();
+    if documents {
+        let rows: Vec<(i64, String)> = sqlx::query_as(&format!(
+            "WITH RECURSIVE {} SELECT id, body FROM nodes
+             WHERE kind = 'document' AND id IN (SELECT id FROM live)
+               AND (instr(body, '/n/') > 0 OR instr(body, '[[') > 0)",
+            nodes::LIVE
+        ))
+        .fetch_all(db)
+        .await?;
+        written.extend(rows.into_iter().map(|(id, body)| (Source::Node(id), body)));
+    }
+    if cards {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, body FROM cards WHERE instr(body, '/n/') > 0 OR instr(body, '[[') > 0",
+        )
+        .fetch_all(db)
+        .await?;
+        written.extend(rows.into_iter().map(|(id, body)| (Source::Card(id), body)));
+    }
+    if written.is_empty() {
+        return Ok(0);
+    }
 
     let mut tx = crate::db::begin_write(db).await?;
-    for row in &documents {
-        index(&mut tx, row.get("id"), row.get("body")).await?;
+    for (source, body) in &written {
+        record(&mut tx, *source, body).await?;
     }
-    let linking: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT from_id) FROM links")
-        .fetch_one(&mut *tx)
-        .await?;
+    let linking: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(DISTINCT from_id) FROM links)
+              + (SELECT COUNT(DISTINCT card_id) FROM card_links)",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(linking as usize)
 }
@@ -563,7 +672,10 @@ mod tests {
     use axum::extract::{Path, State};
 
     use super::{rewrite, written, Kind};
-    use crate::{routes::nodes, state::AppState};
+    use crate::{
+        routes::{boards, nodes},
+        state::AppState,
+    };
 
     #[test]
     fn what_counts_as_a_link() {
@@ -803,5 +915,116 @@ mod tests {
         assert_eq!(super::backfill(&state.db).await.unwrap(), 1);
         assert_eq!(targets(&state, linker).await[0].2, plan);
         assert_eq!(super::backfill(&state.db).await.unwrap(), 0);
+    }
+
+    async fn card(state: &AppState, space: i64, title: &str, node: Option<i64>, body: &str) -> i64 {
+        let board = boards::board(session(), State(state.clone()), Path(space))
+            .await
+            .unwrap();
+        let input = serde_json::from_value(serde_json::json!({
+            "title": title, "body": body, "node_id": node,
+        }))
+        .unwrap();
+        boards::create_card(
+            session(),
+            State(state.clone()),
+            Path(board.lists[0].id),
+            axum::Json(input),
+        )
+        .await
+        .unwrap()
+        .id
+    }
+
+    async fn cards_about(state: &AppState, node: i64) -> Vec<i64> {
+        boards::node_cards(session(), State(state.clone()), Path(node))
+            .await
+            .unwrap()
+            .iter()
+            .map(|placed| placed.card.id)
+            .collect()
+    }
+
+    /// A document lists the cards about it — its own, and the ones whose
+    /// summary links to it — and a rename rewrites a card's links as it does
+    /// a document's.
+    #[tokio::test]
+    async fn cards_link_to_documents_as_documents_do() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let work = space(&state, "work").await;
+        let plan = create(&state, work, "document", "Plan", "").await;
+        let notes = card(&state, work, "write the plan", Some(plan), "").await;
+        let mentions = card(
+            &state,
+            work,
+            "ask about it",
+            None,
+            "see [[Plan]] and [p](/n/work/plan)",
+        )
+        .await;
+        let waiting = card(&state, work, "later", None, "[[Roadmap]] first").await;
+        assert_eq!(cards_about(&state, plan).await, [notes, mentions]);
+
+        rename(&state, plan, "Roadmap").await;
+        let summary: String = sqlx::query_scalar("SELECT body FROM cards WHERE id = ?1")
+            .bind(mentions)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(summary, "see [[Roadmap]] and [p](/n/work/roadmap)");
+        // The card that named it before it was called that now finds it.
+        assert_eq!(cards_about(&state, plan).await, [notes, mentions, waiting]);
+    }
+
+    /// Search finds a card by its title, its summary and its checklist.
+    #[tokio::test]
+    async fn search_finds_cards() {
+        let state = crate::routes::tests::state_in(".".into()).await;
+        let work = space(&state, "work").await;
+        let id = card(
+            &state,
+            work,
+            "quarterly report",
+            None,
+            "numbers from finance",
+        )
+        .await;
+        let input = serde_json::from_value(serde_json::json!({
+            "checklist": [{ "text": "gather receipts" }],
+        }))
+        .unwrap();
+        let _updated =
+            boards::update_card(session(), State(state.clone()), Path(id), axum::Json(input))
+                .await
+                .unwrap();
+
+        for q in ["quarterly", "finance", "receipts", "recei"] {
+            let found = boards::search(
+                session(),
+                State(state.clone()),
+                axum::extract::Query(boards::SearchQuery {
+                    q: q.into(),
+                    space: None,
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                found.iter().map(|c| c.card.id).collect::<Vec<_>>(),
+                [id],
+                "{q}"
+            );
+        }
+        let elsewhere = boards::search(
+            session(),
+            State(state.clone()),
+            axum::extract::Query(boards::SearchQuery {
+                q: "finance".into(),
+                space: Some(space(&state, "uni").await),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(elsewhere.is_empty());
     }
 }

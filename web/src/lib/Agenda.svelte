@@ -77,7 +77,7 @@
             </button>
             {#if isTouchDevice}
               <!-- Space, for a thumb. -->
-              <button class="finish" aria-label="done: {card.title}" onclick={() => workspace.guard(() => workspace.finishCard(card))}>
+              <button class="finish" aria-label="done: {card.title}" onclick={() => workspace.guard(() => workspace.toggleDone(card))}>
                 <Icon name="check" size={18} />
               </button>
             {/if}

@@ -17,7 +17,7 @@
 //! work is still open once its notes are gone.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -32,8 +32,9 @@ use crate::{
     routes::{
         links,
         manifest::ListMeta,
-        nodes::{DOCUMENT, SPACE},
+        nodes::{self, DOCUMENT, SPACE},
         repeat::Repeat,
+        trash,
     },
     state::AppState,
 };
@@ -261,8 +262,52 @@ pub struct AgendaCard {
     pub space_id: i64,
     pub space_slug: String,
     pub list_name: String,
-    /// `inbox` for the first list, `doing` for any list between it and done.
+    /// `inbox` for the first list, `doing` for any list between it and the
+    /// last, `done` once finished.
     pub role: &'static str,
+}
+
+/// What a card is read with, from `cards c`, as `row_to_card` reads it.
+macro_rules! card_columns {
+    () => {
+        "c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
+         c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
+         (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name"
+    };
+}
+
+/// Cards with where each stands, as `row_to_placed` reads them: on a board
+/// that is shown, of a space that is not in the trash. The query goes on with
+/// its own `WHERE`.
+const PLACED: &str = concat!(
+    "WITH bounds AS (
+         SELECT space_id, MIN(position) AS first, MAX(position) AS last
+         FROM board_lists GROUP BY space_id
+     )
+     SELECT ",
+    card_columns!(),
+    ",
+            s.id AS space_id, s.slug AS space_slug, l.name AS list_name,
+            l.position = b.first AS is_first
+     FROM cards c
+     JOIN board_lists l ON l.id = c.list_id
+     JOIN bounds b ON b.space_id = l.space_id
+     JOIN nodes s ON s.id = l.space_id AND s.has_board <> 0 AND s.parent_id IS NULL"
+);
+
+fn row_to_placed(row: &sqlx::sqlite::SqliteRow) -> AgendaCard {
+    let card = row_to_card(row);
+    AgendaCard {
+        role: match (card.done_at, row.get::<bool, _>("is_first")) {
+            (Some(_), _) => "done",
+            (None, true) => "inbox",
+            (None, false) => "doing",
+        },
+        card,
+        space_id: row.get("space_id"),
+        space_slug: row.get("space_slug"),
+        list_name: row.get("list_name"),
+    }
 }
 
 /// Every unfinished card that is due within a week (or overdue), or that sits
@@ -303,44 +348,94 @@ pub async fn agenda(_: Session, State(state): State<AppState>) -> AppResult<Json
 /// The agenda's cards, due before `horizon` or in hand. Apart from the handler
 /// so the selection can be tested against a real schema.
 async fn agenda_cards(db: &SqlitePool, horizon: i64) -> AppResult<Vec<AgendaCard>> {
-    let rows = sqlx::query(
-        "WITH bounds AS (
-             SELECT space_id, MIN(position) AS first, MAX(position) AS last
-             FROM board_lists GROUP BY space_id
-         )
-         SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
-                (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name,
-                s.id AS space_id, s.slug AS space_slug, l.name AS list_name,
-                l.position = b.first AS is_first
-         FROM cards c
-         JOIN board_lists l ON l.id = c.list_id
-         JOIN bounds b ON b.space_id = l.space_id
-         JOIN nodes s ON s.id = l.space_id
-         WHERE s.has_board <> 0 AND s.parent_id IS NULL
-           AND c.done_at IS NULL
+    let rows = sqlx::query(&format!(
+        "{PLACED}
+         WHERE c.done_at IS NULL
            AND (l.position < b.last OR b.first = b.last)
            AND ((c.due_at IS NOT NULL AND c.due_at < ?1) OR (l.position > b.first))
-         ORDER BY c.due_at IS NULL, c.due_at, s.position, l.position, c.position",
-    )
+         ORDER BY c.due_at IS NULL, c.due_at, s.position, l.position, c.position"
+    ))
     .bind(horizon)
     .fetch_all(db)
     .await?;
+    Ok(rows.iter().map(row_to_placed).collect())
+}
 
-    Ok(rows
+/// How many finished cards a document lists. A repeating card leaves one
+/// behind every time it is done, and all of them would bury the open one.
+const FINISHED_SHOWN: usize = 10;
+
+/// The cards about a node: the ones whose notes it is, and the ones whose
+/// summary links to it. The open ones first, the soonest due first; then the
+/// last few finished, the latest first.
+pub(crate) async fn cards_of(db: &mut SqliteConnection, node: i64) -> AppResult<Vec<AgendaCard>> {
+    let rows = sqlx::query(&format!(
+        "{PLACED}
+         WHERE c.node_id = ?1 OR c.id IN (SELECT card_id FROM card_links WHERE to_id = ?1)
+         ORDER BY c.done_at IS NOT NULL, c.due_at IS NULL, c.due_at, c.done_at DESC,
+                  s.position, l.position, c.position"
+    ))
+    .bind(node)
+    .fetch_all(&mut *db)
+    .await?;
+    let (open, done): (Vec<AgendaCard>, Vec<AgendaCard>) = rows
         .iter()
-        .map(|row| AgendaCard {
-            card: row_to_card(row),
-            space_id: row.get("space_id"),
-            space_slug: row.get("space_slug"),
-            list_name: row.get("list_name"),
-            role: if row.get::<bool, _>("is_first") {
-                "inbox"
-            } else {
-                "doing"
-            },
-        })
+        .map(row_to_placed)
+        .partition(|card| card.card.done_at.is_none());
+    Ok(open
+        .into_iter()
+        .chain(done.into_iter().take(FINISHED_SHOWN))
         .collect())
+}
+
+/// `GET /api/nodes/{id}/cards` — the cards about a document, to show beside
+/// it and to work on without going to the board.
+pub async fn node_cards(
+    _: Session,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<AgendaCard>>> {
+    let mut conn = state.db.acquire().await?;
+    if trash::in_trash(&mut conn, id).await? {
+        return Err(AppError::NotFound);
+    }
+    cards_of(&mut conn, id).await.map(Json)
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    pub q: String,
+    /// Confine the search to one space's board.
+    #[serde(default)]
+    pub space: Option<i64>,
+}
+
+/// How many cards a search lists.
+const SEARCH_LIMIT: i64 = 50;
+
+/// `GET /api/cards?q=…` — the cards whose title, summary or a step of whose
+/// checklist matches, the open ones first and the best match first in each.
+pub async fn search(
+    _: Session,
+    State(state): State<AppState>,
+    Query(params): Query<SearchQuery>,
+) -> AppResult<Json<Vec<AgendaCard>>> {
+    let Some(query) = nodes::fts_query(&params.q) else {
+        return Ok(Json(Vec::new()));
+    };
+    let rows = sqlx::query(&format!(
+        "{PLACED}
+         JOIN cards_fts ON cards_fts.rowid = c.id
+         WHERE cards_fts MATCH ?1 AND (?2 IS NULL OR s.id = ?2)
+         ORDER BY c.done_at IS NOT NULL, cards_fts.rank
+         LIMIT ?3"
+    ))
+    .bind(query)
+    .bind(params.space)
+    .bind(SEARCH_LIMIT)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows.iter().map(row_to_placed).collect()))
 }
 
 /// `done_at` after a card moves from list `from` to list `to` on a board whose
@@ -551,10 +646,11 @@ pub(crate) async fn restore(
         .fetch_one(&mut *db)
         .await?;
         for card in &list.cards {
-            sqlx::query(
+            let card_id: i64 = sqlx::query_scalar(
                 "INSERT INTO cards (list_id, node_id, title, body, due_at, done_at, repeat,
                                     checklist, labels, position, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 RETURNING id",
             )
             .bind(id)
             .bind(card.document.as_ref().and_then(|path| documents.get(path)))
@@ -575,8 +671,9 @@ pub(crate) async fn restore(
             .bind(position)
             .bind(card.created_at)
             .bind(card.updated_at)
-            .execute(&mut *db)
+            .fetch_one(&mut *db)
             .await?;
+            links::index_card(db, card_id, &card.body).await?;
             position += 1;
             count += 1;
         }
@@ -624,15 +721,15 @@ async fn load(state: &AppState, space_id: i64, space_name: String) -> AppResult<
 
     // One query for every card on the board rather than one per list: a board
     // is small, and the round trips are what would be felt.
-    let card_rows = sqlx::query(
-        "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
-                (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
+    let card_rows = sqlx::query(concat!(
+        "SELECT ",
+        card_columns!(),
+        "
          FROM cards c
          JOIN board_lists l ON l.id = c.list_id
          WHERE l.space_id = ?1
-         ORDER BY c.position, c.id",
-    )
+         ORDER BY c.position, c.id"
+    ))
     .bind(space_id)
     .fetch_all(&state.db)
     .await?;
@@ -818,6 +915,7 @@ pub(crate) async fn insert_card(
     .fetch_one(&mut *tx)
     .await?
     .get("id");
+    links::index_card(&mut tx, id, &input.body).await?;
     // A card made straight into the done list is finished as it lands.
     settle(&mut tx, space_id).await?;
     tx.commit().await?;
@@ -926,6 +1024,9 @@ pub async fn update_card(
     .bind(card_id)
     .execute(&mut *tx)
     .await?;
+    if let Some(body) = &patch.body {
+        links::index_card(&mut tx, card_id, body).await?;
+    }
     // The move below sees the card as it is now, so a card given its rule
     // and finished in one request comes back by that rule.
     let current = Card {
@@ -1155,6 +1256,7 @@ async fn come_back(
     .bind(now)
     .fetch_one(&mut *db)
     .await?;
+    links::index_card(db, id, &card.body).await?;
 
     sqlx::query("UPDATE cards SET repeat = NULL WHERE id = ?1")
         .bind(card.id)
@@ -1175,12 +1277,12 @@ fn reopened(tasks: &[Task]) -> Vec<Task> {
 }
 
 async fn card(db: &SqlitePool, id: i64) -> AppResult<Card> {
-    let row = sqlx::query(
-        "SELECT c.id, c.list_id, c.title, c.body, c.node_id, c.due_at, c.done_at,
-                c.repeat, c.checklist, c.labels, c.position, c.created_at, c.updated_at,
-                (SELECT n.name FROM nodes n WHERE n.id = c.node_id) AS node_name
-         FROM cards c WHERE c.id = ?1",
-    )
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        card_columns!(),
+        "
+         FROM cards c WHERE c.id = ?1"
+    ))
     .bind(id)
     .fetch_optional(db)
     .await?

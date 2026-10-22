@@ -29,7 +29,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `Ctrl-D / Ctrl-U` | half a page down / up the open document |
 | `zl / zh · zL / zH` | the wide table or code block at the top of the view, sideways — a little, or half its width |
 | `]] / \[\[` | next / previous heading of the document — in the editor too |
-| `gi` | the info sheet: the open document's headings, earlier versions, backlinks and sharing — Tab between them |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards and sharing — Tab between them |
 | `gO` | the headings as a list: j/k, Enter jumps there |
 | `F` | hints over the links and buttons in view — type one to follow it |
 | `gf / gx` | in the editor: follow the link under the cursor / open it in a tab |
@@ -50,7 +50,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `[d / ]d` | the diary entry before / after the one open, by date |
 | `Ctrl-P` | find anything, in every space — Enter opens the result lit beside them, n goes on |
 | `b` | the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's |
-| `c` | capture a card into this space's inbox, without leaving here |
+| `c` | capture a card into this space's inbox, without leaving here — reading a document, a card about it |
 | `Esc · q` | close the document, and its tile when there are several |
 | `/` | full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one |
 | `n / N` | next / previous search result, opened beside the results — :noh clears the search |
@@ -60,6 +60,7 @@ arguments and `↑` / `↓` recall earlier lines.
 | `u` | undo the last delete: it comes back out of the trash — :trash has the rest |
 | `gh` | the open document's earlier versions, as diffs — Enter brings one back |
 | `gb` | the documents that link to the open one — \[\[title]] links by title, \[\[ completes one while writing |
+| `gc` | the cards about the open document — j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board |
 | `:` | command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before |
 | `Ctrl-S` | save, from anywhere |
 | `?` | this screen, from the editor too — h/l a column, / filters it down |
@@ -157,9 +158,9 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:plan, :special` | the board, the agenda and the calendar, tiled ahead of what is open — S puts them up, and every view away again; 1 … 9 on the board picks the board |
 | `:card, :c <title>` | add a card — on the board to the list under the cursor, elsewhere to this space's inbox |
 | `:card!` | add a card linked to the open document — gf on it opens the document |
-| `:due <when\|->` | due date of the card — on the board, its back, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
+| `:due <when\|->` | due date of the card in focus — on the board, its back, in the agenda, or the open document's: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears |
 | `:repeat <rule\|->` | once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it |
-| `:done` | move the selected card into the done list, or back out to the inbox |
+| `:done` | move the card in focus into the done list, or back out to the inbox |
 | `:task, :step <text>` | add a step to the open card's checklist, below the cursor |
 | `:task!` | reword the step under the cursor |
 | `:label <name>` | put a label on the card, or take it off when it has it — each name keeps its colour everywhere |
@@ -184,9 +185,10 @@ do: `:w!`, `:space! <name>`, `:import!`.
 | `:delete, :d, :rm [id]` | delete a node, and everything under it, into the trash (asks first) — u brings it back |
 | `:history, :hist` | the open document's earlier versions as diffs — j/k, Enter brings one back (gh) |
 | `:backlinks, :bl` | the documents that link to the open one — j/k, Enter opens one (gb) |
+| `:cards` | the cards about the open document — its own, and the ones whose summary links here: j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board (gc) |
 | `:source` | show an open markdown file as written, or rendered again |
 | `:outline, :toc` | the open document's headings to pick from — gO, in the editor too |
-| `:info [outline\|history\|backlinks\|share]` | what is known about the open document: its headings, earlier versions, backlinks and sharing — Tab between them (gi) |
+| `:info [outline\|history\|backlinks\|cards\|share]` | what is known about the open document: its headings, earlier versions, backlinks, cards and sharing — Tab between them (gi) |
 | `:search, :se [text]` | full-text search in this space (empty clears) |
 | `:search!` | full-text search across every space — Ctrl-P |
 | `:clear, :noh` | clear the search filter |

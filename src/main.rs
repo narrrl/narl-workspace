@@ -148,9 +148,9 @@ async fn main() -> Result<()> {
     // Before the first request, so no document reads as linked from nowhere.
     match routes::links::backfill(&state.db).await {
         Ok(0) => {}
-        Ok(1) => tracing::info!("indexed the links of 1 document"),
-        Ok(linking) => tracing::info!("indexed the links of {linking} documents"),
-        Err(e) => tracing::warn!("could not index the links between documents: {e:?}"),
+        Ok(1) => tracing::info!("indexed the links of 1 document or card"),
+        Ok(linking) => tracing::info!("indexed the links of {linking} documents and cards"),
+        Err(e) => tracing::warn!("could not index the links of documents and cards: {e:?}"),
     }
     // The text of files is read off the disk, which may take a while on a
     // first start, so the server does not wait for it.

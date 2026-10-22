@@ -23,6 +23,7 @@ export type Context =
   | 'media'
   | 'trash'
   | 'backlinks'
+  | 'cards'
   | 'history'
   | 'share'
   | 'card'
@@ -89,7 +90,7 @@ export const bindings = [
   { context: 'tree', keys: ['zh', 'zl', 'zH', 'zL'], action: 'sideways', label: 'zl / zh · zL / zH', help: 'the wide table or code block at the top of the view, sideways — a little, or half its width' },
   { context: 'tree', keys: [']]'], action: 'nextHeading', label: ']] / [[', help: 'next / previous heading of the document — in the editor too' },
   { context: 'tree', keys: ['[['], action: 'previousHeading' },
-  { context: 'tree', keys: ['gi'], action: 'info', help: "the info sheet: the open document's headings, earlier versions, backlinks and sharing — Tab between them" },
+  { context: 'tree', keys: ['gi'], action: 'info', help: "the info sheet: the open document's headings, earlier versions, backlinks, cards and sharing — Tab between them" },
   { context: 'tree', keys: ['gO'], action: 'outline', help: 'the headings as a list: j/k, Enter jumps there' },
   { context: 'tree', keys: ['F'], action: 'hints', help: 'hints over the links and buttons in view — type one to follow it' },
   { context: 'tree', label: 'gf / gx', help: 'in the editor: follow the link under the cursor / open it in a tab' },
@@ -112,7 +113,7 @@ export const bindings = [
   { context: 'tree', keys: [']d'], action: 'nextEntry' },
   { context: 'global', keys: ['Ctrl-p'], action: 'find', label: 'Ctrl-P', help: 'find anything, in every space — Enter opens the result lit beside them, n goes on' },
   { context: 'global', keys: ['b'], action: 'board', help: "the board, in a tile: this space's, or the last one shown — 1 … 9 there shows another's" },
-  { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here" },
+  { context: 'tree', keys: ['c'], action: 'capture', help: "capture a card into this space's inbox, without leaving here — reading a document, a card about it" },
   { context: 'tree', keys: ['q', 'Escape'], action: 'close', label: 'Esc · q', help: 'close the document, and its tile when there are several' },
   { context: 'tree', keys: ['/'], action: 'search', help: 'full-text search, inside the current space and its text files — Tab or Ctrl-N/P walk the results, Enter opens one' },
   { context: 'tree', keys: ['n'], action: 'next', label: 'n / N', help: 'next / previous search result, opened beside the results — :noh clears the search' },
@@ -123,6 +124,7 @@ export const bindings = [
   { context: 'tree', keys: ['u'], action: 'undo', help: 'undo the last delete: it comes back out of the trash — :trash has the rest' },
   { context: 'tree', keys: ['gh'], action: 'history', help: "the open document's earlier versions, as diffs — Enter brings one back" },
   { context: 'tree', keys: ['gb'], action: 'backlinks', help: 'the documents that link to the open one — [[title]] links by title, [[ completes one while writing' },
+  { context: 'tree', keys: ['gc'], action: 'cards', help: 'the cards about the open document — j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board' },
   { context: 'global', keys: [':'], action: 'line', help: 'command line — Tab / Shift-Tab cycle the matches, then the argument; ↑ ↓ recall what ran before' },
   { context: 'always', keys: ['Ctrl-s', 'Meta-s'], action: 'save', typing: true, label: 'Ctrl-S', help: 'save, from anywhere' },
   { context: 'global', keys: ['?'], action: 'help', help: 'this screen, from the editor too — h/l a column, / filters it down' },
@@ -258,6 +260,19 @@ export const bindings = [
   { context: 'backlinks', keys: ['k', 'ArrowUp'], action: 'up' },
   { context: 'backlinks', keys: ['G'], action: 'bottom' },
   { context: 'backlinks', keys: ['Enter'], action: 'open', hint: 'open' },
+
+  { context: 'cards', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'move' },
+  { context: 'cards', keys: ['k', 'ArrowUp'], action: 'up' },
+  { context: 'cards', keys: ['G'], action: 'bottom' },
+  { context: 'cards', keys: ['Enter'], action: 'turn', hint: 'turn over' },
+  { context: 'cards', keys: ['Space'], action: 'done', hint: 'done' },
+  { context: 'cards', keys: ['H'], action: 'sendLeft', caps: ['H', 'L'], hint: 'send' },
+  { context: 'cards', keys: ['L'], action: 'sendRight' },
+  { context: 'cards', keys: ['D'], action: 'due', hint: 'due' },
+  { context: 'cards', keys: ['o', 'c'], action: 'new', caps: ['o'], hint: 'new' },
+  { context: 'cards', keys: ['a'], action: 'label', hint: 'label' },
+  // The sheet stays up behind the line, so `:due` and `:repeat` know which card.
+  { context: 'cards', keys: [':'], action: 'line' },
 
   { context: 'history', keys: ['j', 'ArrowDown'], action: 'down', caps: ['j', 'k'], hint: 'earlier / later' },
   { context: 'history', keys: ['k', 'ArrowUp'], action: 'up' },

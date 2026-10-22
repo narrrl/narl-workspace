@@ -10,7 +10,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 use crate::{
     auth::Session,
     error::{AppError, AppResult},
-    routes::{diary, links, media, revisions, trash},
+    routes::{boards, diary, links, media, revisions, trash},
     state::AppState,
 };
 
@@ -112,6 +112,9 @@ pub struct Node {
     pub path: Vec<Crumb>,
     /// How many documents link here.
     pub backlinks: i64,
+    /// The cards about it: the ones whose notes it is, and the ones whose
+    /// summary links here.
+    pub cards: Vec<boards::AgendaCard>,
     /// Where each `[[title]]` in the body leads, as an /n/... path. A title
     /// that leads nowhere is not in it.
     pub wikilinks: BTreeMap<String, String>,
@@ -252,7 +255,7 @@ pub(crate) fn excerpt(head: &str) -> String {
 
 /// Turn free text into an FTS5 prefix query, discarding anything that could be
 /// read as FTS syntax.
-fn fts_query(raw: &str) -> Option<String> {
+pub(crate) fn fts_query(raw: &str) -> Option<String> {
     let terms: Vec<String> = raw
         .split_whitespace()
         .map(|term| term.replace(|c: char| !c.is_alphanumeric(), " "))
@@ -1146,11 +1149,12 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
 
     let body: String = row.get("body");
     let summary = row_to_summary(&row, &body.chars().take(HEAD_CHARS).collect::<String>());
-    let (backlinks, wikilinks) = {
+    let (backlinks, wikilinks, cards) = {
         let mut conn = state.db.acquire().await?;
         (
             links::linked_from(&mut conn, id).await?,
             links::wikilinks(&mut conn, id, &body).await?,
+            boards::cards_of(&mut conn, id).await?,
         )
     };
 
@@ -1174,6 +1178,7 @@ pub async fn load(state: &AppState, id: i64) -> AppResult<Node> {
         file: summary.file,
         path: path_of(&state.db, id).await?,
         backlinks,
+        cards,
         wikilinks,
     })
 }

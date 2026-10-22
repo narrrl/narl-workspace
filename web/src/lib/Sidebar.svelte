@@ -77,7 +77,10 @@
   <div class="head label rule">
     <span class="marker"></span>
     <span class="name">{workspace.space?.slug ?? 'diary'}</span>
-    <span class="count">{workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}</span>
+    <span class="count">
+      {workspace.nodes.length} {workspace.nodes.length === 1 ? 'item' : 'items'}{#if workspace.foundCards.length > 0}
+        · {workspace.foundCards.length} {workspace.foundCards.length === 1 ? 'card' : 'cards'}{/if}
+    </span>
   </div>
 
   {#if workspace.query}
@@ -144,7 +147,22 @@
           </button>
         {/if}
       </li>
-    {:else}
+    {/each}
+    <!-- The cards a search found, after the nodes: Enter turns one over on its board. -->
+    {#if workspace.foundCards.length > 0}
+      <li class="daybreak label rule"><span>cards</span></li>
+    {/if}
+    {#each workspace.foundCards as card, at (card.id)}
+      {@const index = workspace.nodes.length + at}
+      <li class="item">
+        <button class="row card" class:active={index === workspace.cursor} class:done={card.done_at !== null} data-index={index} onclick={() => pick(index)}>
+          <span class="dot"></span>
+          <span class="title">{card.title}<span class="where">{card.space_slug}/{card.list_name}</span></span>
+          <span class="aside">{card.done_at !== null ? 'done' : card.due_at !== null ? formatDay(card.due_at) : 'card'}</span>
+        </button>
+      </li>
+    {/each}
+    {#if workspace.rows === 0}
       <li class="empty muted">
         {#if workspace.query}
           no matches
@@ -152,7 +170,7 @@
           nothing here yet — <span class="kbd">o</span> writes, <span class="kbd">⇧ O</span> makes a folder, files dropped here land here
         {/if}
       </li>
-    {/each}
+    {/if}
   </ul>
 </div>
 
@@ -246,6 +264,9 @@
   }
   .row.open .dot { background: var(--light); }
   .row.open.active .dot { background: var(--ink); }
+  /* A card is told from a node by its square. */
+  .row.card .dot { border: 1px solid currentColor; border-radius: 1px; }
+  .row.card.done .title { color: var(--muted); text-decoration: line-through; }
 
   .title {
     flex: 1;

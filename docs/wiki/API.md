@@ -33,6 +33,7 @@ sealed or not.
 | `POST` | `/api/lists/{id}/cards` | add a card |
 | `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
+| `GET` | `/api/cards?q=…` | cards whose title, summary or a checklist step matches, open ones first; `space` keeps it to one board |
 | `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
 | `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
@@ -43,6 +44,7 @@ sealed or not.
 | `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
 | `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
 | `GET` | `/api/nodes/{id}/backlinks` | the documents that link to this one, with the line each does it on |
+| `GET` | `/api/nodes/{id}/cards` | the cards about this document: its own (`node_id`) and the ones whose summary links here — also in the node itself as `cards` |
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |

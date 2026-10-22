@@ -111,16 +111,43 @@ step open again.
 
 `c` in the tree opens `:card ` on the command line. The card goes
 into the inbox of the space you are in, or of the first space with a board, and
-you stay where you were. From outside the browser, see [Capture](Capture.md).
+you stay where you were. Reading a document, `c` opens `:card! ` instead: the
+card is about that document, and an empty title takes the document's. From
+outside the browser, see [Capture](Capture.md).
 
 ### Notes
 
 `gf` on a card, or on its back, opens its notes: a document named after the card, made in the
 root of the space the first time, in a tile beside the board. Closing it goes
-back to the board, on the same card. `:card!` while reading a document makes a card that points at it.
+back to the board, on the same card.
 
 The link is loose on purpose: deleting the document leaves the card, because the
 work is still open when its notes are gone.
+
+### A document's cards
+
+A document knows the cards about it: the ones whose notes it is, and the ones
+whose description links to it with a `[[title]]` or an `/n/` path. Under the
+line below its title, a second line says what is still open about it
+(`card  write the plan · doing`, or `cards  3 open`) and the first date one is
+due. Clicking it, or `gc`, opens the cards part of the info sheet.
+
+There, `j`/`k` picks a card. `Space` finishes it, `H`/`L` sends it along its
+board, `D` or `:due` sets its date, and `:label` and `:repeat` work too, all
+without going to the board. `Enter` turns it over on its board. `o` makes another
+card about the document.
+
+Reading a document with just one open card about it, the card verbs act on that
+card with the sheet closed: `:due fri` while reading the plan dates the plan's card.
+
+A card's description links the way a document's text does. Renaming or moving
+a document rewrites the links to it in card descriptions too.
+
+### The card in focus
+
+`:due`, `:repeat`, `:label` and `:done` act on the card in focus: the one under
+the board's cursor, the one turned over, the one highlighted in the agenda, or
+a document's card as above.
 
 ### Due dates
 

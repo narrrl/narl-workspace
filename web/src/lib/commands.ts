@@ -78,7 +78,8 @@ const closeFocused = () => {
 /**
  * The info sheet over the open document, at `section` or where it was last
  * left. Every part is read now, so each one's count is in its tab: the
- * headings from the pane, the versions and backlinks from the server.
+ * headings from the pane, the versions and backlinks from the server, and
+ * the cards with the document.
  */
 export async function openInfo(section?: InfoSection) {
   if (!requireOpen()) return
@@ -90,6 +91,8 @@ export async function openInfo(section?: InfoSection) {
     // of the same text at once would race.
     await workspace.loadHistory()
     await workspace.loadBacklinks()
+    // Picked afresh each time, from the first: the open card leads.
+    workspace.cardsCursor = 0
     if (section) workspace.infoSection = section
     workspace.openSheet('info')
   })
@@ -97,8 +100,6 @@ export async function openInfo(section?: InfoSection) {
 
 /** The board's cursor, or the card turned over beside it, has the keys. */
 const onBoard = () => workspace.focus === 'board' || workspace.focus === 'card'
-/** A card has the keys: on the board, its back, or highlighted in the agenda. */
-const cardFocused = () => onBoard() || workspace.focus === 'agenda'
 
 const requireOpen = () => {
   if (!workspace.open) {
@@ -162,8 +163,8 @@ const describeTile = (index: number) => {
 
 /** Move the cursor and follow it, so `:next` reads as well as `j` then `Enter`. */
 const jumpTo = async (index: number) => {
-  if (workspace.nodes.length === 0) return workspace.say('nothing here', 'error')
-  workspace.cursor = Math.min(Math.max(index, 0), workspace.nodes.length - 1)
+  if (workspace.rows === 0) return workspace.say('nothing here', 'error')
+  workspace.cursor = Math.min(Math.max(index, 0), workspace.rows - 1)
   await workspace.guard(() => workspace.openSelected())
 }
 
@@ -509,19 +510,16 @@ export const commands: CommandSpec[] = [
     name: 'due',
     args: '<when|->',
     group: 'board',
-    help: 'due date of the card — on the board, its back, or highlighted in the agenda: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears',
+    help: "due date of the card in focus — on the board, its back, in the agenda, or the open document's: today, tm, fri, +3d, +2w, 10-31, 2026-10-31 — - clears",
     complete: () => ['today', 'tm', 'fri', '+3d'],
     run: async (arg) => {
-      const agenda = workspace.focus === 'agenda'
-      if (!cardFocused()) return workspace.say('no card in focus — :board', 'error')
-      const set = (due_at: number | null) =>
-        agenda ? workspace.patchAgendaCard({ due_at }) : workspace.patchCard({ due_at })
       const target = arg.trim()
-      if (target === '-' || target === '') return workspace.guard(() => set(null))
+      if (target === '-' || target === '') return workspace.guard(() => workspace.patchCard({ due_at: null }))
       const at = parseDue(target)
       if (at === null) return workspace.say(`not a date: ${target} — try fri, +3d or 2026-09-30`, 'error')
-      await workspace.guard(() => set(at))
-      workspace.say(`due ${formatDay(at)}`)
+      await workspace.guard(async () => {
+        if (await workspace.patchCard({ due_at: at })) workspace.say(`due ${formatDay(at)}`)
+      })
     },
   },
   {
@@ -531,12 +529,10 @@ export const commands: CommandSpec[] = [
     help: 'once the card is done, a copy comes back in the inbox: daily, weekly, monthly, yearly, +3d, +2w, +6m — - stops it',
     complete: () => ['daily', 'weekly', 'monthly', 'yearly', '+2w', '-'],
     run: async (arg) => {
-      const agenda = workspace.focus === 'agenda'
-      if (!cardFocused()) return workspace.say('no card in focus — :board', 'error')
       const rule = arg.trim()
       const repeat = rule === '-' || rule === '' ? null : rule
       await workspace.guard(async () => {
-        const card = await (agenda ? workspace.patchAgendaCard({ repeat }) : workspace.patchCard({ repeat }))
+        const card = await workspace.patchCard({ repeat })
         // The server's spelling of the rule: `+14d` is kept as `+2w`.
         if (card) workspace.say(card.repeat === null ? 'repeats no more' : `repeats ${card.repeat} once done`)
       })
@@ -545,15 +541,8 @@ export const commands: CommandSpec[] = [
   {
     name: 'done',
     group: 'board',
-    help: 'move the selected card into the done list, or back out to the inbox',
-    run: () => {
-      if (workspace.focus === 'agenda') {
-        const card = workspace.agendaCards[workspace.agendaCursor]
-        return card ? workspace.guard(() => workspace.finishCard(card)) : workspace.say('no card highlighted', 'error')
-      }
-      if (!onBoard()) return workspace.say('no card in focus — :board', 'error')
-      return workspace.guard(() => workspace.toggleDone())
-    },
+    help: 'move the card in focus into the done list, or back out to the inbox',
+    run: () => workspace.guard(() => workspace.toggleDone()),
   },
   {
     name: 'scratch',
@@ -603,8 +592,8 @@ export const commands: CommandSpec[] = [
     help: 'put a label on the card, or take it off when it has it — each name keeps its colour everywhere',
     complete: () => workspace.boardLabels,
     run: async (arg) => {
-      if (!onBoard()) return workspace.say('no card in focus — :board', 'error')
-      if (!arg.trim()) return workspace.say(workspace.card?.labels.join(' · ') || 'no labels — :label <name> adds one')
+      const card = workspace.focusedCard
+      if (!arg.trim() && card) return workspace.say(card.labels.join(' · ') || 'no labels — :label <name> adds one')
       await workspace.guard(() => workspace.toggleLabel(arg))
     },
   },
@@ -840,7 +829,7 @@ export const commands: CommandSpec[] = [
     name: 'last',
     group: 'documents',
     help: 'open the last node in the list',
-    run: () => jumpTo(workspace.nodes.length - 1),
+    run: () => jumpTo(workspace.rows - 1),
   },
   {
     name: 'random',
@@ -952,6 +941,12 @@ export const commands: CommandSpec[] = [
     run: async () => {
       await openInfo('backlinks')
     },
+  },
+  {
+    name: 'cards',
+    group: 'documents',
+    help: 'the cards about the open document — its own, and the ones whose summary links here: j/k picks the one :due, :label, Space and H/L act on, Enter turns it over on its board (gc)',
+    run: () => openInfo('cards'),
   },
   {
     name: 'trash',
@@ -1126,13 +1121,13 @@ export const commands: CommandSpec[] = [
   },
   {
     name: 'info',
-    args: '[outline|history|backlinks|share]',
+    args: '[outline|history|backlinks|cards|share]',
     group: 'documents',
-    help: 'what is known about the open document: its headings, earlier versions, backlinks and sharing — Tab between them (gi)',
+    help: 'what is known about the open document: its headings, earlier versions, backlinks, cards and sharing — Tab between them (gi)',
     complete: () => infoSections,
     run: (arg) => {
       const section = arg.trim()
-      if (section && !infoSections.includes(section as InfoSection)) return workspace.say('usage: :info [outline|history|backlinks|share]', 'error')
+      if (section && !infoSections.includes(section as InfoSection)) return workspace.say('usage: :info [outline|history|backlinks|cards|share]', 'error')
       return openInfo((section || undefined) as InfoSection | undefined)
     },
   },

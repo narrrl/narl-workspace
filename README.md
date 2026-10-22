@@ -128,11 +128,12 @@ it; in the document pane it is that document. In the browse pane:
 | `Ctrl-D` / `Ctrl-U` | half a page down / up the open document |
 | `zl` / `zh`, `zL` / `zH` | scroll the table, code block or formula at the top of the view sideways, a little or by half its width |
 | `]]` / `[[` | the next / previous heading of the open document, in the editor too |
-| `gi` | the info sheet: the open document's headings, earlier versions, backlinks and share link — `Tab` goes from one part to the next (`:info`); clicking the line under the title opens it too |
+| `gi` | the info sheet: the open document's headings, earlier versions, backlinks, cards and the share link — `Tab` goes from one part to the next (`:info`); clicking the line under the title opens it too |
 | `gO` | the info sheet at the headings — `j`/`k`, `Enter` jumps there (`:outline`) |
 | `gx` | open the file under the cursor in a tab of its own |
 | `gh` | the info sheet at the earlier versions, as diffs — `j`/`k`, `Enter` brings one back (`:history`) |
 | `gb` | the info sheet at the documents that link to the open one — `j`/`k`, `Enter` opens one (`:backlinks`) |
+| `gc` | the info sheet at the cards about the open document — `j`/`k` picks one for `Space`, `H`/`L`, `:due` and `:label`, `Enter` turns it over on its board (`:cards`) |
 | `F` | a letter over every link and button in view; typing it follows it — links out of the workspace open in a tab of their own |
 | `Enter`, `l` | open the highlighted entry; on an open keystore or sealed file, `Enter` asks for its password |
 | `o` | a new document here, straight into insert mode |
@@ -147,7 +148,7 @@ it; in the document pane it is that document. In the browse pane:
 | `T` | today's diary entry, started if there is none |
 | `C` | the diary by month (`:cal`) — see [The diary](#the-diary) |
 | `[d` / `]d` | the diary entry before / after the one open, by date |
-| `c` | capture a card into this space's inbox without leaving where you are |
+| `c` | capture a card into this space's inbox without leaving where you are — reading a document, a card about it |
 | `Q` | the scratchpad, lowered over whatever is on screen — see [The scratchpad](docs/wiki/Writing.md#the-scratchpad) |
 | `Esc`, `q` | close the document, and its tile when there are several |
 | `h` | up one level in the tree |
@@ -882,6 +883,7 @@ sealed or not.
 | `POST` | `/api/lists/{id}/cards` | add a card |
 | `PUT`/`DELETE` | `/api/cards/{id}` | update (title, body, due, repeat, checklist, labels, done, link) / delete; finishing a repeating card answers its copy as `again` |
 | `POST` | `/api/cards/{id}/move` | to another list and place in it; `again` as above |
+| `GET` | `/api/cards?q=…` | cards whose title, summary or a checklist step matches, open ones first; `space` keeps it to one board |
 | `GET`/`POST` | `/api/scratch` | the scratchpad's notes, the one touched last first / a new note `{ body }` |
 | `PUT`/`DELETE` | `/api/scratch/{id}` | rewrite a note `{ body }` / drop it |
 | `POST` | `/api/nodes/{id}/move` | reparent, and place among the new siblings |
@@ -892,6 +894,7 @@ sealed or not.
 | `GET` | `/api/nodes/{id}/revisions` | a document's earlier versions, the newest first |
 | `GET` | `/api/nodes/{id}/revisions/{rev}` | one earlier version, with its text |
 | `GET` | `/api/nodes/{id}/backlinks` | the documents that link to this one, with the line each does it on |
+| `GET` | `/api/nodes/{id}/cards` | the cards about this document: its own (`node_id`) and the ones whose summary links here — also in the node itself as `cards` |
 | `POST`/`DELETE` | `/api/nodes/{id}/share` | mint or rotate / revoke a share link |
 | `GET` | `/api/export` | the whole workspace, boards and dates included, as a zip |
 | `GET`/`POST` | `/api/backup` | Proton Drive mirror: status / run now |

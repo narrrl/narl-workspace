@@ -34,7 +34,7 @@ const spaceIndex = (key: string) => {
 const reading = () => !!workspace.open && !workspace.editing && workspace.pane === 'document'
 
 /** A cursor down a sheet's list, kept on it. */
-function step(cursor: 'outlineCursor' | 'mediaCursor' | 'trashCursor' | 'backlinksCursor', length: number, by: number) {
+function step(cursor: 'outlineCursor' | 'mediaCursor' | 'trashCursor' | 'backlinksCursor' | 'cardsCursor', length: number, by: number) {
   workspace[cursor] = Math.min(Math.max(workspace[cursor] + by, 0), Math.max(length - 1, 0))
 }
 
@@ -209,6 +209,33 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     },
   },
 
+  /**
+   * Its cards: j/k picks the one the card verbs act on — Space, H/L, `:due`,
+   * `:label` — and Enter turns it over on its board.
+   */
+  cards: {
+    down: () => step('cardsCursor', workspace.open?.cards.length ?? 0, 1),
+    up: () => step('cardsCursor', workspace.open?.cards.length ?? 0, -1),
+    bottom: () => step('cardsCursor', workspace.open?.cards.length ?? 0, Infinity),
+    turn: () => {
+      const card = workspace.open?.cards[workspace.cardsCursor]
+      if (!card) return
+      workspace.closeSheet()
+      guard(() => workspace.turnTo(card))
+    },
+    done: () => guard(() => workspace.toggleDone()),
+    sendLeft: () => guard(() => workspace.sendCard(-1)),
+    sendRight: () => guard(() => workspace.sendCard(1)),
+    due: () => {
+      if (workspace.focusedCard) line(':due ')
+    },
+    new: () => line(':card! '),
+    label: () => {
+      if (workspace.focusedCard) line(':label ')
+    },
+    line: () => line(':'),
+  },
+
   /** Its history: j/k through the versions, Enter brings the one shown back. */
   history: {
     down: () => moveHistory(1),
@@ -307,7 +334,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     down: () => void (reading() ? hooks.scrollReader(1) : workspace.move(1)),
     up: () => void (reading() ? hooks.scrollReader(-1) : workspace.move(-1)),
     top: () => void (reading() ? hooks.scrollReader('top') : (workspace.cursor = 0)),
-    bottom: () => void (reading() ? hooks.scrollReader('bottom') : (workspace.cursor = Math.max(workspace.nodes.length - 1, 0))),
+    bottom: () => void (reading() ? hooks.scrollReader('bottom') : (workspace.cursor = Math.max(workspace.rows - 1, 0))),
     open: (key) => {
       const enter = key === 'Enter' || key === 'Shift-Enter'
       if (enter && reading() && hooks.fileAction()) return
@@ -341,6 +368,7 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     outline: () => void runCommand('outline'),
     history: () => void runCommand('history'),
     backlinks: () => void runCommand('backlinks'),
+    cards: () => void runCommand('cards'),
     inTab: () => openInTab(),
     // `f` already fills the screen, so the hints vimium puts on `f` live on
     // its other key.
@@ -357,7 +385,8 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
     drop: () => guard(() => workspace.drop()),
     new: () => void runCommand('new'),
     // Capture: a thought goes on this space's inbox without leaving here.
-    capture: () => line(':card '),
+    // Reading a document, the card is about it.
+    capture: () => line(workspace.focus === 'node' && workspace.open?.kind === 'document' ? ':card! ' : ':card '),
     // The name has to come from somewhere, and the command line is where
     // names are typed — this only saves typing `:mkdir `.
     mkdir: () => line(':mkdir '),
@@ -445,16 +474,13 @@ export const actions: { [C in Context]: Record<ActionOf<C>, Run> } = {
       // Beside the agenda, so `q` on it comes back here.
       else if (past) guard(() => workspace.openPath(past.path))
     },
-    finish: () => {
-      const card = workspace.agendaCards[workspace.agendaCursor]
-      if (card) guard(() => workspace.finishCard(card))
-    },
+    finish: () => guard(() => workspace.toggleDone()),
     due: () => {
       if (workspace.agendaCards[workspace.agendaCursor]) line(':due ')
     },
     line: () => line(':'),
-    sendLeft: () => sendAgendaCard(-1),
-    sendRight: () => sendAgendaCard(1),
+    sendLeft: () => guard(() => workspace.sendCard(-1)),
+    sendRight: () => guard(() => workspace.sendCard(1)),
     today: () => void runCommand('today'),
   },
 
@@ -519,9 +545,4 @@ function goToSpace(index: number) {
   if (!entry) return
   workspace.closeSheet()
   guard(() => workspace.enterSpace(entry.space.id))
-}
-
-function sendAgendaCard(by: 1 | -1) {
-  const card = workspace.agendaCards[workspace.agendaCursor]
-  if (card) guard(() => workspace.sendAgendaCard(card, by))
 }

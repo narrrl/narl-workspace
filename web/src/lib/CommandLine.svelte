@@ -129,7 +129,7 @@
       const query = line.slice(1)
       await workspace.guard(async () => {
         if (query && workspace.query !== query) await workspace.search(query, global)
-        if (query && workspace.selected) await workspace.openSelected()
+        if (query && (workspace.selected || workspace.foundCard)) await workspace.openSelected()
       })
       hooks.focusList()
       return
